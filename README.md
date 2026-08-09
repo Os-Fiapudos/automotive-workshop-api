@@ -1,7 +1,5 @@
 # automotive-workshop-api
 
-API Go gerada automaticamente.
-
 ```bash
 go run ./cmd/api
 ```
