@@ -10,6 +10,8 @@
 | documento | string | CPF ou CNPJ do cliente, usado para identificação fiscal.       |
 | telefone  | string | Telefone de contato principal.                                 |
 | email     | string | E-mail de contato, usado para notificações e comunicação.      |
+| createdAt | string | Data/hora de criação do registro, gerada automaticamente.      |
+| updatedAt | string | Data/hora da última atualização do registro, gerada automaticamente. |
 
 ## Veiculo
 
@@ -23,6 +25,8 @@
 | ano       | number | Ano de fabricação/modelo do veículo.                                |
 | cor       | string | Cor predominante do veículo.                                       |
 | clienteId | uuid   | Referência ao `Cliente` proprietário do veículo.                    |
+| createdAt | string | Data/hora de criação do registro, gerada automaticamente.           |
+| updatedAt | string | Data/hora da última atualização do registro, gerada automaticamente. |
 
 ## Produto
 
@@ -35,6 +39,8 @@
 | valorUnitario | number | Preço de venda por unidade do produto.                                     |
 | estoqueAtual  | number | Quantidade disponível em estoque no momento da consulta.                   |
 | tipo          | string | Categoria do produto: `PECA` (peça de reposição) ou `INSUMO` (material de consumo). |
+| createdAt     | string | Data/hora de criação do registro, gerada automaticamente.                  |
+| updatedAt     | string | Data/hora da última atualização do registro, gerada automaticamente.       |
 
 ## Servico
 
@@ -46,6 +52,8 @@
 | descricao     | string  | Descrição detalhada do que o serviço compreende.                       |
 | valor         | number  | Preço cobrado pela execução do serviço.                                |
 | tempoEstimado | number? | Tempo estimado de execução, em minutos. Campo opcional.                |
+| createdAt     | string  | Data/hora de criação do registro, gerada automaticamente.              |
+| updatedAt     | string  | Data/hora da última atualização do registro, gerada automaticamente.   |
 
 ## OrdemDeServico
 
@@ -59,6 +67,8 @@
 | status      | string    | Situação atual da OS: `RECEBIDA` (veículo recebido) → `EM_DIAGNOSTICO` (em avaliação) → `AGUARDANDO_APROVACAO` (orçamento enviado ao cliente) → `EM_EXECUCAO` (serviço em andamento) → `FINALIZADA` (serviço concluído) → `ENTREGUE` (veículo devolvido ao cliente). |
 | orcamento   | Orcamento | Orçamento vinculado a esta ordem de serviço.                                                                |
 | observacoes | string    | Anotações livres sobre o atendimento (ex: relato do cliente, condições do veículo).                        |
+| createdAt   | string    | Data/hora de criação do registro, gerada automaticamente.                                                   |
+| updatedAt   | string    | Data/hora da última atualização do registro, gerada automaticamente.                                        |
 
 ## Orcamento
 
@@ -73,6 +83,8 @@
 | dataResposta   | string?    | Data/hora em que o cliente respondeu (aprovou/reprovou). Campo opcional, preenchido só após resposta. |
 | products       | Produto[]  | Lista de produtos/peças incluídos no orçamento.                                      |
 | services       | Servico[]  | Lista de serviços incluídos no orçamento.                                            |
+| createdAt      | string     | Data/hora de criação do registro, gerada automaticamente.                            |
+| updatedAt      | string     | Data/hora da última atualização do registro, gerada automaticamente.                 |
 
 ## HistoricoOrdemServico
 
