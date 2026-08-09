@@ -36,7 +36,15 @@ docker compose up -d
 
 ### Dados de exemplo (seed)
 
-[docs/seed.sql](docs/seed.sql) popula o banco com clientes, veículos, produtos, serviços e ordens de serviço cobrindo os principais status do fluxo. Usa IDs fixos com `ON CONFLICT DO NOTHING`, então pode ser reexecutado sem duplicar dados:
+[docs/seed.sql](docs/seed.sql) popula o banco com clientes, veículos, produtos, serviços e ordens de serviço cobrindo os principais status do fluxo. Usa IDs fixos com `ON CONFLICT DO NOTHING`, então pode ser reexecutado sem duplicar dados.
+
+PowerShell (Windows):
+
+```powershell
+Get-Content docs/seed.sql -Raw | docker compose exec -T db psql -U workshop -d automotive_workshop
+```
+
+Bash/Git Bash/macOS/Linux:
 
 ```bash
 docker compose exec -T db psql -U workshop -d automotive_workshop < docs/seed.sql
