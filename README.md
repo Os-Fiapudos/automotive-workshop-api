@@ -34,6 +34,14 @@ docker compose down -v
 docker compose up -d
 ```
 
+### Dados de exemplo (seed)
+
+[docs/seed.sql](docs/seed.sql) popula o banco com clientes, veículos, produtos, serviços e ordens de serviço cobrindo os principais status do fluxo. Usa IDs fixos com `ON CONFLICT DO NOTHING`, então pode ser reexecutado sem duplicar dados:
+
+```bash
+docker compose exec -T db psql -U workshop -d automotive_workshop < docs/seed.sql
+```
+
 ## Estrutura do projeto
 
 ```mermaid
@@ -69,6 +77,8 @@ flowchart TD
   n21 --> n22
   n23("schema.sql")
   n21 --> n23
+  n26("seed.sql")
+  n21 --> n26
   n13("go.mod")
   n0 --> n13
   n14(".gitignore")
