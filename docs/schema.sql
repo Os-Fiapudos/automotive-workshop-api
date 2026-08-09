@@ -65,9 +65,14 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 
 COMMENT ON TABLE clientes IS 'Cliente da oficina, pessoa física ou jurídica.';
-COMMENT ON COLUMN clientes.codigo IS 'Identificador legível/sequencial exibido ao usuário.';
+COMMENT ON COLUMN clientes.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN clientes.codigo IS 'Identificador legível/sequencial exibido ao usuário (ex: em telas, recibos, buscas).';
+COMMENT ON COLUMN clientes.nome IS 'Nome completo ou razão social do cliente.';
 COMMENT ON COLUMN clientes.documento IS 'CPF ou CNPJ do cliente, usado para identificação fiscal.';
+COMMENT ON COLUMN clientes.telefone IS 'Telefone de contato principal.';
 COMMENT ON COLUMN clientes.email IS 'E-mail de contato, usado para notificações e comunicação.';
+COMMENT ON COLUMN clientes.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN clientes.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 
 -- ---- Veiculo ----
 
@@ -85,7 +90,16 @@ CREATE TABLE IF NOT EXISTS veiculos (
 );
 
 COMMENT ON TABLE veiculos IS 'Veículo pertencente a um cliente.';
+COMMENT ON COLUMN veiculos.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN veiculos.codigo IS 'Identificador legível/sequencial exibido ao usuário.';
+COMMENT ON COLUMN veiculos.placa IS 'Placa de identificação do veículo.';
+COMMENT ON COLUMN veiculos.marca IS 'Fabricante do veículo (ex: Fiat, Volkswagen).';
+COMMENT ON COLUMN veiculos.modelo IS 'Modelo do veículo (ex: Uno, Gol).';
+COMMENT ON COLUMN veiculos.ano IS 'Ano de fabricação/modelo do veículo.';
+COMMENT ON COLUMN veiculos.cor IS 'Cor predominante do veículo.';
 COMMENT ON COLUMN veiculos.cliente_id IS 'Referência ao Cliente proprietário do veículo.';
+COMMENT ON COLUMN veiculos.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN veiculos.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 
 -- ---- Produto ----
 
@@ -102,7 +116,15 @@ CREATE TABLE IF NOT EXISTS produtos (
 );
 
 COMMENT ON TABLE produtos IS 'Peça de reposição ou insumo de consumo.';
+COMMENT ON COLUMN produtos.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN produtos.codigo IS 'Identificador legível/sequencial exibido ao usuário.';
+COMMENT ON COLUMN produtos.nome IS 'Nome do produto.';
+COMMENT ON COLUMN produtos.descricao IS 'Descrição detalhada do produto.';
+COMMENT ON COLUMN produtos.valor_unitario IS 'Preço de venda por unidade do produto.';
 COMMENT ON COLUMN produtos.estoque_atual IS 'Quantidade disponível em estoque no momento da consulta.';
+COMMENT ON COLUMN produtos.tipo IS 'Categoria do produto: PECA (peça de reposição) ou INSUMO (material de consumo).';
+COMMENT ON COLUMN produtos.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN produtos.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 
 -- ---- Servico ----
 
@@ -118,7 +140,14 @@ CREATE TABLE IF NOT EXISTS servicos (
 );
 
 COMMENT ON TABLE servicos IS 'Serviço oferecido pela oficina (ex: troca de óleo, alinhamento).';
+COMMENT ON COLUMN servicos.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN servicos.codigo IS 'Identificador legível/sequencial exibido ao usuário.';
+COMMENT ON COLUMN servicos.nome IS 'Nome do serviço oferecido (ex: troca de óleo, alinhamento).';
+COMMENT ON COLUMN servicos.descricao IS 'Descrição detalhada do que o serviço compreende.';
+COMMENT ON COLUMN servicos.valor IS 'Preço cobrado pela execução do serviço.';
 COMMENT ON COLUMN servicos.tempo_estimado IS 'Tempo estimado de execução, em minutos. Campo opcional.';
+COMMENT ON COLUMN servicos.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN servicos.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 
 -- ---- OrdemDeServico ----
 
@@ -135,7 +164,15 @@ CREATE TABLE IF NOT EXISTS ordens_servico (
 );
 
 COMMENT ON TABLE ordens_servico IS 'Ordem de serviço aberta para um veículo/cliente.';
+COMMENT ON COLUMN ordens_servico.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN ordens_servico.codigo IS 'Identificador legível/sequencial da OS, usado para consulta e comunicação com o cliente.';
+COMMENT ON COLUMN ordens_servico.cliente_id IS 'Referência ao Cliente solicitante do serviço.';
+COMMENT ON COLUMN ordens_servico.veiculo_id IS 'Referência ao Veiculo que está sendo atendido.';
+COMMENT ON COLUMN ordens_servico.data_criacao IS 'Data/hora de abertura da ordem de serviço.';
 COMMENT ON COLUMN ordens_servico.status IS 'RECEBIDA -> EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO -> EM_EXECUCAO -> FINALIZADA -> ENTREGUE.';
+COMMENT ON COLUMN ordens_servico.observacoes IS 'Anotações livres sobre o atendimento (ex: relato do cliente, condições do veículo).';
+COMMENT ON COLUMN ordens_servico.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN ordens_servico.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 -- Nota: o doc modela OrdemDeServico.orcamento <-> Orcamento.ordemServicoId como
 -- referência 1:1 circular. A FK física fica só em orcamentos.ordem_servico_id
 -- (UNIQUE), evitando duas FKs redundantes apontando uma pra outra; o orçamento
@@ -157,8 +194,15 @@ CREATE TABLE IF NOT EXISTS orcamentos (
 );
 
 COMMENT ON TABLE orcamentos IS 'Orçamento vinculado 1:1 a uma ordem de serviço.';
+COMMENT ON COLUMN orcamentos.id IS 'Identificador técnico seguro, gerado pelo sistema.';
+COMMENT ON COLUMN orcamentos.codigo IS 'Identificador legível/sequencial do orçamento.';
+COMMENT ON COLUMN orcamentos.ordem_servico_id IS 'Referência à OrdemDeServico à qual este orçamento pertence.';
 COMMENT ON COLUMN orcamentos.valor IS 'Valor total do orçamento (soma de produtos e serviços).';
-COMMENT ON COLUMN orcamentos.data_resposta IS 'Data/hora em que o cliente respondeu. Preenchido só após resposta.';
+COMMENT ON COLUMN orcamentos.status IS 'Situação do orçamento: PENDENTE (aguardando resposta do cliente), APROVADO (cliente aceitou) ou REPROVADO (cliente recusou).';
+COMMENT ON COLUMN orcamentos.data_geracao IS 'Data/hora em que o orçamento foi gerado e enviado ao cliente.';
+COMMENT ON COLUMN orcamentos.data_resposta IS 'Data/hora em que o cliente respondeu (aprovou/reprovou). Campo opcional, preenchido só após resposta.';
+COMMENT ON COLUMN orcamentos.created_at IS 'Data/hora de criação do registro, gerada automaticamente.';
+COMMENT ON COLUMN orcamentos.updated_at IS 'Data/hora da última atualização do registro, gerada automaticamente.';
 
 -- ---- Orcamento <-> Produto / Servico (N:N) ----
 -- O doc modela Orcamento.products/services como arrays; fisicamente isso vira
@@ -174,6 +218,10 @@ CREATE TABLE IF NOT EXISTS orcamento_produtos (
 );
 
 COMMENT ON TABLE orcamento_produtos IS 'Produtos/peças incluídos em um orçamento, com preço aplicado no momento.';
+COMMENT ON COLUMN orcamento_produtos.orcamento_id IS 'Referência ao Orcamento ao qual este item pertence.';
+COMMENT ON COLUMN orcamento_produtos.produto_id IS 'Referência ao Produto incluído no orçamento.';
+COMMENT ON COLUMN orcamento_produtos.quantidade IS 'Quantidade do produto incluída no orçamento.';
+COMMENT ON COLUMN orcamento_produtos.valor_unitario_aplicado IS 'Preço unitário do produto no momento em que foi incluído no orçamento (snapshot).';
 
 CREATE TABLE IF NOT EXISTS orcamento_servicos (
     orcamento_id     UUID NOT NULL REFERENCES orcamentos (id) ON DELETE CASCADE,
@@ -183,6 +231,9 @@ CREATE TABLE IF NOT EXISTS orcamento_servicos (
 );
 
 COMMENT ON TABLE orcamento_servicos IS 'Serviços incluídos em um orçamento, com preço aplicado no momento.';
+COMMENT ON COLUMN orcamento_servicos.orcamento_id IS 'Referência ao Orcamento ao qual este item pertence.';
+COMMENT ON COLUMN orcamento_servicos.servico_id IS 'Referência ao Servico incluído no orçamento.';
+COMMENT ON COLUMN orcamento_servicos.valor_aplicado IS 'Preço do serviço no momento em que foi incluído no orçamento (snapshot).';
 
 -- ---- HistoricoOrdemServico ----
 
@@ -197,6 +248,13 @@ CREATE TABLE IF NOT EXISTS historico_ordem_servico (
 );
 
 COMMENT ON TABLE historico_ordem_servico IS 'Trilha de eventos e mudanças de status de uma OS, para auditoria e rastreabilidade.';
+COMMENT ON COLUMN historico_ordem_servico.id IS 'Identificador técnico do registro de histórico.';
+COMMENT ON COLUMN historico_ordem_servico.ordem_servico_id IS 'Referência à OrdemDeServico à qual este evento pertence.';
+COMMENT ON COLUMN historico_ordem_servico.data_hora IS 'Data/hora em que o evento ocorreu.';
+COMMENT ON COLUMN historico_ordem_servico.evento IS 'Tipo de evento registrado: criacao, aprovacao, finalizacao ou cancelamento.';
+COMMENT ON COLUMN historico_ordem_servico.descricao IS 'Detalhamento do que ocorreu no evento.';
+COMMENT ON COLUMN historico_ordem_servico.status_old IS 'Status da OS imediatamente antes do evento.';
+COMMENT ON COLUMN historico_ordem_servico.status_new IS 'Status da OS imediatamente após o evento.';
 
 -- ---- AuditServices ----
 
@@ -209,6 +267,11 @@ CREATE TABLE IF NOT EXISTS audit_services (
 );
 
 COMMENT ON TABLE audit_services IS 'Início e fim da execução de cada serviço dentro de uma OS, para controle de tempo/produtividade.';
+COMMENT ON COLUMN audit_services.id IS 'Identificador técnico do registro de auditoria.';
+COMMENT ON COLUMN audit_services.ordem_servico_id IS 'Referência à OrdemDeServico em execução.';
+COMMENT ON COLUMN audit_services.service_id IS 'Referência ao Servico sendo executado.';
+COMMENT ON COLUMN audit_services.data_hora IS 'Data/hora em que o evento foi registrado.';
+COMMENT ON COLUMN audit_services.evento IS 'Marco do evento: inicio (início da execução) ou fim (conclusão).';
 
 -- =============================================================================
 -- ==== Índices ====
