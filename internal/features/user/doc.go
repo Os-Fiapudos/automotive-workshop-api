@@ -1,2 +1,2 @@
-// Package user: Feature "user": controller, service, repository e model juntos
+// Package user: Feature "user": controller, service, repository, and model together
 package user

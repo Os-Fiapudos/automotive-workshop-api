@@ -1,2 +1,2 @@
-// Package shared: Codigo compartilhado entre features (utils, tipos, etc.)
+// Package shared: code shared across features (utils, types, etc.)
 package shared
