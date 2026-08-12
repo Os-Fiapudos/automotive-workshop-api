@@ -13,12 +13,17 @@
 BEGIN;
 
 -- ==== Customers ====
+-- document is stored normalized (digits only) and document_type/status are
+-- required as of the Customer Management feature — see
+-- specs/customer-management/. Documents below are real, check-digit-valid
+-- CPF/CNPJ numbers (not just plausible-looking strings), matching what the
+-- application itself would persist.
 
-INSERT INTO customers (id, name, document, phone, email) VALUES
-    ('a0000000-0000-0000-0000-000000000001', 'João Pedro Silva',        '123.456.789-00', '(11) 91234-5678', 'joao.silva@example.com'),
-    ('a0000000-0000-0000-0000-000000000002', 'Maria Fernanda Costa',    '987.654.321-00', '(11) 99876-5432', 'maria.costa@example.com'),
-    ('a0000000-0000-0000-0000-000000000003', 'Transportadora Rota Sul Ltda', '12.345.678/0001-90', '(11) 3333-4444', 'contato@rotasul.com.br'),
-    ('a0000000-0000-0000-0000-000000000004', 'Carlos Eduardo Almeida',  '111.222.333-44', '(11) 98888-1111', NULL)
+INSERT INTO customers (id, name, document, document_type, phone, email, status) VALUES
+    ('a0000000-0000-0000-0000-000000000001', 'João Pedro Silva',        '12345678909',     'CPF',  '(11) 91234-5678', 'joao.silva@example.com', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000002', 'Maria Fernanda Costa',    '98765432100',     'CPF',  '(11) 99876-5432', 'maria.costa@example.com', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000003', 'Transportadora Rota Sul Ltda', '12345678000195', 'CNPJ', '(11) 3333-4444', 'contato@rotasul.com.br', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000004', 'Carlos Eduardo Almeida',  '11122233396',     'CPF',  '(11) 98888-1111', NULL, 'INACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====

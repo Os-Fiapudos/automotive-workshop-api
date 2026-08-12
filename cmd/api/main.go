@@ -1,17 +1,39 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"automotive-workshop-api/internal/features/customer"
+	"automotive-workshop-api/internal/shared/config"
+	"automotive-workshop-api/internal/shared/database"
 )
 
-// TODO: register the handlers of the chosen architecture in internal/
 func main() {
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	configuration, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, configuration.DatabaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pool.Close()
+
+	customerRepository := customer.NewPostgresCustomerRepository(pool)
+	customerService := customer.NewCustomerService(customerRepository)
+
+	router := http.NewServeMux()
+	router.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
-	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	customer.RegisterRoutes(router, customerService)
+
+	log.Printf("listening on :%s", configuration.Port)
+	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))
 }

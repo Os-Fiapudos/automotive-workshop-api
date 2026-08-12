@@ -33,17 +33,24 @@ yet.
 
 ## 2. Technology stack
 
-- **Language**: Go 1.22 (see [go.mod](go.mod)).
-- **External dependencies**: none so far — there is no `go.sum`, the module only uses the
-  standard library.
-- **HTTP**: stdlib `net/http`. No web framework/router has been adopted yet (e.g. chi, gin,
-  echo). **To be defined**: whether and which framework/router will be adopted once the
-  number of routes justifies it — do not assume one before deciding with the team.
+- **Language**: Go 1.25 (see [go.mod](go.mod)). Bumped from the original 1.22 when
+  `pgx v5.10.0` was added for the Customer Management feature — it requires Go ≥ 1.25.
+  [Dockerfile](Dockerfile)'s build image must stay at or above this version (`golang:1.25-alpine`
+  today) or `docker compose build` fails with `go: go.mod requires go >= 1.25.0`.
+- **External dependencies**: `github.com/jackc/pgx/v5` (Postgres driver), `github.com/google/uuid`,
+  and `github.com/stretchr/testify` (test-only) — added deliberately for the Customer
+  Management feature, after explicit alignment rather than assumed (see
+  `specs/customer-management/requirements.md` §8). Still the only three; keep this list
+  accurate here as new dependencies are added, per the "don't add a dependency without
+  alignment" rule in §12 below.
+- **HTTP**: stdlib `net/http`, using Go 1.22+'s method-aware `http.ServeMux` route patterns
+  (e.g. `"POST /api/v1/customers"`). No third-party web framework/router — the Customer
+  Management feature confirmed the stdlib mux is sufficient; do not add a router dependency
+  without a concrete reason the stdlib mux can't handle.
 - **Database**: PostgreSQL 16, schema versioned in [docs/schema.sql](docs/schema.sql)
   (UUID via `pgcrypto`, native enums, sequential `code` via
-  `GENERATED ALWAYS AS IDENTITY`). No Go driver/ORM has been added to `go.mod` yet.
-  **To be defined**: database driver (e.g. `pgx`, `database/sql` + `lib/pq`) and whether a
-  query builder/ORM will be used.
+  `GENERATED ALWAYS AS IDENTITY`). Accessed via `pgx v5` (`pgxpool.Pool`), no ORM/query
+  builder — see `internal/shared/database/` and each feature's `repository.go`.
 - **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), and `api`
   services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
@@ -199,15 +206,19 @@ the command the CI runs, and any new feature must keep it passing.
 - Handler/integration tests live in `internal/handlers_test/`; unit tests for a feature live
   alongside that feature's code (`*_test.go` next to the code, package
   `internal/features/<feature>/`).
-- Use the stdlib `testing` package (no test framework has been added to `go.mod` yet). **To
-  be defined**: whether additional test libraries (e.g. `testify`) will be adopted — this
-  changes `go.mod`/`go.sum` and must be decided explicitly, not assumed.
+- Use the stdlib `testing` package plus `testify` (`require`/`assert`) — `testify` was
+  adopted deliberately for the Customer Management feature (see
+  `specs/customer-management/requirements.md` §8) and is now the project-wide convention;
+  no other test framework has been added.
 - `go test ./...` must pass before any delivery is considered complete.
 
 ## 12. Rules for dependency management
 
-- The module today **has no external dependency** (`go.mod` only declares `go 1.22`, no
-  `go.sum`). Treat this as a deliberate choice, not a gap to fill automatically.
+- The module started with **no external dependency** (`go.mod` only declared `go 1.22`, no
+  `go.sum`) — a deliberate initial choice, not a gap to fill automatically. The Customer
+  Management feature added the first three (`pgx/v5`, `google/uuid`, `stretchr/testify`,
+  see §2 above), each after explicit alignment, not assumed. The bar for adding a new one
+  stays the same as before: justified need, alignment when there's a choice to make.
 - Do not add a dependency (`go get`) just for convenience. Before adding any package
   (database driver, HTTP router, test library, etc.), confirm it is necessary and, if there
   is ambiguity about which one to choose, ask before deciding — do not assume the "most
@@ -256,8 +267,10 @@ the command the CI runs, and any new feature must keep it passing.
 
 ## 15. Rules specific to working with Go
 
-- Go 1.22, per `go.mod` — do not use syntax/features from newer versions without first
-  deliberately updating `go.mod`.
+- Go 1.25, per `go.mod` — do not use syntax/features from newer versions without first
+  deliberately updating `go.mod` (as happened when `pgx v5.10.0` required bumping from the
+  original 1.22 — see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image in sync with
+  whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported
