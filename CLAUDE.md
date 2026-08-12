@@ -33,12 +33,19 @@ yet.
 
 ## 2. Technology stack
 
-- **Language**: Go 1.25 (see [go.mod](go.mod)). Bumped from the original 1.22 when
-  `pgx v5.10.0` was added for the Customer Management feature — it requires Go ≥ 1.25.
-  [Dockerfile](Dockerfile)'s build image must stay at or above this version (`golang:1.25-alpine`
-  today) or `docker compose build` fails with `go: go.mod requires go >= 1.25.0`.
-- **External dependencies**: `github.com/jackc/pgx/v5` (Postgres driver), `github.com/google/uuid`,
-  and `github.com/stretchr/testify` (test-only) — added deliberately for the Customer
+- **Language**: Go 1.22 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.22"`, so `go.mod` and [Dockerfile](Dockerfile)'s build image
+  (`golang:1.22-alpine`) must stay compatible with that exact version. When adding or
+  upgrading a dependency, check that its own `go` directive (and its transitive
+  dependencies') doesn't exceed 1.22 — `go get`/`go mod tidy` will otherwise silently raise
+  `go.mod`'s `go` line past what CI can build. This already happened once: `pgx v5.10.0`
+  required Go ≥ 1.25; the fix was pinning `pgx` at `v5.7.4` (last release requiring only Go
+  1.21) and its transitive `golang.org/x/sync`/`golang.org/x/text` at the newest versions
+  that still require ≤ 1.22, not bumping CI/the Dockerfile — see
+  `specs/customer-management/design.md` §0.
+- **External dependencies**: `github.com/jackc/pgx/v5` (Postgres driver, pinned at `v5.7.4`
+  for Go 1.22 compatibility — see above), `github.com/google/uuid`, and
+  `github.com/stretchr/testify` (test-only) — added deliberately for the Customer
   Management feature, after explicit alignment rather than assumed (see
   `specs/customer-management/requirements.md` §8). Still the only three; keep this list
   accurate here as new dependencies are added, per the "don't add a dependency without
@@ -267,10 +274,10 @@ the command the CI runs, and any new feature must keep it passing.
 
 ## 15. Rules specific to working with Go
 
-- Go 1.25, per `go.mod` — do not use syntax/features from newer versions without first
-  deliberately updating `go.mod` (as happened when `pgx v5.10.0` required bumping from the
-  original 1.22 — see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image in sync with
-  whatever `go.mod` requires.
+- Go 1.22, per `go.mod` and CI's pinned `go-version: "1.22"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.22 before
+  `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
+  (`golang:1.22-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported

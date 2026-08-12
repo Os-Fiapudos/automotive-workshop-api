@@ -15,9 +15,11 @@ implements. Check items off as they land; do not start a task before the ones it
 ## Dependencies (design.md §1.4, requirements.md §8)
 
 - [x] 4. `go get github.com/jackc/pgx/v5`, `go get github.com/google/uuid`,
-      `go get github.com/stretchr/testify`; `go mod tidy`. (Go itself had to be installed
-      on this machine first — see design.md §0 — which bumped `go.mod`'s `go` directive
-      from 1.22 to 1.25.0, a dependency-driven, documented change.)
+      `go get github.com/stretchr/testify`; `go mod tidy`. (Go itself had to be installed on
+      this machine first — see design.md §0. `pgx`'s latest release initially bumped
+      `go.mod`'s `go` directive to 1.25.0, breaking CI/`Dockerfile` — both pinned to 1.22 —
+      so `pgx` and its transitive `x/sync`/`x/text` deps were pinned to the newest versions
+      still compatible with Go 1.22; see design.md §0 for the full account.)
 
 ## Shared packages (design.md §1.5)
 

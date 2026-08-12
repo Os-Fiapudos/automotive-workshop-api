@@ -8,13 +8,26 @@ implemented.
 
 ## 0. Go toolchain note
 
-Adding `pgx v5.10.0` (`go get`) required Go ≥ 1.25, and Go bumped `go.mod`'s `go` directive
-from `1.22` to `1.25.0` automatically. This project had no Go toolchain installed locally
-before this feature (see `tasks.md`); Go 1.26.5 was installed via Homebrew to build/test it.
-Per `CLAUDE.md` §15 ("do not use syntax/features from newer versions without first
-deliberately updating `go.mod`"), this is recorded here explicitly as a deliberate,
-dependency-driven bump, not a silent one — no code in this feature intentionally relies on
-1.23+ language features beyond what `pgx` itself requires.
+This project had no Go toolchain installed locally before this feature (see `tasks.md`); Go
+1.26.5 was installed via Homebrew to build/test it. That toolchain builds `go.mod`'s
+declared `go` version fine either way — the real constraint is CI
+(`.github/workflows/ci.yml` pins `go-version: "1.22"`) and `Dockerfile`
+(`golang:1.22-alpine`), which only have Go 1.22 available.
+
+Initially, adding `pgx v5.10.0` (`go get`) required Go ≥ 1.25, and Go bumped `go.mod`'s `go`
+directive to `1.25.0` automatically — this passed locally (newer toolchain installed) and in
+a manually-tested Docker build (after temporarily bumping the Dockerfile's image), but broke
+both **CI** and anyone building the real `Dockerfile` image, which are pinned to 1.22 and
+were not going to be changed just to accommodate a dependency. The fix: `pgx` was pinned
+back to `v5.7.4` — the newest release whose own `go.mod` still requires only Go 1.21 — and
+its transitive `golang.org/x/sync`/`golang.org/x/text` dependencies were likewise pinned to
+the newest versions that still require ≤ Go 1.22 (`v0.11.0` and `v0.22.0` respectively;
+newer patch releases of both jumped to requiring Go 1.23+). `go.mod`'s `go` directive is
+back at `1.22.0`, matching CI/`Dockerfile` again, with no code in this feature relying on
+any 1.23+ language feature. Per `CLAUDE.md` §15, this whole back-and-forth is recorded here
+explicitly rather than left as a silent version churn — future dependency upgrades must
+check the dependency's own (and its transitive dependencies') `go` directive against 1.22
+*before* running `go get`, not after CI fails.
 
 ## 1. Architecture decisions
 
