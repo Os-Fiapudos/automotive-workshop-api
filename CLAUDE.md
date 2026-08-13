@@ -25,11 +25,14 @@ The full domain model (entities, fields, enums) is documented in
 [docs/entities.md](docs/entities.md); the corresponding PostgreSQL schema in
 [docs/schema.sql](docs/schema.sql).
 
-**Current state**: the project is at an early stage (skeleton). Today there is only a
-minimal HTTP server with a `/health` endpoint (no framework, no real database connection)
-and the folder structure for the vertical slice architecture, still empty. The database
-schema and sample data are already modeled in `docs/`, even though no Go code consumes them
-yet.
+**Current state**: the skeleton stage is over. The HTTP server (stdlib `net/http`, no
+framework) exposes `/health` plus the first full vertical slice, **auth**
+(`internal/features/auth/`): login and a protected `/me` route, backed by a real Postgres
+connection (`pgx/v5` via `internal/shared/database`), with unit tests alongside the code
+and integration tests in `internal/handlers_test/`. The database schema and sample data
+modeled in `docs/` are now actually consumed by this feature (`users` table). Every other
+business entity (Customer, Vehicle, ServiceOrder, etc.) is still schema/docs only, with no
+corresponding Go feature yet — `internal/features/user/` remains an empty placeholder.
 
 ## 2. Technology stack
 
@@ -59,11 +62,14 @@ yet.
 ```
 cmd/api/main.go            → HTTP entrypoint, wires up the server and registers feature routes
 internal/features/         → one folder per business feature (vertical slice)
-  features/user/           → example slice: controller + service + repository + model
-                              (today it only has doc.go, no implementation)
-internal/shared/            → cross-cutting code reused across features (utils, types,
-                              middlewares, database client, etc.) — today only has doc.go
-internal/handlers_test/    → handler/integration tests (currently empty, only .gitkeep)
+  features/auth/           → implemented slice: handler + service + repository + model
+                              (login, /me; unit-tested)
+  features/user/           → placeholder slice: only has doc.go, no implementation yet
+internal/shared/            → cross-cutting code reused across features — implemented:
+                              database (pgx pool), token (JWT), middleware (auth),
+                              httpx (JSON/error envelope)
+internal/handlers_test/    → handler/integration tests — implemented (auth_test.go),
+                              skipped when DATABASE_URL is unset
 docs/                      → domain model (entities.md) and PostgreSQL schema
                               (schema.sql, seed.sql)
 .github/workflows/ci.yml   → CI pipeline
@@ -81,11 +87,15 @@ specs/                      → SDD specifications: specs/README.md (process) an
 under `internal/features/<feature>/`, gathering all of that feature's layers
 (handler/controller, service, repository, model) together — instead of splitting by
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
-etc.). This is the pattern declared in [README.md](README.md) and reflected in the
-`internal/features/user/` folder.
+etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
+by `internal/features/auth/`; `internal/features/user/` remains an unimplemented
+placeholder folder.
 
-There are no infrastructure layers implemented yet (database connection, middlewares,
-authentication) — only the architectural intent and the skeleton folders.
+Infrastructure layers are implemented: database connection (`internal/shared/database`,
+pgx pool), authentication middleware (`internal/shared/middleware`), and JWT issuing/
+verification (`internal/shared/token`) — introduced by the auth feature and reusable by
+future features. See [specs/architecture.md](specs/architecture.md) for the full,
+code-derived description.
 
 ## 5. How to run the application
 
@@ -123,8 +133,16 @@ docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
 ```bash
 go test ./...
 ```
-No tests are implemented today (`internal/handlers_test/` only contains `.gitkeep`). This is
-the command the CI runs, and any new feature must keep it passing.
+This is the command CI runs, and any new feature must keep it passing. It runs the unit
+tests alongside each feature/shared package (`internal/features/auth/*_test.go`,
+`internal/shared/*/*_test.go`) plus the integration tests in
+`internal/handlers_test/`. The integration tests self-skip (`t.Skip`, not fail) when
+`DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
+
+To also run the integration tests against the local compose Postgres:
+```bash
+DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' go test ./...
+```
 
 ## 7. Lint, static analysis, and other checks
 
