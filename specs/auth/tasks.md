@@ -32,10 +32,16 @@ Implements design §2. First external deps of the module — approved 2026-08-12
 - [ ] **Step 1: Add the three approved dependencies**
 
 ```bash
-go get github.com/golang-jwt/jwt/v5@latest
-go get golang.org/x/crypto@latest
-go get github.com/jackc/pgx/v5@latest
+go get github.com/golang-jwt/jwt/v5@v5.2.2
+go get golang.org/x/crypto@v0.31.0
+go get github.com/jackc/pgx/v5@v5.7.2
 ```
+
+Versions are pinned (not `@latest`) by explicit decision (2026-08-12): `@latest` releases
+require Go ≥ 1.25, and the project's documented baseline is Go 1.22 (CLAUDE.md §2/§15,
+Dockerfile `golang:1.22-alpine`, CI `go-version: "1.22"`). These are the newest releases
+whose module requirements stay ≤ 1.22. After running the commands, `go.mod` must still
+declare `go 1.22` (no `toolchain` line); revert the directive if `go get` bumped it.
 
 Do NOT run `go mod tidy` yet — nothing imports these modules until Tasks 4/6/8, and
 `tidy` would prune them from `go.mod`. It runs once in Task 12 Step 1, when all imports
