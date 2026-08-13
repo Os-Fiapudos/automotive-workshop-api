@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-// TODO: registre os handlers da arquitetura escolhida em internal/
+// TODO: register the handlers of the chosen architecture in internal/
 func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

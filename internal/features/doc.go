@@ -1,2 +1,2 @@
-// Package features: Cada feature reune todas as suas proprias camadas
+// Package features: each feature gathers all of its own layers
 package features

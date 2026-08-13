@@ -6,35 +6,48 @@ go run ./cmd/api
 
 ## Stack
 
-**Go REST API** — API Go com layout padrao cmd/ + internal/ (handlers/models/services).
+**Go REST API** — Go API with the standard cmd/ + internal/ layout (handlers/models/services).
 
-## Arquitetura
+## Architecture
 
-**Vertical Slice (Feature-based)** — Organizado por funcionalidade; cada feature reune suas proprias camadas.
+**Vertical Slice (Feature-based)** — Organized by functionality; each feature gathers its own layers.
 
-## Banco de dados
+## Database
 
-O modelo de dados está documentado em [docs/entidades.md](docs/entidades.md) e o schema PostgreSQL correspondente (tabelas, enums, índices e comentários) em [docs/schema.sql](docs/schema.sql).
+The data model is documented in [docs/entities.md](docs/entities.md) and the corresponding PostgreSQL schema (tables, enums, indexes, and comments) in [docs/schema.sql](docs/schema.sql).
 
-Suba o banco (Postgres + Adminer + API) com Docker Compose:
+Bring up the database (Postgres + Adminer + API) with Docker Compose:
 
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
 
-- **Postgres**: `localhost:5432` (credenciais em `.env`), com `docs/schema.sql` aplicado automaticamente na primeira subida.
-- **Adminer**: http://localhost:8081 — sistema `PostgreSQL`, servidor `db`, usuário/senha/banco conforme `.env`.
+- **Postgres**: `localhost:5432` (credentials in `.env`), with `docs/schema.sql` applied automatically on first startup.
+- **Adminer**: http://localhost:8081 — system `PostgreSQL`, server `db`, user/password/database as in `.env`.
 - **API**: http://localhost:8080/health
 
-Para recriar o banco do zero (ex: após alterar `schema.sql`), como o script só roda na criação inicial do volume:
+To recreate the database from scratch (e.g. after changing `schema.sql`), since the script only runs on initial volume creation:
 
 ```bash
 docker compose down -v
 docker compose up -d
 ```
 
-## Estrutura do projeto
+### Sample data (seed)
+
+[docs/seed.sql](docs/seed.sql) populates the database with customers, vehicles, products, services, and service orders covering the main statuses of the flow. It uses fixed IDs with `ON CONFLICT DO NOTHING`, so it can be re-run without duplicating data.
+
+Apply it by copying the file into the container before running (avoids UTF-8 encoding issues that occur when using pipe/redirection from stdin on PowerShell):
+
+```bash
+docker compose cp docs/seed.sql db:/tmp/seed.sql
+docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
+```
+
+Works the same way on PowerShell, Bash, Git Bash, macOS, and Linux.
+
+## Project structure
 
 ```mermaid
 flowchart TD
@@ -65,10 +78,18 @@ flowchart TD
   n11 --> n12
   n21["docs/"]
   n0 --> n21
-  n22("entidades.md")
+  n22("entities.md")
   n21 --> n22
   n23("schema.sql")
   n21 --> n23
+  n26("seed.sql")
+  n21 --> n26
+  n27["specs/"]
+  n0 --> n27
+  n28("README.md")
+  n27 --> n28
+  n29("architecture.md")
+  n27 --> n29
   n13("go.mod")
   n0 --> n13
   n14(".gitignore")
