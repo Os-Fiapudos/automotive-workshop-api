@@ -31,6 +31,8 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-workshop}:${POSTGRES_PASSWORD:-workshop}@db:5432/${POSTGRES_DB:-automotive_workshop}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
+      JWT_TTL: ${JWT_TTL:-1h}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

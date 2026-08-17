@@ -25,25 +25,33 @@ The full domain model (entities, fields, enums) is documented in
 [docs/entities.md](docs/entities.md); the corresponding PostgreSQL schema in
 [docs/schema.sql](docs/schema.sql).
 
-**Current state**: the project is at an early stage (skeleton). Today there is only a
-minimal HTTP server with a `/health` endpoint (no framework, no real database connection)
-and the folder structure for the vertical slice architecture, still empty. The database
-schema and sample data are already modeled in `docs/`, even though no Go code consumes them
-yet.
+**Current state**: the skeleton stage is over. The HTTP server (stdlib `net/http`, no
+framework) exposes `/health` plus the first full vertical slice, **auth**
+(`internal/features/auth/`): login and a protected `/me` route, backed by a real Postgres
+connection (`pgx/v5` via `internal/shared/database`), with unit tests alongside the code
+and integration tests in `internal/handlers_test/`. The database schema and sample data
+modeled in `docs/` are now actually consumed by this feature (`users` table). Every other
+business entity (Customer, Vehicle, ServiceOrder, etc.) is still schema/docs only, with no
+corresponding Go feature yet — `internal/features/user/` remains an empty placeholder.
 
 ## 2. Technology stack
 
 - **Language**: Go 1.22 (see [go.mod](go.mod)).
-- **External dependencies**: none so far — there is no `go.sum`, the module only uses the
-  standard library.
-- **HTTP**: stdlib `net/http`. No web framework/router has been adopted yet (e.g. chi, gin,
-  echo). **To be defined**: whether and which framework/router will be adopted once the
-  number of routes justifies it — do not assume one before deciding with the team.
+- **External dependencies**: pinned in [go.mod](go.mod), introduced by the auth feature
+  (`specs/auth/design.md` §2) — `github.com/golang-jwt/jwt/v5` (JWT), `golang.org/x/crypto`
+  (bcrypt), `github.com/jackc/pgx/v5` (Postgres driver/pool). Adding further dependencies
+  still requires explicit alignment first (see §12).
+- **HTTP**: stdlib `net/http`, using Go 1.22 method-pattern routing
+  (`mux.HandleFunc("POST /api/v1/auth/login", ...)`). No web framework/router has been
+  adopted (chi, gin, echo). **To be defined**: whether and which framework/router will be
+  adopted once the number of routes justifies it — do not assume one before deciding with
+  the team.
 - **Database**: PostgreSQL 16, schema versioned in [docs/schema.sql](docs/schema.sql)
   (UUID via `pgcrypto`, native enums, sequential `code` via
-  `GENERATED ALWAYS AS IDENTITY`). No Go driver/ORM has been added to `go.mod` yet.
-  **To be defined**: database driver (e.g. `pgx`, `database/sql` + `lib/pq`) and whether a
-  query builder/ORM will be used.
+  `GENERATED ALWAYS AS IDENTITY`). Driver decided: `github.com/jackc/pgx/v5` (`pgxpool`),
+  plain parameterized SQL, no query builder/ORM — see `internal/shared/database` and
+  `internal/features/auth/repository.go`. **To be defined**: whether a query
+  builder/ORM will be adopted for future features (not needed so far).
 - **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), and `api`
   services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
@@ -54,11 +62,14 @@ yet.
 ```
 cmd/api/main.go            → HTTP entrypoint, wires up the server and registers feature routes
 internal/features/         → one folder per business feature (vertical slice)
-  features/user/           → example slice: controller + service + repository + model
-                              (today it only has doc.go, no implementation)
-internal/shared/            → cross-cutting code reused across features (utils, types,
-                              middlewares, database client, etc.) — today only has doc.go
-internal/handlers_test/    → handler/integration tests (currently empty, only .gitkeep)
+  features/auth/           → implemented slice: handler + service + repository + model
+                              (login, /me; unit-tested)
+  features/user/           → placeholder slice: only has doc.go, no implementation yet
+internal/shared/            → cross-cutting code reused across features — implemented:
+                              database (pgx pool), token (JWT), middleware (auth),
+                              httpx (JSON/error envelope)
+internal/handlers_test/    → handler/integration tests — implemented (auth_test.go),
+                              skipped when DATABASE_URL is unset
 docs/                      → domain model (entities.md) and PostgreSQL schema
                               (schema.sql, seed.sql)
 .github/workflows/ci.yml   → CI pipeline
@@ -76,11 +87,15 @@ specs/                      → SDD specifications: specs/README.md (process) an
 under `internal/features/<feature>/`, gathering all of that feature's layers
 (handler/controller, service, repository, model) together — instead of splitting by
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
-etc.). This is the pattern declared in [README.md](README.md) and reflected in the
-`internal/features/user/` folder.
+etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
+by `internal/features/auth/`; `internal/features/user/` remains an unimplemented
+placeholder folder.
 
-There are no infrastructure layers implemented yet (database connection, middlewares,
-authentication) — only the architectural intent and the skeleton folders.
+Infrastructure layers are implemented: database connection (`internal/shared/database`,
+pgx pool), authentication middleware (`internal/shared/middleware`), and JWT issuing/
+verification (`internal/shared/token`) — introduced by the auth feature and reusable by
+future features. See [specs/architecture.md](specs/architecture.md) for the full,
+code-derived description.
 
 ## 5. How to run the application
 
@@ -118,8 +133,16 @@ docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
 ```bash
 go test ./...
 ```
-No tests are implemented today (`internal/handlers_test/` only contains `.gitkeep`). This is
-the command the CI runs, and any new feature must keep it passing.
+This is the command CI runs, and any new feature must keep it passing. It runs the unit
+tests alongside each feature/shared package (`internal/features/auth/*_test.go`,
+`internal/shared/*/*_test.go`) plus the integration tests in
+`internal/handlers_test/`. The integration tests self-skip (`t.Skip`, not fail) when
+`DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
+
+To also run the integration tests against the local compose Postgres:
+```bash
+DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' go test ./...
+```
 
 ## 7. Lint, static analysis, and other checks
 
@@ -158,8 +181,19 @@ the command the CI runs, and any new feature must keep it passing.
   `internal/shared/doc.go`) — keep this pattern in new features.
 - **Commits**: the history uses type-prefixed short, descriptive messages in the style
   `feat:`, `fix:`, `docs:` (see section 16).
-- **To be defined**: error handling, logging, API error response format, and API
-  versioning conventions — none of this has been implemented yet, do not assume a pattern.
+- **API error response format** (RNF04): decided by the auth feature and implemented in
+  `internal/shared/httpx` — every error response is
+  `{"error": {"code": "STRING_CODE", "message": "human-readable message"}}`, written via
+  `httpx.Error`/`httpx.JSON`. Reuse this helper for every new handler instead of building
+  a new envelope shape.
+- **Authentication/middleware**: JWT (HS256) authentication is implemented —
+  `internal/shared/token` issues/verifies tokens, `internal/shared/middleware.RequireAuth`
+  protects routes not explicitly listed as public in `cmd/api/main.go`. See
+  [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
+  authorization (403) is still **to be defined** — not implemented in the MVP.
+- **To be defined**: general request/handler error-handling convention beyond the envelope
+  above (e.g. a centralized error-mapping helper across features), logging conventions
+  beyond BR5 (never log passwords/hashes/tokens), and API versioning conventions.
 
 ## 9. Architectural patterns that must be respected
 
@@ -199,15 +233,18 @@ the command the CI runs, and any new feature must keep it passing.
 - Handler/integration tests live in `internal/handlers_test/`; unit tests for a feature live
   alongside that feature's code (`*_test.go` next to the code, package
   `internal/features/<feature>/`).
-- Use the stdlib `testing` package (no test framework has been added to `go.mod` yet). **To
-  be defined**: whether additional test libraries (e.g. `testify`) will be adopted — this
-  changes `go.mod`/`go.sum` and must be decided explicitly, not assumed.
+- Use the stdlib `testing` package. The auth feature deliberately did not adopt `testify`
+  (or any other test library) even after its first real integration tests — stdlib
+  `testing` plus hand-written fakes stands as the project's practice; adopting a test
+  library later still requires the explicit-alignment step from section 12.
 - `go test ./...` must pass before any delivery is considered complete.
 
 ## 12. Rules for dependency management
 
-- The module today **has no external dependency** (`go.mod` only declares `go 1.22`, no
-  `go.sum`). Treat this as a deliberate choice, not a gap to fill automatically.
+- The module's first external dependencies were added by the auth feature, after explicit
+  alignment (`specs/auth/design.md` §2): `golang-jwt/jwt/v5`, `golang.org/x/crypto`
+  (bcrypt), `jackc/pgx/v5`. Adding a dependency is still not a default — it requires the
+  same explicit-alignment step for anything beyond this pinned set.
 - Do not add a dependency (`go get`) just for convenience. Before adding any package
   (database driver, HTTP router, test library, etc.), confirm it is necessary and, if there
   is ambiguity about which one to choose, ask before deciding — do not assume the "most

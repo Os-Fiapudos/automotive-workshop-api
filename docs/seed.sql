@@ -118,4 +118,15 @@ INSERT INTO audit_services (id, service_order_id, service_id, occurred_at, event
     ('22200000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', now() - interval '5 days' + interval '1 hour', 'start')
 ON CONFLICT (id) DO NOTHING;
 
+-- ==== Users (administrative) ====
+-- Dev-only credentials: admin@workshop.local / admin123.
+-- The password is bcrypt-hashed at insert time via pgcrypto's crypt() —
+-- only the hash is stored (BR1/AC5). Never use these credentials outside
+-- local development.
+
+INSERT INTO users (id, name, email, password_hash) VALUES
+    ('f0000000-0000-0000-0000-000000000001', 'Workshop Admin', 'admin@workshop.local',
+     crypt('admin123', gen_salt('bf', 10)))
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;
