@@ -8,6 +8,7 @@ import (
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
+	serviceorder "automotive-workshop-api/internal/features/service-order"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
 	"automotive-workshop-api/internal/shared/middleware"
@@ -34,6 +35,9 @@ func main() {
 	customerRepository := customer.NewPostgresCustomerRepository(pool)
 	customerService := customer.NewCustomerService(customerRepository)
 
+	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+
 	router := http.NewServeMux()
 
 	// Public routes (auth FR6).
@@ -55,6 +59,10 @@ func main() {
 	// route, or a small helper) once that's explicitly decided — not done
 	// silently as part of this merge.
 	customer.RegisterRoutes(router, customerService)
+
+	// Service Order Opening routes remain unauthenticated for now, same
+	// rationale as Customer Management above.
+	serviceorder.RegisterRoutes(router, serviceOrderService)
 
 	log.Printf("listening on :%s", configuration.Port)
 	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))

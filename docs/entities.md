@@ -32,6 +32,7 @@
 | year        | number | Vehicle manufacturing/model year.                                      |
 | color       | string | Vehicle's predominant color.                                           |
 | customerId  | uuid   | Reference to the owning `Customer`.                                    |
+| status      | string | Vehicle situation: `ACTIVE` or `INACTIVE`. Starts `ACTIVE`. Used by other features (e.g. Service Order Opening) to validate a vehicle before use; full vehicle lifecycle management is a separate, not-yet-specified feature. |
 | createdAt   | string | Record creation date/time, generated automatically.                    |
 | updatedAt   | string | Record last update date/time, generated automatically.                 |
 
@@ -73,6 +74,7 @@
 | openedAt    | string    | Date/time the service order was opened.                                                                     |
 | status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
+| requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
 | createdAt   | string    | Record creation date/time, generated automatically.                                                         |
 | updatedAt   | string    | Record last update date/time, generated automatically.                                                      |
@@ -175,3 +177,9 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 | Field         | Type   | Description                                                              |
 | ------------- | ------ | ---------------------------------------------------------------------------- |
 | customerStatus | string | Possible values for `Customer.status`: `ACTIVE`, `INACTIVE`. |
+
+### VehicleStatus
+
+| Field         | Type   | Description                                                              |
+| ------------- | ------ | ---------------------------------------------------------------------------- |
+| vehicleStatus | string | Possible values for `Vehicle.status`: `ACTIVE`, `INACTIVE`. |
