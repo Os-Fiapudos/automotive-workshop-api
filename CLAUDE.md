@@ -26,34 +26,61 @@ The full domain model (entities, fields, enums) is documented in
 [docs/schema.sql](docs/schema.sql).
 
 **Current state**: the skeleton stage is over. The HTTP server (stdlib `net/http`, no
-framework) exposes `/health` plus the first full vertical slice, **auth**
-(`internal/features/auth/`): login and a protected `/me` route, backed by a real Postgres
-connection (`pgx/v5` via `internal/shared/database`), with unit tests alongside the code
-and integration tests in `internal/handlers_test/`. The database schema and sample data
-modeled in `docs/` are now actually consumed by this feature (`users` table). Every other
-business entity (Customer, Vehicle, ServiceOrder, etc.) is still schema/docs only, with no
-corresponding Go feature yet — `internal/features/user/` remains an empty placeholder.
+framework) exposes `/health` plus two implemented vertical slices:
+- **auth** (`internal/features/auth/`, [specs/auth/](specs/auth/)): administrative login
+  (`POST /api/v1/auth/login`) issuing a JWT, and a protected `GET /api/v1/auth/me`.
+- **customer** (`internal/features/customer/`, [specs/customer-management/](specs/customer-management/)):
+  full CRUD + logical deactivation for workshop customers (`/api/v1/customers*`, 6
+  endpoints), CPF/CNPJ normalization and check-digit validation (including the
+  alphanumeric CNPJ format in effect since July 2026).
+
+Both are backed by a real Postgres connection (`pgx/v5` via `internal/shared/database`),
+with unit tests alongside the code and integration tests in `internal/handlers_test/`. The
+database schema and sample data modeled in `docs/` are now consumed by both features
+(`users` and `customers` tables). Every other business entity (Vehicle, Product, Service,
+ServiceOrder, etc.) is still schema/docs only, with no corresponding Go feature yet —
+`internal/features/user/` (singular, unrelated to `auth`'s `users` table — an unfortunately
+similar name, see the note in section 3) remains an empty placeholder.
+
+**The customer endpoints are currently unauthenticated** — `cmd/api/main.go` does not wrap
+`customer.RegisterRoutes` in `middleware.RequireAuth`. `specs/auth/design.md` §7 states the
+convention going forward is that every route *not* explicitly listed as public should
+require authentication; whether/when to wrap the customer routes accordingly is an **open
+decision**, not yet made — do not wrap them without confirming first (see section 17).
 
 ## 2. Technology stack
 
-- **Language**: Go 1.22 (see [go.mod](go.mod)).
-- **External dependencies**: pinned in [go.mod](go.mod), introduced by the auth feature
-  (`specs/auth/design.md` §2) — `github.com/golang-jwt/jwt/v5` (JWT), `golang.org/x/crypto`
-  (bcrypt), `github.com/jackc/pgx/v5` (Postgres driver/pool). Adding further dependencies
-  still requires explicit alignment first (see §12).
-- **HTTP**: stdlib `net/http`, using Go 1.22 method-pattern routing
-  (`mux.HandleFunc("POST /api/v1/auth/login", ...)`). No web framework/router has been
-  adopted (chi, gin, echo). **To be defined**: whether and which framework/router will be
-  adopted once the number of routes justifies it — do not assume one before deciding with
-  the team.
+- **Language**: Go 1.22 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.22"`, so `go.mod` and [Dockerfile](Dockerfile)'s build image
+  (`golang:1.22-alpine`) must stay compatible with that exact version. When adding or
+  upgrading a dependency, check that its own `go` directive (and its transitive
+  dependencies') doesn't exceed 1.22 — `go get`/`go mod tidy` will otherwise silently raise
+  `go.mod`'s `go` line past what CI can build. This has already happened twice (once for
+  `pgx`, once merging in a `rogpeppe/go-internal` transitive bump pulled in by `testify`);
+  both times the fix was pinning the offending module at the newest release that still
+  requires ≤ Go 1.22, not bumping CI/the Dockerfile — see
+  `specs/customer-management/design.md` §0.
+- **External dependencies**, all added deliberately after explicit alignment (not assumed —
+  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, pinned at `v5.7.4` for Go 1.22
+  compatibility), `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
+  `specs/auth/design.md` §2), `golang.org/x/crypto` (bcrypt, same feature),
+  `github.com/google/uuid` (from the Customer Management feature), and
+  `github.com/stretchr/testify` (test-only, adopted by Customer Management; the auth
+  feature's tests deliberately use stdlib `testing` only — both are fine, see section 11).
+  Keep this list accurate as new dependencies are added.
+- **HTTP**: stdlib `net/http`, using Go 1.22+'s method-aware `http.ServeMux` route patterns
+  (e.g. `"POST /api/v1/customers"`, `"POST /api/v1/auth/login"`). No third-party web
+  framework/router — both implemented features confirmed the stdlib mux is sufficient; do
+  not add a router dependency without a concrete reason the stdlib mux can't handle.
 - **Database**: PostgreSQL 16, schema versioned in [docs/schema.sql](docs/schema.sql)
   (UUID via `pgcrypto`, native enums, sequential `code` via
-  `GENERATED ALWAYS AS IDENTITY`). Driver decided: `github.com/jackc/pgx/v5` (`pgxpool`),
-  plain parameterized SQL, no query builder/ORM — see `internal/shared/database` and
-  `internal/features/auth/repository.go`. **To be defined**: whether a query
-  builder/ORM will be adopted for future features (not needed so far).
+  `GENERATED ALWAYS AS IDENTITY`). Accessed via `pgx v5` (`pgxpool.Pool`), no ORM/query
+  builder — one shared pool built by `internal/shared/database.NewPool` and injected into
+  each feature's own `repository.go` from `cmd/api/main.go`.
 - **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), and `api`
-  services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)).
+  services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)). `api` now
+  requires `JWT_SECRET` to be set (compose fails fast via `${JWT_SECRET:?...}` if it's
+  missing from `.env`).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
 
@@ -64,12 +91,20 @@ cmd/api/main.go            → HTTP entrypoint, wires up the server and register
 internal/features/         → one folder per business feature (vertical slice)
   features/auth/           → implemented slice: handler + service + repository + model
                               (login, /me; unit-tested)
-  features/user/           → placeholder slice: only has doc.go, no implementation yet
+  features/customer/       → implemented slice: handler + service + repository + model
+                              (CRUD + deactivation; unit- and integration-tested)
+  features/user/           → placeholder slice: only has doc.go, no implementation yet.
+                              NOTE: unrelated to auth's `users` database table — this is a
+                              distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
                               database (pgx pool), token (JWT), middleware (auth),
-                              httpx (JSON/error envelope)
-internal/handlers_test/    → handler/integration tests — implemented (auth_test.go),
-                              skipped when DATABASE_URL is unset
+                              httpx (JSON/error envelope, used by auth), apierror (JSON/error
+                              envelope, used by customer — see section 8 for why there are
+                              currently two and what that means for new code)
+                              document (CPF/CNPJ), config (env var loading)
+internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
+                              customer_test.go), each skipped independently when
+                              DATABASE_URL is unset
 docs/                      → domain model (entities.md) and PostgreSQL schema
                               (schema.sql, seed.sql)
 .github/workflows/ci.yml   → CI pipeline
@@ -78,8 +113,7 @@ Dockerfile, docker-compose.yml, .env.example → containerized local environment
 
 specs/                      → SDD specifications: specs/README.md (process) and
                               specs/architecture.md (current architecture), with one
-                              subfolder per feature once the first one is specified (see
-                              section 17)
+                              subfolder per feature (specs/auth/, specs/customer-management/)
 
 ## 4. Identified architecture
 
@@ -88,14 +122,16 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 (handler/controller, service, repository, model) together — instead of splitting by
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
-by `internal/features/auth/`; `internal/features/user/` remains an unimplemented
-placeholder folder.
+by both `internal/features/auth/` and `internal/features/customer/`; `internal/features/user/`
+remains an unimplemented placeholder folder.
 
-Infrastructure layers are implemented: database connection (`internal/shared/database`,
-pgx pool), authentication middleware (`internal/shared/middleware`), and JWT issuing/
-verification (`internal/shared/token`) — introduced by the auth feature and reusable by
-future features. See [specs/architecture.md](specs/architecture.md) for the full,
-code-derived description.
+Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
+pool, shared by both features), authentication middleware (`internal/shared/middleware`),
+and JWT issuing/verification (`internal/shared/token`) — introduced by the auth feature and
+available to future features; CPF/CNPJ validation (`internal/shared/document`), the API
+config loader (`internal/shared/config`), and a JSON error envelope
+(`internal/shared/apierror`) — introduced by the Customer Management feature. See
+[specs/architecture.md](specs/architecture.md) for the full, code-derived description.
 
 ## 5. How to run the application
 
@@ -103,6 +139,8 @@ Run the API locally (without a database):
 ```bash
 go run ./cmd/api
 ```
+(Needs `DATABASE_URL` and `JWT_SECRET` set in the environment — the process fails fast
+without them. See `.env.example` for every variable.)
 
 Bring up the full environment (Postgres + Adminer + API) via Docker Compose:
 ```bash
@@ -122,7 +160,8 @@ docker compose up -d
 ```
 
 Populate the database with sample data ([docs/seed.sql](docs/seed.sql), idempotent via
-`ON CONFLICT DO NOTHING`):
+`ON CONFLICT DO NOTHING`) — includes one administrative user
+(`admin@workshop.local` / `admin123`, dev-only, bcrypt-hashed at insert time):
 ```bash
 docker compose cp docs/seed.sql db:/tmp/seed.sql
 docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
@@ -134,10 +173,10 @@ docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
 go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
-tests alongside each feature/shared package (`internal/features/auth/*_test.go`,
-`internal/shared/*/*_test.go`) plus the integration tests in
-`internal/handlers_test/`. The integration tests self-skip (`t.Skip`, not fail) when
-`DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
+tests alongside each feature/shared package (`internal/features/{auth,customer}/*_test.go`,
+`internal/shared/*/*_test.go`) plus the integration tests in `internal/handlers_test/`
+(`auth_test.go`, `customer_test.go`). Each integration test file self-skips (`t.Skip`, not
+fail) when `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
 To also run the integration tests against the local compose Postgres:
 ```bash
@@ -177,23 +216,37 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   - Status/type enums as native Postgres `ENUM` (not `CHECK`), documented with
     `COMMENT ON`.
 - **Go packages**: one `doc.go` per package with a package comment explaining its purpose
-  (pattern already used in `internal/features/doc.go`, `internal/features/user/doc.go`, and
-  `internal/shared/doc.go`) — keep this pattern in new features.
+  (pattern already used throughout `internal/features/*` and `internal/shared/*`) — keep
+  this pattern in new features.
 - **Commits**: the history uses type-prefixed short, descriptive messages in the style
   `feat:`, `fix:`, `docs:` (see section 16).
-- **API error response format** (RNF04): decided by the auth feature and implemented in
-  `internal/shared/httpx` — every error response is
-  `{"error": {"code": "STRING_CODE", "message": "human-readable message"}}`, written via
-  `httpx.Error`/`httpx.JSON`. Reuse this helper for every new handler instead of building
-  a new envelope shape.
+- **API error response format (RNF04) — currently two competing implementations, not one.**
+  The auth feature and the Customer Management feature were built in parallel and each
+  independently established what its own spec calls "the project-wide convention":
+  - `internal/shared/httpx` (`JSON`/`Error`) — `{"error": {"code", "message"}}`, used by
+    `auth`'s handler and middleware. Decided in `specs/auth/design.md` §4.
+  - `internal/shared/apierror` (`Write` + typed constructors `NotFound`/`Conflict`/
+    `Validation`/`BadRequest`/`Internal`) — `{"error": {"code", "message", "details"?}}`,
+    used by `customer`'s handler. Decided in `specs/customer-management/design.md` §1.5.
+  Both currently compile and work; this is **not a build conflict, it's an unresolved
+  architecture decision** surfaced when the two branches were merged. **Do not silently
+  pick one and refactor the other feature to match** — that is a cross-feature change with
+  real behavioral impact (response shape, e.g. the `details` field) and belongs in an
+  explicit follow-up decision, not something to infer from context. Until resolved, a new
+  feature should use whichever of the two the feature it most resembles already uses, and
+  flag the duplication rather than adding a third shape.
 - **Authentication/middleware**: JWT (HS256) authentication is implemented —
   `internal/shared/token` issues/verifies tokens, `internal/shared/middleware.RequireAuth`
   protects routes not explicitly listed as public in `cmd/api/main.go`. See
   [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
-  authorization (403) is still **to be defined** — not implemented in the MVP.
-- **To be defined**: general request/handler error-handling convention beyond the envelope
-  above (e.g. a centralized error-mapping helper across features), logging conventions
-  beyond BR5 (never log passwords/hashes/tokens), and API versioning conventions.
+  authorization (403) is still **to be defined** — not implemented in the MVP. **The
+  Customer Management routes are not currently wrapped in `RequireAuth`** — see section 1's
+  note; this is an open decision, not an oversight to silently fix.
+- **To be defined**: which error envelope (`httpx` vs. `apierror`) becomes the single
+  project-wide convention (see above), general request/handler error-handling convention
+  beyond the envelope itself (e.g. a centralized error-mapping helper across features),
+  logging conventions beyond BR5 (never log passwords/hashes/tokens), and API versioning
+  conventions.
 
 ## 9. Architectural patterns that must be respected
 
@@ -204,7 +257,8 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
    adopted.
 2. **No direct coupling between features.** A feature must not import internal packages of
    another feature directly. If two features need to share logic or types, that logic must
-   move up to `internal/shared/`.
+   move up to `internal/shared/`. (Both `auth` and `customer` today only import
+   `internal/shared/*`, never each other.)
 3. **`internal/shared/` is only for what is truly generic.** Reserve this package for
    genuinely cross-cutting code (HTTP middlewares, database client/connection, utility
    types). Do not put a specific feature's business rules there.
@@ -222,6 +276,8 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   together in `internal/features/<feature>/`.
 - Reuse what already exists in `internal/shared/` before duplicating logic; if something new
   is genuinely cross-cutting, it goes into `internal/shared/`, not repeated in each feature.
+  (Exception currently in effect: the error envelope — see section 8 — until that's
+  explicitly resolved, don't add a third implementation either.)
 - Every new route is registered from `cmd/api/main.go`, without business logic in it.
 - Any new field/entity must be reflected together in
   [docs/entities.md](docs/entities.md), [docs/schema.sql](docs/schema.sql), and in the Go
@@ -233,41 +289,56 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 - Handler/integration tests live in `internal/handlers_test/`; unit tests for a feature live
   alongside that feature's code (`*_test.go` next to the code, package
   `internal/features/<feature>/`).
-- Use the stdlib `testing` package. The auth feature deliberately did not adopt `testify`
-  (or any other test library) even after its first real integration tests — stdlib
-  `testing` plus hand-written fakes stands as the project's practice; adopting a test
-  library later still requires the explicit-alignment step from section 12.
+- Test library choice currently differs by feature, and that's fine: Customer Management
+  uses stdlib `testing` plus `testify` (`require`/`assert`), adopted deliberately (see
+  `specs/customer-management/requirements.md` §8); the auth feature deliberately did **not**
+  adopt `testify` (or any other test library) even after its own integration tests, using
+  stdlib `testing` plus hand-written fakes instead. Don't treat either as "the" convention
+  to force on the other feature; adopting a test library for a *new* feature still requires
+  the explicit-alignment step from section 12.
 - `go test ./...` must pass before any delivery is considered complete.
 
 ## 12. Rules for dependency management
 
-- The module's first external dependencies were added by the auth feature, after explicit
-  alignment (`specs/auth/design.md` §2): `golang-jwt/jwt/v5`, `golang.org/x/crypto`
-  (bcrypt), `jackc/pgx/v5`. Adding a dependency is still not a default — it requires the
-  same explicit-alignment step for anything beyond this pinned set.
+- The module started with **no external dependency** (`go.mod` only declared `go 1.22`, no
+  `go.sum`) — a deliberate initial choice, not a gap to fill automatically. Two features
+  then each added their own, in parallel, both after explicit alignment (not assumed): the
+  auth feature added `golang-jwt/jwt/v5`, `golang.org/x/crypto` (bcrypt), and `jackc/pgx/v5`
+  (`specs/auth/design.md` §2); the Customer Management feature added `jackc/pgx/v5` (same
+  dependency, versions reconciled when the branches merged), `google/uuid`, and
+  `stretchr/testify` (`specs/customer-management/requirements.md` §8). The bar for adding a
+  new one stays the same as before: justified need, alignment when there's a choice to make.
 - Do not add a dependency (`go get`) just for convenience. Before adding any package
   (database driver, HTTP router, test library, etc.), confirm it is necessary and, if there
   is ambiguity about which one to choose, ask before deciding — do not assume the "most
   popular" library in the Go ecosystem without alignment.
 - When adding a dependency, run `go mod tidy` to keep `go.mod`/`go.sum` consistent, and
-  confirm that `go build ./...`, `go vet ./...`, and `go test ./...` still pass in CI.
+  confirm that `go build ./...`, `go vet ./...`, and `go test ./...` still pass in CI. Watch
+  the `go` directive — `go mod tidy` will silently raise it to the highest requirement found
+  anywhere in the full transitive module graph, which can exceed what CI's pinned Go version
+  can build even when the packages actually used don't need it; see section 2.
 
 ## 13. Security rules
 
-- Secrets (database credentials, etc.) come from environment variables / `.env`, never
-  hardcoded in code — `.env` is already in `.gitignore` and must not be versioned.
+- Secrets (database credentials, JWT signing secret, etc.) come from environment variables /
+  `.env`, never hardcoded in code — `.env` is already in `.gitignore` and must not be
+  versioned.
 - `.env.example` documents the expected variables without real sensitive values; keep it
   up to date when introducing new variables, without putting real secrets in it.
 - When implementing database access, use parameterized queries — never concatenate user
   input into SQL (SQL injection protection).
 - Validate and sanitize all input received in handlers before passing it to
   services/queries.
-- **To be defined**: the API's authentication/authorization mechanism — nothing has been
-  implemented yet; do not assume a scheme (JWT, session, API key) unless it is specified in
-  `specs/`.
+- **Authentication is implemented**: JWT (HS256), via `internal/shared/token` +
+  `internal/shared/middleware.RequireAuth` — see section 8 and
+  [specs/auth/design.md](specs/auth/design.md). Passwords are hashed with bcrypt (never
+  stored or logged in plain text). **Authorization (roles/permissions, HTTP 403) is still
+  not implemented** — a valid token is currently sufficient to reach any protected route;
+  do not assume a role/permission scheme unless it is specified in `specs/`.
 - Follow general security best practices (OWASP Top 10) in any new code: avoid XSS, SQL
   injection, exposure of sensitive data in logs/errors, and do not disable security checks
-  (e.g. `sslmode=disable` in production) without an explicit, documented decision.
+  (e.g. `sslmode=disable` in production) without an explicit, documented decision. Never log
+  passwords, password hashes, or tokens (BR5, `specs/auth/requirements.md`).
 
 ## 14. Database and migration rules
 
@@ -293,17 +364,20 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 15. Rules specific to working with Go
 
-- Go 1.22, per `go.mod` — do not use syntax/features from newer versions without first
-  deliberately updating `go.mod`.
+- Go 1.22, per `go.mod` and CI's pinned `go-version: "1.22"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.22 before
+  `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
+  (`golang:1.22-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported
   application code goes in `internal/`.
 - One package per directory, with a `go doc` (`doc.go`) describing the package's purpose,
   per the pattern already used in the project (section 8).
-- Errors in Go must be handled explicitly (no silent `_ = err`) — the current `main.go`
-  uses `log.Fatal` for fatal startup errors; for request/handler errors, the handling
-  convention is still **to be defined** alongside the first implemented feature.
+- Errors in Go must be handled explicitly (no silent `_ = err`) — `main.go` uses
+  `log.Fatal`/`log.Fatalf` for fatal startup errors (missing config, DB connection failure);
+  handler-level error mapping is implemented per feature (section 8) rather than
+  centralized.
 - Run `go build ./...`, `go vet ./...`, and `go test ./...` before considering any Go
   change complete (same pipeline as CI).
 
@@ -321,6 +395,12 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 - Avoid commits that mix unrelated scopes of change (e.g. database schema + unrelated
   business feature) — keep commits cohesive by subject, as is already the pattern in the
   current history.
+- When merging two feature branches that each introduced their own cross-cutting code
+  (this happened once already — auth's `shared/httpx` vs. Customer Management's
+  `shared/apierror`, and two different Postgres pool constructors), resolve the mechanical
+  conflict (get the build/tests green) without silently picking a winner between competing
+  conventions — flag it instead (see section 8) and let it be resolved as its own explicit
+  decision.
 
 ## 17. Specification-Driven Development (SDD)
 
@@ -348,6 +428,14 @@ flow, the `specs/<feature>/requirements.md|design.md|tasks.md` organization) is 
 [specs/README.md](specs/README.md). The current system architecture, documented
 exclusively from the existing code, is in
 [specs/architecture.md](specs/architecture.md) — keep it up to date when a new feature
-changes the real architecture. No feature folder exists in `specs/` yet; any request to
-implement a feature without a corresponding specification should be treated as ambiguous:
-ask for the requirements before writing code.
+changes the real architecture. Two feature folders exist today: `specs/auth/` and
+`specs/customer-management/`; a request to implement a feature without a corresponding
+specification should be treated as ambiguous: ask for the requirements before writing code.
+
+**Open decisions inherited from merging the `auth` and `customer-management` branches**
+(neither should be resolved silently — see section 8 for detail):
+1. Which JSON error envelope (`internal/shared/httpx` vs. `internal/shared/apierror`)
+   becomes the single project-wide convention, and who migrates.
+2. Whether/when the Customer Management routes should be wrapped in
+   `middleware.RequireAuth`, per the "every non-public route requires auth" convention
+   `specs/auth/design.md` §7 sets going forward.

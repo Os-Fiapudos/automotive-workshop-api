@@ -1,0 +1,344 @@
+openapi: 3.0.3
+info:
+  title: automotive-workshop-api — Customer Management
+  description: >
+    Customer Management endpoints for the automotive workshop API. See
+    specs/customer-management/ for the requirements and design behind this
+    contract. Other domain entities (Vehicle, Product, Service, ServiceOrder,
+    Quote) are documented in docs/entities.md but not yet implemented/exposed
+    via HTTP.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Local (docker-compose) or `go run ./cmd/api`
+
+tags:
+  - name: customers
+    description: Create and maintain workshop customers (individuals via CPF, companies via CNPJ).
+
+paths:
+  /api/v1/customers:
+    post:
+      tags: [customers]
+      summary: Register a new customer
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCustomerRequest"
+            examples:
+              individual:
+                summary: Individual (CPF)
+                value:
+                  name: Maria Silva
+                  document: "123.456.789-09"
+                  phone: "+55 11 91234-5678"
+                  email: maria@example.com
+              company:
+                summary: Company (CNPJ)
+                value:
+                  name: Transportadora Rota Sul Ltda
+                  document: "12.345.678/0001-90"
+                  phone: "+55 11 3333-4444"
+      responses:
+        "201":
+          description: Customer created, always with status ACTIVE.
+          headers:
+            Location:
+              description: URL of the newly created customer.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          description: Missing required field, or CPF/CNPJ failed check-digit validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The document already belongs to another customer (code `DUPLICATE_DOCUMENT`),
+            or the e-mail already belongs to another customer (code `DUPLICATE_EMAIL`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [customers]
+      summary: List customers (active and inactive)
+      operationId: listCustomers
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of customers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerList"
+
+  /api/v1/customers/{id}:
+    parameters:
+      - $ref: "#/components/parameters/CustomerId"
+    get:
+      tags: [customers]
+      summary: Retrieve a customer by id
+      operationId: getCustomerById
+      responses:
+        "200":
+          description: The customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: No customer with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [customers]
+      summary: Partially update a customer
+      description: >
+        Only the fields present in the request body are changed; omitted
+        fields keep their current value. If `document` is present, it is
+        normalized, re-validated, and re-checked for uniqueness.
+      operationId: updateCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCustomerRequest"
+      responses:
+        "200":
+          description: The updated customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "400":
+          description: The updated document failed check-digit validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No customer with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The updated document already belongs to another customer (code
+            `DUPLICATE_DOCUMENT`), or the updated e-mail already belongs to another customer
+            (code `DUPLICATE_EMAIL`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [customers]
+      summary: Logically deactivate a customer
+      description: >
+        Soft delete: sets status to INACTIVE. The record is never physically
+        removed and remains fully queryable. Idempotent — deactivating an
+        already-inactive customer returns 200 with no change. There is no
+        endpoint to reactivate a customer in this feature.
+      operationId: deactivateCustomer
+      responses:
+        "200":
+          description: The now-inactive customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: No customer with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/customers/document/{document}:
+    get:
+      tags: [customers]
+      summary: Retrieve a customer by document (CPF/CNPJ)
+      description: The path parameter is normalized (punctuation stripped) before lookup.
+      operationId: getCustomerByDocument
+      parameters:
+        - name: document
+          in: path
+          required: true
+          description: CPF or CNPJ, formatted or already normalized.
+          schema:
+            type: string
+          example: "123.456.789-09"
+      responses:
+        "200":
+          description: The customer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Customer"
+        "404":
+          description: No customer with this document.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+components:
+  parameters:
+    CustomerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      description: 1-indexed page number. Defaults to 1; values below 1 fall back to the default.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      description: Items per page. Defaults to 20; clamped to a maximum of 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    CreateCustomerRequest:
+      type: object
+      required: [name, document, phone]
+      properties:
+        name:
+          type: string
+          example: Maria Silva
+        document:
+          type: string
+          description: >
+            CPF (11 digits) or CNPJ (14 characters — digits, or, since July 2026, uppercase
+            letters A-Z in the first 12 with numeric check digits), with or without
+            punctuation.
+          example: "123.456.789-09"
+        phone:
+          type: string
+          example: "+55 11 91234-5678"
+        email:
+          type: string
+          format: email
+          nullable: true
+
+    UpdateCustomerRequest:
+      type: object
+      description: Every field is optional; omitted fields are left unchanged.
+      properties:
+        name:
+          type: string
+        document:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+          description: Human-readable sequential identifier.
+        name:
+          type: string
+        document:
+          type: string
+          description: >
+            Always normalized. CPF is 11 digits. CNPJ is 14 characters: digits, or (since
+            the Receita Federal alphanumeric CNPJ format, in effect since July 2026)
+            uppercase letters A-Z in the first 12 characters, with the last 2 always
+            numeric (the check digits).
+          example: "12345678909"
+        documentType:
+          type: string
+          enum: [CPF, CNPJ]
+        phone:
+          type: string
+        email:
+          type: string
+          format: email
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CustomerList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Customer"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [INVALID_BODY, VALIDATION_ERROR, NOT_FOUND, DUPLICATE_DOCUMENT, DUPLICATE_EMAIL, INTERNAL_ERROR]
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+      example:
+        error:
+          code: VALIDATION_ERROR
+          message: invalid customer data
+          details:
+            - field: document
+              message: "CPF \"12345678900\" has invalid check digits"
