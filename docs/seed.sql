@@ -27,13 +27,16 @@ INSERT INTO customers (id, name, document, document_type, phone, email, status) 
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====
+-- status is required as of the Service Order Opening feature — see
+-- specs/service-order-opening/. Vehicle 5 is kept INACTIVE to exercise the
+-- rejection path (its owner, customer 4, is also INACTIVE).
 
-INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001'),
-    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003'),
-    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004')
+INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004', 'INACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Products ====
@@ -70,6 +73,16 @@ INSERT INTO service_orders (id, customer_id, vehicle_id, opened_at, status, note
     ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', now() - interval '1 day',   'EM_DIAGNOSTICO',       'Van with intermittent failure to start.'),
     ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000005', now(),                       'RECEBIDA',             'Customer brought it in for alignment and balancing.')
 ON CONFLICT (id) DO NOTHING;
+
+-- ==== Service Order Requested Services ====
+-- Initial demand recorded at order-opening time (see
+-- specs/service-order-opening/) — not the priced quote. Order 5 (RECEBIDA)
+-- is the only one still at that stage; earlier orders had their demand
+-- already superseded by a generated quote.
+
+INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES
+    ('e0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000002')
+ON CONFLICT DO NOTHING;
 
 -- ==== Quotes ====
 -- 1:1 with service_orders. status/responded_at consistent with the service order status.
