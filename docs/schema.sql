@@ -118,7 +118,7 @@ COMMENT ON COLUMN vehicles.model IS 'Vehicle model (e.g. Uno, Gol).';
 COMMENT ON COLUMN vehicles.year IS 'Vehicle manufacturing/model year.';
 COMMENT ON COLUMN vehicles.color IS 'Vehicle predominant color.';
 COMMENT ON COLUMN vehicles.customer_id IS 'Reference to the owning Customer.';
-COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically.';
+COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically. Also consulted by other features (e.g. Service Order Opening) to reject an INACTIVE vehicle before use.';
 COMMENT ON COLUMN vehicles.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN vehicles.updated_at IS 'Record last update date/time, generated automatically.';
 
@@ -198,6 +198,21 @@ COMMENT ON COLUMN service_orders.updated_at IS 'Record last update date/time, ge
 -- 1:1 reference. The physical FK lives only on quotes.service_order_id (UNIQUE),
 -- avoiding two redundant FKs pointing at each other; a service order's quote is
 -- obtained through that reverse index.
+
+-- ---- ServiceOrder <-> Service (requested at opening, N:N) ----
+-- Unlike quote_services, this join has no price column: it records the
+-- customer's initial demand at order-opening time (see
+-- specs/service-order-opening/), not the definitive priced quote.
+
+CREATE TABLE IF NOT EXISTS service_order_requested_services (
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    service_id        UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
+    PRIMARY KEY (service_order_id, service_id)
+);
+
+COMMENT ON TABLE service_order_requested_services IS 'Services initially requested when a service order was opened — the customer''s stated demand, not the definitive priced quote.';
+COMMENT ON COLUMN service_order_requested_services.service_order_id IS 'Reference to the ServiceOrder this request belongs to.';
+COMMENT ON COLUMN service_order_requested_services.service_id IS 'Reference to the requested Service.';
 
 -- ---- Quote ----
 
@@ -321,6 +336,7 @@ CREATE INDEX IF NOT EXISTS ix_service_orders_customer_id ON service_orders (cust
 CREATE INDEX IF NOT EXISTS ix_service_orders_vehicle_id ON service_orders (vehicle_id);
 CREATE INDEX IF NOT EXISTS ix_quote_products_product_id ON quote_products (product_id);
 CREATE INDEX IF NOT EXISTS ix_quote_services_service_id ON quote_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON service_order_requested_services (service_id);
 CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);

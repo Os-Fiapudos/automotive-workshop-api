@@ -11,6 +11,7 @@ import (
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
+	serviceorder "automotive-workshop-api/internal/features/service-order"
 	"automotive-workshop-api/internal/features/vehicle"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
@@ -59,6 +60,9 @@ func main() {
 	vehicleRepository := vehicle.NewPostgresVehicleRepository(pool)
 	vehicleService := vehicle.NewVehicleService(vehicleRepository, customerLookupAdapter{service: customerService})
 
+	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+
 	router := http.NewServeMux()
 
 	// Public routes (auth FR6).
@@ -86,6 +90,10 @@ func main() {
 	// Management's still-unauthenticated routes above — reuses the same
 	// requireAuth middleware built for the auth feature.
 	vehicle.RegisterRoutes(router, vehicleService, requireAuth)
+
+	// Service Order Opening routes remain unauthenticated for now, same
+	// rationale as Customer Management above.
+	serviceorder.RegisterRoutes(router, serviceOrderService)
 
 	log.Printf("listening on :%s", configuration.Port)
 	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))

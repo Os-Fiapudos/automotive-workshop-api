@@ -32,7 +32,10 @@ ON CONFLICT (id) DO NOTHING;
 -- itself INACTIVE above; that customer's pre-existing vehicle stays exactly
 -- as it is (seed data isn't run through the application's own create-time
 -- "customer must be ACTIVE" check), illustrating that inactivity only blocks
--- *new* creation, never hides existing history (requirements.md BR8).
+-- *new* creation, never hides existing history (requirements.md BR8). This
+-- also doubles as fixture data for Service Order Opening (see
+-- specs/service-order-opening/): vehicle 5 being INACTIVE (owned by the
+-- also-INACTIVE customer 4) exercises its rejection path.
 
 INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
     ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),
@@ -76,6 +79,16 @@ INSERT INTO service_orders (id, customer_id, vehicle_id, opened_at, status, note
     ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', now() - interval '1 day',   'EM_DIAGNOSTICO',       'Van with intermittent failure to start.'),
     ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000005', now(),                       'RECEBIDA',             'Customer brought it in for alignment and balancing.')
 ON CONFLICT (id) DO NOTHING;
+
+-- ==== Service Order Requested Services ====
+-- Initial demand recorded at order-opening time (see
+-- specs/service-order-opening/) — not the priced quote. Order 5 (RECEBIDA)
+-- is the only one still at that stage; earlier orders had their demand
+-- already superseded by a generated quote.
+
+INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES
+    ('e0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000002')
+ON CONFLICT DO NOTHING;
 
 -- ==== Quotes ====
 -- 1:1 with service_orders. status/responded_at consistent with the service order status.

@@ -15,10 +15,10 @@
 | createdAt    | string  | Record creation date/time, generated automatically.                    |
 | updatedAt    | string  | Record last update date/time, generated automatically.                 |
 
-> **Future integration note**: once Service Order exists, opening a new service order must
-> validate that the referenced customer's `status` is `ACTIVE`. This rule is documented here
-> and in `specs/customer-management/requirements.md` §7.1, but is not implemented until the
-> Service Order feature itself is specified.
+> **Service Order integration**: opening a new service order validates that the referenced
+> customer's `status` is `ACTIVE`, rejecting an unknown or `INACTIVE` customer. Implemented
+> in [specs/service-order-opening](../specs/service-order-opening/); originally recorded as
+> a future note here and in `specs/customer-management/requirements.md` §7.1, now fulfilled.
 
 ## Vehicle
 
@@ -36,10 +36,10 @@
 | createdAt   | string | Record creation date/time, generated automatically.                    |
 | updatedAt   | string | Record last update date/time, generated automatically.                 |
 
-> **Future integration note**: once Service Order exists, opening a new service order must
-> validate that the referenced vehicle's `status` is `ACTIVE`. This rule is documented here
-> and in `specs/vehicle-management/requirements.md` §7.1, but is not implemented until the
-> Service Order feature itself is specified.
+> **Service Order integration**: opening a new service order validates that the referenced
+> vehicle's `status` is `ACTIVE`, rejecting an unknown or `INACTIVE` vehicle. Implemented in
+> [specs/service-order-opening](../specs/service-order-opening/); originally recorded as a
+> future note here and in `specs/vehicle-management/requirements.md` §7.1, now fulfilled.
 
 ## Product
 
@@ -79,6 +79,7 @@
 | openedAt    | string    | Date/time the service order was opened.                                                                     |
 | status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
+| requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
 | createdAt   | string    | Record creation date/time, generated automatically.                                                         |
 | updatedAt   | string    | Record last update date/time, generated automatically.                                                      |
@@ -184,6 +185,6 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 
 ### VehicleStatus
 
-| Field        | Type   | Description                                                 |
-| ------------ | ------ | ------------------------------------------------------------- |
+| Field         | Type   | Description                                                              |
+| ------------- | ------ | ---------------------------------------------------------------------------- |
 | vehicleStatus | string | Possible values for `Vehicle.status`: `ACTIVE`, `INACTIVE`. |
