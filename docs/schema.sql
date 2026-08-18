@@ -34,6 +34,10 @@ DO $$ BEGIN
     CREATE TYPE customer_status AS ENUM ('ACTIVE', 'INACTIVE');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+DO $$ BEGIN
+    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- NOTE: the values of this enum are a deliberate exception to the "everything in
 -- English" convention. ServiceOrder.status is kept in Portuguese by explicit
 -- product decision (see docs/entities.md) — do not translate these values.
@@ -100,6 +104,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
     year           SMALLINT NOT NULL,
     color          TEXT NOT NULL,
     customer_id    UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
+    status         vehicle_status NOT NULL DEFAULT 'ACTIVE',
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -113,6 +118,7 @@ COMMENT ON COLUMN vehicles.model IS 'Vehicle model (e.g. Uno, Gol).';
 COMMENT ON COLUMN vehicles.year IS 'Vehicle manufacturing/model year.';
 COMMENT ON COLUMN vehicles.color IS 'Vehicle predominant color.';
 COMMENT ON COLUMN vehicles.customer_id IS 'Reference to the owning Customer.';
+COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically.';
 COMMENT ON COLUMN vehicles.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN vehicles.updated_at IS 'Record last update date/time, generated automatically.';
 

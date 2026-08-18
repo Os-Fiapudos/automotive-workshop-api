@@ -27,13 +27,19 @@ INSERT INTO customers (id, name, document, document_type, phone, email, status) 
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====
+-- status is required as of the Vehicle Management feature — see
+-- specs/vehicle-management/. The last vehicle belongs to a customer that is
+-- itself INACTIVE above; that customer's pre-existing vehicle stays exactly
+-- as it is (seed data isn't run through the application's own create-time
+-- "customer must be ACTIVE" check), illustrating that inactivity only blocks
+-- *new* creation, never hides existing history (requirements.md BR8).
 
-INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001'),
-    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003'),
-    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004')
+INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004', 'INACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Products ====

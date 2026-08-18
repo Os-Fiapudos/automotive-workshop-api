@@ -1,12 +1,14 @@
 openapi: 3.0.3
 info:
-  title: automotive-workshop-api — Customer Management
+  title: automotive-workshop-api — Customer & Vehicle Management
   description: >
-    Customer Management endpoints for the automotive workshop API. See
-    specs/customer-management/ for the requirements and design behind this
-    contract. Other domain entities (Vehicle, Product, Service, ServiceOrder,
-    Quote) are documented in docs/entities.md but not yet implemented/exposed
-    via HTTP.
+    Customer Management and Vehicle Management endpoints for the automotive
+    workshop API. See specs/customer-management/ and specs/vehicle-management/
+    for the requirements and design behind these contracts. Other domain
+    entities (Product, Service, ServiceOrder, Quote) are documented in
+    docs/entities.md but not yet implemented/exposed via HTTP. Vehicle routes
+    require a JWT (see the bearerAuth security scheme); Customer routes do not
+    (see specs/customer-management/requirements.md §7.2).
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
@@ -15,6 +17,10 @@ servers:
 tags:
   - name: customers
     description: Create and maintain workshop customers (individuals via CPF, companies via CNPJ).
+  - name: vehicles
+    description: >
+      Create and maintain workshop vehicles, each linked to an existing,
+      active customer. Every endpoint requires a valid JWT.
 
 paths:
   /api/v1/customers:
@@ -196,9 +202,255 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /api/v1/vehicles:
+    post:
+      tags: [vehicles]
+      summary: Register a new vehicle
+      description: >
+        The referenced customerId must belong to an existing, ACTIVE
+        customer. The vehicle always starts ACTIVE.
+      operationId: createVehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVehicleRequest"
+            examples:
+              vehicle:
+                summary: Mercosul-format plate
+                value:
+                  licensePlate: ABC1D23
+                  brand: Fiat
+                  model: Uno
+                  year: 2018
+                  color: White
+                  customerId: a0000000-0000-0000-0000-000000000001
+      responses:
+        "201":
+          description: Vehicle created, always with status ACTIVE.
+          headers:
+            Location:
+              description: URL of the newly created vehicle.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          description: Missing required field, invalid license plate format, or year out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: The referenced customerId does not exist (code `CUSTOMER_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The referenced customer exists but is INACTIVE (code
+            `CUSTOMER_INACTIVE`), or the license plate already belongs to
+            another vehicle (code `DUPLICATE_LICENSE_PLATE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [vehicles]
+      summary: List vehicles (active and inactive)
+      operationId: listVehicles
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of vehicles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/vehicles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/VehicleId"
+    get:
+      tags: [vehicles]
+      summary: Retrieve a vehicle by id
+      operationId: getVehicleById
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [vehicles]
+      summary: Partially update a vehicle
+      description: >
+        Only brand, model, year, and color may be updated; the license plate
+        and the owning customer are immutable after creation and are not
+        accepted by this endpoint. Omitted fields keep their current value.
+      operationId: updateVehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVehicleRequest"
+      responses:
+        "200":
+          description: The updated vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          description: The updated year is out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [vehicles]
+      summary: Logically deactivate a vehicle
+      description: >
+        Soft delete: sets status to INACTIVE. The record is never physically
+        removed and remains fully queryable. Idempotent — deactivating an
+        already-inactive vehicle returns 200 with no change. There is no
+        endpoint to reactivate a vehicle in this feature.
+      operationId: deactivateVehicle
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The now-inactive vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/vehicles/plate/{plate}:
+    get:
+      tags: [vehicles]
+      summary: Retrieve a vehicle by license plate
+      description: The path parameter is normalized (formatting stripped, uppercased) before lookup.
+      operationId: getVehicleByPlate
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: plate
+          in: path
+          required: true
+          description: Legacy (AAA9999) or Mercosul (AAA9A99) plate, formatted or already normalized.
+          schema:
+            type: string
+          example: ABC1D23
+      responses:
+        "200":
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this plate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/vehicles/customer/{customerId}:
+    get:
+      tags: [vehicles]
+      summary: List a customer's vehicles
+      description: >
+        An existing customer with no vehicles returns 200 with an empty data
+        array. An inactive customer's vehicles are still listed — inactivity
+        only affects future service-order eligibility, not visibility.
+      operationId: listVehiclesByCustomer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of the customer's vehicles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No customer with this id (code `CUSTOMER_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Required on every Vehicle Management route (RNF02). Not required on
+        Customer Management routes (see
+        specs/customer-management/requirements.md §7.2).
+
   parameters:
     CustomerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VehicleId:
       name: id
       in: path
       required: true
@@ -315,6 +567,99 @@ components:
         totalPages:
           type: integer
 
+    CreateVehicleRequest:
+      type: object
+      required: [licensePlate, brand, model, year, color, customerId]
+      properties:
+        licensePlate:
+          type: string
+          description: Legacy (AAA9999) or Mercosul (AAA9A99) format, with or without punctuation.
+          example: ABC1D23
+        brand:
+          type: string
+          example: Fiat
+        model:
+          type: string
+          example: Uno
+        year:
+          type: integer
+          description: Manufacturing year, between 1950 and the current year + 1.
+          example: 2018
+        color:
+          type: string
+          example: White
+        customerId:
+          type: string
+          format: uuid
+          description: Must reference an existing, ACTIVE customer.
+
+    UpdateVehicleRequest:
+      type: object
+      description: >
+        Every field is optional; omitted fields are left unchanged. License
+        plate and customerId are not part of this request's shape — they are
+        immutable after creation.
+      properties:
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+          description: Human-readable sequential identifier.
+        licensePlate:
+          type: string
+          description: Always normalized (uppercase, formatting stripped).
+          example: ABC1D23
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        customerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    VehicleList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vehicle"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
     ErrorEnvelope:
       type: object
       properties:
@@ -323,7 +668,18 @@ components:
           properties:
             code:
               type: string
-              enum: [INVALID_BODY, VALIDATION_ERROR, NOT_FOUND, DUPLICATE_DOCUMENT, DUPLICATE_EMAIL, INTERNAL_ERROR]
+              enum:
+                [
+                  INVALID_BODY,
+                  VALIDATION_ERROR,
+                  NOT_FOUND,
+                  DUPLICATE_DOCUMENT,
+                  DUPLICATE_EMAIL,
+                  CUSTOMER_NOT_FOUND,
+                  CUSTOMER_INACTIVE,
+                  DUPLICATE_LICENSE_PLATE,
+                  INTERNAL_ERROR,
+                ]
             message:
               type: string
             details:

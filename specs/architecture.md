@@ -13,38 +13,57 @@ real architecture of the system.
 
 The system is a single Go binary (`cmd/api`) that starts an HTTP server using only the
 standard library's `net/http` (Go 1.22+'s method-aware `http.ServeMux` patterns), with no
-third-party web framework/router. It exposes `GET /health` plus two implemented business
+third-party web framework/router. It exposes `GET /health` plus three implemented business
 features:
 - **auth** (`internal/features/auth/`, [specs/auth/](auth/)) — `POST /api/v1/auth/login`
   and the protected `GET /api/v1/auth/me`.
 - **customer** (`internal/features/customer/`, [specs/customer-management/](customer-management/))
   — the six Customer Management endpoints under `/api/v1/customers`.
+- **vehicle** (`internal/features/vehicle/`, [specs/vehicle-management/](vehicle-management/))
+  — the seven Vehicle Management endpoints under `/api/v1/vehicles`, every one of them
+  JWT-protected (unlike `customer`'s routes).
 
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under
-`internal/features/<feature>/`. Both `internal/features/auth/` and
-`internal/features/customer/` implement this end to end (`customer` organized internally by
-responsibility file — `model.go`, `dto.go`, `repository.go`, `service.go`, `handler.go`,
-`errors.go` — rather than by use case; see `specs/customer-management/design.md` §1.1 for
-the rationale). `internal/features/user/` remains an empty placeholder (`doc.go` only) —
-note this is unrelated to auth's `users` database table; it's a distinct, not-yet-specified
-future feature.
+`internal/features/<feature>/`. `internal/features/auth/`, `internal/features/customer/`,
+and `internal/features/vehicle/` all implement this end to end (`customer` and `vehicle`
+organized internally by responsibility file — `model.go`, `dto.go`, `repository.go`,
+`service.go`, `handler.go`, `errors.go`, plus `vehicle`'s own `plate.go` and both features'
+`httpsupport.go` — rather than by use case; see `specs/customer-management/design.md` §1.1
+for the rationale, reused as-is by `specs/vehicle-management/design.md` §1.1).
+`internal/features/user/` remains an empty placeholder (`doc.go` only) — note this is
+unrelated to auth's `users` database table; it's a distinct, not-yet-specified future
+feature.
 
-`internal/shared/` holds cross-cutting code from both features: a single shared Postgres
-connection pool (`shared/database`, first introduced by auth, now used by both features'
-repositories), JWT issuing/verification (`shared/token`) and the authentication middleware
-(`shared/middleware`) from auth, and CPF/CNPJ validation (`shared/document`) and the
-environment config loader (`shared/config`) from Customer Management. **Both features also
+`internal/shared/` holds cross-cutting code from all three features: a single shared
+Postgres connection pool (`shared/database`, first introduced by auth, now used by every
+feature's repository), JWT issuing/verification (`shared/token`) and the authentication
+middleware (`shared/middleware`) from auth — reused unchanged by `vehicle` for its own
+JWT-protected routes — and CPF/CNPJ validation (`shared/document`) and the environment
+config loader (`shared/config`) from Customer Management. `vehicle` deliberately does
+**not** add a third shared package for its own license-plate validation
+(`vehicle/plate.go` stays feature-local — see `specs/vehicle-management/design.md` §1.2):
+unlike CPF/CNPJ, a license plate isn't a cross-feature concept, so it doesn't meet the
+"genuinely generic" bar `CLAUDE.md` §9.3 sets for `shared/`. **Both `auth` and `customer`
 each introduced their own JSON error-envelope package** (`shared/httpx` from auth,
-`shared/apierror` from Customer Management) — this is flagged, not resolved, in §8 below;
-it is a real duplication surfaced by merging the two branches, not a design decision to
-imitate.
+`shared/apierror` from Customer Management) — this is flagged, not resolved, in §8 below; it
+is a real duplication surfaced by merging the two branches, not a design decision to
+imitate. `vehicle` reuses `shared/apierror` (the feature it most resembles structurally),
+not a third envelope.
 
-Communication is real for both features: `main.go` builds the shared pool and JWT manager,
-then wires `auth.NewHandler(...)` (routes: login public, `/me` behind
-`middleware.RequireAuth`) and `customer.RegisterRoutes(...)` (all six routes currently
-public — see §10, decision 16) onto one `*http.ServeMux`.
+Communication is real across all three features: `main.go` builds the shared pool and JWT
+manager, then wires `auth.NewHandler(...)` (routes: login public, `/me` behind
+`middleware.RequireAuth`), `customer.RegisterRoutes(...)` (all six routes still public — see
+§10, decision 16), and `vehicle.RegisterRoutes(...)` (all seven routes wrapped in the same
+`requireAuth` middleware auth already built — see §10, decision 17) onto one
+`*http.ServeMux`. `vehicle` needs to check, at vehicle creation, that a referenced customer
+exists and is `ACTIVE` — it does this through a small `CustomerLookup` interface it declares
+itself (mirroring how `auth.Service` depends on `UserFinder`), implemented by an adapter
+`main.go` builds around the already-constructed `*customer.CustomerService` — so `vehicle`
+never imports `internal/features/customer` directly, preserving "no feature imports another
+feature" (§5 below) even though this is the first case where one feature's business logic
+genuinely depends on another's current state.
 
 ## 2. Main components
 
@@ -53,6 +72,7 @@ public — see §10, decision 16) onto one `*http.ServeMux`.
 | HTTP entrypoint | `cmd/api/main.go` | Implemented — loads config (`DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT`), opens the shared Postgres pool, wires both `auth` and `customer`, registers `/health`, the public/protected auth routes, and the customer routes, starts the server. |
 | `auth` feature | `internal/features/auth/` | Implemented — `handler.go` (HTTP), `service.go` (login/lookup logic), `repository.go` (pgx queries), `model.go` (`User`). Unit-tested (`handler_test.go`, `service_test.go`). See `specs/auth/`. |
 | `customer` feature | `internal/features/customer/` | Implemented — model, DTOs, Postgres repository, service, HTTP handlers for all 6 endpoints. See `specs/customer-management/`. |
+| `vehicle` feature | `internal/features/vehicle/` | Implemented — model, plate validation, DTOs, Postgres repository, service, HTTP handlers for all 7 endpoints, every route JWT-protected. See `specs/vehicle-management/`. |
 | `user` feature | `internal/features/user/` | Not implemented — only `doc.go` declaring the package (placeholder for a future feature; unrelated to auth's `users` table). |
 | `features` package (root) | `internal/features/doc.go` | Not implemented — only a package comment. |
 | Shared: `database` | `internal/shared/database/` | Implemented — `NewPool` builds and pings a `pgxpool.Pool` from a `postgres://` URL. Used by both features' repositories. (Consolidated from two independent implementations, `NewPool` and `Connect`, that each branch introduced — see §10.) |
@@ -62,11 +82,11 @@ public — see §10, decision 16) onto one `*http.ServeMux`.
 | Shared: `apierror` | `internal/shared/apierror/` | Implemented — the JSON error envelope and HTTP status mapping used by `customer` (`{"error":{"code","message","details"?}}`). See §8 re: overlap with `httpx`. |
 | Shared: `document` | `internal/shared/document/` | Implemented — CPF/CNPJ normalize/detect-type/validate (check-digit algorithm, no third-party library), including the alphanumeric CNPJ format. |
 | Shared: `config` | `internal/shared/config/` | Implemented — reads `DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT` from the environment. |
-| Handler/integration tests | `internal/handlers_test/` | Implemented — `auth_test.go` and `customer_test.go`, each driving real HTTP against a real Postgres, each independently skipping (not failing) without `DATABASE_URL`/a reachable database. |
-| Database schema | `docs/schema.sql` | Implemented as plain SQL; consumed by both features' repositories (`users` table for auth, `customers` table — with its `document_type`/`status` columns/enums — for Customer Management). |
-| Sample data | `docs/seed.sql` | Implemented as plain SQL; applied manually via `psql`. Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`) and four sample customers. |
-| Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User`. `Customer` and `User` are the only entities with a corresponding Go implementation. |
-| API documentation | `docs/openapi.yaml` | Implemented for the Customer Management endpoints only (schemas, pagination, error envelope). The auth endpoints are not yet documented here — `specs/auth/requirements.md` scoped that out (RNF10) as a separate future feature. |
+| Handler/integration tests | `internal/handlers_test/` | Implemented — `auth_test.go`, `customer_test.go`, and `vehicle_test.go`, each driving real HTTP against a real Postgres, each independently skipping (not failing) without `DATABASE_URL`/a reachable database. |
+| Database schema | `docs/schema.sql` | Implemented as plain SQL; consumed by every feature's repository (`users` table for auth, `customers` table — with its `document_type`/`status` columns/enums — for Customer Management, `vehicles` table — with its new `status` column/enum — for Vehicle Management). |
+| Sample data | `docs/seed.sql` | Implemented as plain SQL; applied manually via `psql`. Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`), four sample customers, and five sample vehicles (one `INACTIVE`, owned by the one `INACTIVE` customer). |
+| Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User`. `Customer`, `Vehicle`, and `User` are the only entities with a corresponding Go implementation. |
+| API documentation | `docs/openapi.yaml` | Implemented for the Customer Management and Vehicle Management endpoints (schemas, pagination, error envelope, `bearerAuth` security scheme for Vehicle Management). The auth endpoints are not yet documented here — `specs/auth/requirements.md` scoped that out (RNF10) as a separate future feature. |
 | Local environment | `docker-compose.yml`, `Dockerfile` | Implemented — orchestrates `db` (Postgres), `adminer`, and `api`; `api` now requires `JWT_SECRET` (fails fast via compose variable substitution if unset). |
 | CI | `.github/workflows/ci.yml` | Implemented — runs `go build ./...`, `go vet ./...`, `go test ./...`. |
 
@@ -99,6 +119,27 @@ public — see §10, decision 16) onto one `*http.ServeMux`.
   - `model.go` — the `Customer` aggregate and its invariants (always starts `ACTIVE`,
     document only settable through validated construction, no `Activate` method).
   - `dto.go` — HTTP request/response shapes, independent of the domain type.
+- **`internal/features/vehicle/`**: (see `specs/vehicle-management/design.md` §1.1 for the
+  full rationale — same file layout as `customer`, plus `plate.go`)
+  - `handler.go`/`httpsupport.go` — HTTP layer: request parsing/validation, DTO ⇄ domain
+    conversion, status code mapping (`apierror`, reused from `customer`, not a third
+    envelope). Every route is wrapped in the `requireAuth` middleware `main.go` passes in
+    (RNF02). Depends on `service.go`.
+  - `service.go` — one method per use case, orchestrates domain + repository +
+    `CustomerLookup`. Depends on the `VehicleRepository` interface (not the concrete
+    Postgres type) and the `CustomerLookup` interface it declares itself (satisfied by an
+    adapter `main.go` builds around `*customer.CustomerService` — see §1 above).
+  - `repository.go` — the `VehicleRepository` interface and its `pgx`-backed implementation.
+    Depends only on `model.go` — no dependency on `internal/shared/document` or any
+    `customer` type.
+  - `model.go` — the `Vehicle` aggregate and its invariants (always starts `ACTIVE`, plate
+    only settable through validated construction, year re-validated on every update, no
+    `Activate` method).
+  - `plate.go` — license-plate `Normalize`/`Validate` (legacy + Mercosul formats), feature-
+    local rather than `internal/shared/` (§1 above).
+  - `dto.go` — HTTP request/response shapes, independent of the domain type; the update
+    request type has no field for license plate or customer id — both are immutable after
+    creation, enforced by the type itself, not just handler logic.
 - **`internal/features/user/`**: intended responsibility unchanged (folder convention +
   package comment) — still no concrete implementation.
 - **`internal/shared/`**: genuinely cross-cutting code only (`CLAUDE.md` §9.3), each
@@ -138,17 +179,33 @@ POST/GET/PATCH/DELETE /api/v1/customers... (currently unauthenticated — see §
   → customer.CustomerService (business rules: starts ACTIVE, no reactivation, partial update, ...)
   → customer.CustomerRepository → pgx → Postgres `customers` table
   → customer.handler (DTO response) → HTTP response
+
+POST/GET/PATCH/DELETE /api/v1/vehicles... (every route requires a valid JWT — §10 decision 17)
+  → middleware.RequireAuth (same check as GET /api/v1/auth/me) → 401 on missing/invalid/
+    expired token, otherwise proceeds
+  → vehicle.handler (parses/validates request, maps errors to apierror's envelope)
+  → vehicle.VehicleService
+      → on Create: CustomerLookup.IsActiveCustomer (→ 404 CUSTOMER_NOT_FOUND if the
+        customer doesn't exist, 409 CUSTOMER_INACTIVE if it exists but isn't ACTIVE) →
+        NewVehicle (normalizes/validates the plate, validates the year range) →
+        ExistsByPlate pre-check (→ 409 DUPLICATE_LICENSE_PLATE) → Create
+      → other use cases: business rules (starts ACTIVE, no reactivation, PATCH limited to
+        brand/model/year/color, plate/customerId immutable, ...)
+  → vehicle.VehicleRepository → pgx → Postgres `vehicles` table (unique-violation on
+    `ux_vehicles_license_plate` also mapped to DUPLICATE_LICENSE_PLATE, catching a
+    concurrent-request race the pre-check alone can't)
+  → vehicle.handler (DTO response) → HTTP response
 ```
 
-No other feature's operation flow is implemented (vehicle, product, service registration,
-service orders, quotes, etc.). `docs/entities.md` describes the **data model** of these
-entities and a service order status flow
+No other feature's operation flow is implemented (product, service registration, service
+orders, quotes, etc.). `docs/entities.md` describes the **data model** of these entities and
+a service order status flow
 (`RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE`),
 but that remains domain documentation only — no Go logic implements it yet. **To be
 defined** once those features are specified and implemented. Note the documented **future**
-invariant (not yet implemented, since Service Order does not exist): opening a service
+invariants (not yet implemented, since Service Order does not exist): opening a service
 order must reject an `INACTIVE` customer (see `specs/customer-management/requirements.md`
-§7.1).
+§7.1) or an `INACTIVE` vehicle (see `specs/vehicle-management/requirements.md` §7.1).
 
 ## 5. Communication between components
 
@@ -158,14 +215,27 @@ Both implemented features follow the convention declared in [CLAUDE.md](../CLAUD
   depends on the `UserFinder`/`TokenIssuer` interfaces it defines itself (not on
   `*Repository`/`*token.Manager` directly), which is what lets its tests use fakes instead
   of a real database/signer. `customer`'s `service.go` similarly depends only on the
-  `CustomerRepository` interface, not the concrete Postgres type.
+  `CustomerRepository` interface, not the concrete Postgres type. `vehicle`'s `service.go`
+  depends on both the `VehicleRepository` interface and the `CustomerLookup` interface (see
+  below), never a concrete type.
 - **Between a feature and shared code**: `auth` imports
   `internal/shared/{database,token,httpx,middleware}`; `customer` imports
-  `internal/shared/{database,document,config,apierror}`. `cmd/api/main.go` is the only
-  place that imports both features and wires their concrete dependencies together.
-- **Between features**: no feature imports another feature's package directly — `auth` and
-  `customer` are fully independent of each other; the only thing they share is
-  `internal/shared/database`'s pool (each holds its own repository wrapping it).
+  `internal/shared/{database,document,config,apierror}`; `vehicle` imports
+  `internal/shared/{database,apierror}` only — no `middleware` import (the `requireAuth`
+  middleware value is passed into `vehicle.RegisterRoutes` by `main.go` instead, so
+  `vehicle` never needs to import `internal/shared/middleware` or hold a `token.Manager`
+  itself) and no new shared package for plate validation (§1 above). `cmd/api/main.go` is
+  the only place that imports every feature and wires their concrete dependencies together.
+- **Between features**: no feature imports another feature's package directly — `auth`,
+  `customer`, and `vehicle` are fully independent Go packages of each other. `auth` and
+  `customer` share nothing but `internal/shared/database`'s pool. `vehicle` is the first
+  feature whose business logic genuinely depends on another feature's current state (BR1:
+  a vehicle's customer must exist and be `ACTIVE`) — it resolves this via a `CustomerLookup`
+  interface it declares itself (mirroring `auth.Service`'s `UserFinder` pattern), satisfied
+  by a small adapter `main.go` builds around the already-constructed
+  `*customer.CustomerService`. `internal/features/vehicle/` itself never imports
+  `internal/features/customer/` — only `main.go`, which already imports every feature as the
+  composition root, does.
 
 ## 6. Persistence
 
@@ -188,6 +258,13 @@ pool for the whole process:
     this feature, `document_type customer_document_type` and `status customer_status`
     (two new enums), directly in the `CREATE TABLE` — see
     `specs/customer-management/design.md` §3.1.
+  - `vehicles` (Vehicle Management): the pre-existing table plus one column added by this
+    feature, `status vehicle_status` (one new enum, mirroring `customer_status`), directly
+    in the `CREATE TABLE` — see `specs/vehicle-management/design.md` §3.1. The pre-existing
+    `customer_id UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT` foreign key
+    (present before this feature) guarantees the referenced customer *exists*; it cannot
+    express "and is `ACTIVE`" (Postgres FKs don't see other columns) — that half of BR1 is
+    the application-level `CustomerLookup` check (§1 above).
 - **Repository pattern**: one interface + implementation per feature (not a generic
   repository). `auth`'s `Repository` maps `pgx.ErrNoRows` to `ErrUserNotFound`.
   `customer`'s `CustomerRepository` maps `pgx.ErrNoRows` to `ErrNotFound`, and inspects
@@ -195,13 +272,18 @@ pool for the whole process:
   `document` (`ux_customers_document`) from a duplicate `email`
   (`ux_customers_email` — a pre-existing invariant predating the feature, see
   `specs/customer-management/requirements.md` §3.4.1) rather than assuming it's always the
-  document.
+  document. `vehicle`'s `VehicleRepository` maps `pgx.ErrNoRows` to `ErrNotFound` and a
+  `23505` violation on `ux_vehicles_license_plate` (a pre-existing index, predating this
+  feature) to `ErrDuplicatePlate`, same two-layer defense (application pre-check +
+  database-constraint mapping) as `customer`'s document uniqueness.
 - **Seed**: [docs/seed.sql](../docs/seed.sql) populates sample data via manual `psql`: one
   administrative user (`admin@workshop.local`) with a bcrypt hash produced by pgcrypto's
   `crypt()` at insert time (plaintext dev-only password documented only in the seed file's
-  SQL comment, never in Go code or logs), and four sample customers with normalized
-  CPF/CNPJ documents.
-- **Other entities** (`vehicles`, `products`, `services`, `service_orders`, `quotes`,
+  SQL comment, never in Go code or logs), four sample customers with normalized CPF/CNPJ
+  documents, and five sample vehicles with normalized Mercosul-format plates (one
+  `INACTIVE`, owned by the one `INACTIVE` sample customer — illustrating that inactivating a
+  customer doesn't retroactively touch its pre-existing vehicles' own status).
+- **Other entities** (`products`, `services`, `service_orders`, `quotes`,
   `service_order_history`, `audit_services`): schema exists in
   [docs/schema.sql](../docs/schema.sql) but still has no Go repository.
 
@@ -247,17 +329,26 @@ Per-feature error handling, as implemented today:
   never leaking internal error text to the client. HTTP status mapping: `400` for a
   malformed body or any validation failure (structural or business — **400 was chosen over
   422** for simplicity), `404` not found, `409` duplicate document/email.
-- There is no centralized error-handling middleware in either feature; each handler
-  performs its own `errors.Is` mapping. Whether a shared error-mapping helper is worth
-  extracting (on top of resolving the envelope duplication above) is **to be defined**.
+- `vehicle/httpsupport.go`'s `writeServiceError` follows the identical pattern, mapping
+  `ErrNotFound` → `404 NOT_FOUND`, `ErrCustomerNotFound` → `404 CUSTOMER_NOT_FOUND` (a
+  distinct code from the vehicle's own not-found, same reasoning as splitting
+  `DUPLICATE_DOCUMENT`/`DUPLICATE_EMAIL`), `ErrCustomerInactive` → `409 CUSTOMER_INACTIVE`
+  (a state conflict, not a malformed request — kept `409`, not `400`, on purpose),
+  `ErrDuplicatePlate` → `409 DUPLICATE_LICENSE_PLATE`, `ErrInvalidPlate`/`ErrInvalidYear` →
+  `400 VALIDATION_ERROR`. `CUSTOMER_NOT_FOUND` is built from `apierror.Error`'s exported
+  fields directly rather than `apierror.NotFound(...)`, since that constructor hardcodes its
+  code to `"NOT_FOUND"` — this required no change to the shared `apierror` package itself.
+- There is no centralized error-handling middleware in any feature; each handler performs
+  its own `errors.Is` mapping. Whether a shared error-mapping helper is worth extracting (on
+  top of resolving the envelope duplication above) is **to be defined**.
 - **Startup fatal errors**: `main.go` uses `log.Fatal`/`log.Fatalf` for missing required
   configuration (`DATABASE_URL`, `JWT_SECRET`, malformed `JWT_TTL`), database connection
   failure, and `http.ListenAndServe` failure.
 
 ## 9. Testing strategy
 
-Both implemented features follow the convention in [CLAUDE.md](../CLAUDE.md) §11 — tests
-alongside the code, integration tests in `internal/handlers_test/`, each independently
+All three implemented features follow the convention in [CLAUDE.md](../CLAUDE.md) §11 —
+tests alongside the code, integration tests in `internal/handlers_test/`, each independently
 skipping without `DATABASE_URL` — but differ, deliberately, on test library choice:
 
 - **auth**: stdlib `testing` only (no test library adopted — considered and explicitly
@@ -279,12 +370,24 @@ skipping without `DATABASE_URL` — but differ, deliberately, on test library ch
     CNPJ, duplicate document/email (create and update), pagination, logical-deactivation-
     not-physical-delete, and a test proving the database unique constraint (not just the
     application pre-check) catches a simulated race condition.
-- **Coverage targets**: none set numerically for either feature — "every new feature needs
+- **vehicle**: stdlib `testing` + `testify`, following `customer`'s choice (the feature it
+  most resembles, per `specs/vehicle-management/requirements.md` §8's application of
+  `customer-management`'s "reuse what the closest feature already uses" logic).
+  - Unit: `internal/features/vehicle/plate_test.go` (legacy/Mercosul table-driven cases),
+    `internal/features/vehicle/{model,service}_test.go` against a hand-written in-memory
+    `fakeRepository` and `fakeCustomerLookup` — no mocking framework.
+  - Integration: `internal/handlers_test/vehicle_test.go` — every route asserted `401`
+    without a bearer token, full CRUD flow, invalid plate (both formats rejected), year out
+    of range, duplicate plate (create), customer not found (404)/inactive (409) on create,
+    pagination on both list endpoints, logical-deactivation-not-physical-delete, and the
+    same database-unique-constraint-catches-a-race test `customer_test.go` has for its own
+    uniqueness rule.
+- **Coverage targets**: none set numerically for any feature — "every new feature needs
   tests" (`CLAUDE.md` §11), not a percentage gate.
 - CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs `go build/vet/test
-  ./...` with no Postgres service configured, so both features' integration tests currently
-  run in **skip mode** in CI; provisioning a Postgres service for CI to exercise them for
-  real remains **to be defined**.
+  ./...` with no Postgres service configured, so all three features' integration tests
+  currently run in **skip mode** in CI; provisioning a Postgres service for CI to exercise
+  them for real remains **to be defined**.
 
 ## 10. Identified architectural decisions
 
@@ -353,6 +456,31 @@ their source:
     the routes now would be a behavioral change (breaking any unauthenticated client/test
     already exercising them) made silently during a branch merge, which `CLAUDE.md` §17
     explicitly prohibits. Whether/when to wrap them is an open decision, not a bug.
+17. **All seven Vehicle Management routes are wrapped in `middleware.RequireAuth`**, unlike
+    Customer Management. This is not an inconsistency to reconcile: Vehicle Management's own
+    requirements (RNF02, "todas as rotas administrativas exigem JWT") explicitly demand it,
+    unlike Customer Management's requirements, which explicitly deferred JWT to a future
+    Security feature (decision 16). `vehicle.RegisterRoutes` takes the same
+    `middleware.RequireAuth(tokens)` value already built for auth's `/me` route as a plain
+    `func(http.Handler) http.Handler` parameter — no new middleware/JWT code, and `vehicle`
+    itself never imports `internal/shared/middleware`. This does not retroactively wrap the
+    Customer Management routes; decision 16 remains open on its own.
+18. **The customer-scoped vehicle listing lives at `GET /api/v1/vehicles/customer/{customerId}`,
+    not the originally-specified `GET /api/v1/customers/{customerId}/vehicles`.** Discovered
+    during implementation (the process panics at startup, not caught by `go build`/`go vet`/
+    `go test`): Go 1.22's `http.ServeMux` requires that any two patterns matching an
+    overlapping path set have one strictly more specific than the other, and
+    `/api/v1/customers/{customerId}/vehicles` is genuinely ambiguous against customer's own
+    pre-existing `GET /api/v1/customers/document/{document}` — both would match
+    `/api/v1/customers/document/vehicles`. The fix keeps the route inside `vehicle`'s own
+    `/api/v1/vehicles/` path prefix (mirroring the already-working
+    `GET /api/v1/vehicles/plate/{plate}`), so it can never collide with a route any other
+    feature registers, without touching customer's already-shipped route. See
+    `specs/vehicle-management/design.md` §1.5 for the full account. This is a reusable
+    lesson for any future feature that considers nesting a route under another feature's URL
+    prefix: verify the actual `*http.ServeMux` registration succeeds (a real process start,
+    not just `go build`/`go vet`/`go test`), don't assume path-string composition is
+    automatically conflict-free.
 
 Any architectural decision outside this list (migration tool, linter beyond
 `gofmt`/`go vet`, authorization/roles, refresh tokens, OpenAPI/Swagger documentation for

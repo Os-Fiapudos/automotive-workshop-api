@@ -32,8 +32,14 @@
 | year        | number | Vehicle manufacturing/model year.                                      |
 | color       | string | Vehicle's predominant color.                                           |
 | customerId  | uuid   | Reference to the owning `Customer`.                                    |
+| status      | string | Vehicle situation: `ACTIVE` or `INACTIVE`. Starts `ACTIVE`; moves to `INACTIVE` only via explicit deactivation (never back automatically). See [specs/vehicle-management](../specs/vehicle-management/). |
 | createdAt   | string | Record creation date/time, generated automatically.                    |
 | updatedAt   | string | Record last update date/time, generated automatically.                 |
+
+> **Future integration note**: once Service Order exists, opening a new service order must
+> validate that the referenced vehicle's `status` is `ACTIVE`. This rule is documented here
+> and in `specs/vehicle-management/requirements.md` §7.1, but is not implemented until the
+> Service Order feature itself is specified.
 
 ## Product
 
@@ -175,3 +181,9 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 | Field         | Type   | Description                                                              |
 | ------------- | ------ | ---------------------------------------------------------------------------- |
 | customerStatus | string | Possible values for `Customer.status`: `ACTIVE`, `INACTIVE`. |
+
+### VehicleStatus
+
+| Field        | Type   | Description                                                 |
+| ------------ | ------ | ------------------------------------------------------------- |
+| vehicleStatus | string | Possible values for `Vehicle.status`: `ACTIVE`, `INACTIVE`. |
