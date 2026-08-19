@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"automotive-workshop-api/internal/features/auth"
+	"automotive-workshop-api/internal/features/servicecatalog"
 	"automotive-workshop-api/internal/shared/database"
 	"automotive-workshop-api/internal/shared/httpx"
 	"automotive-workshop-api/internal/shared/middleware"
@@ -40,6 +41,7 @@ func main() {
 
 	tokens := token.NewManager(secret, ttl)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewRepository(pool), tokens))
+	catalogHandler := servicecatalog.NewHandler(servicecatalog.NewCatalog(servicecatalog.NewRepository(pool)))
 	requireAuth := middleware.RequireAuth(tokens)
 
 	mux := http.NewServeMux()
@@ -53,6 +55,11 @@ func main() {
 
 	// Protected routes.
 	mux.Handle("GET /api/v1/auth/me", requireAuth(http.HandlerFunc(authHandler.Me)))
+	mux.Handle("POST /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.Create)))
+	mux.Handle("GET /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.List)))
+	mux.Handle("GET /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Get)))
+	mux.Handle("PATCH /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Update)))
+	mux.Handle("DELETE /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Delete)))
 
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))
