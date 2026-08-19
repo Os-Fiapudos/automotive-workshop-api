@@ -26,12 +26,14 @@ The full domain model (entities, fields, enums) is documented in
 [docs/schema.sql](docs/schema.sql).
 
 **Current state**: the skeleton stage is over. The HTTP server (stdlib `net/http`, no
-framework) exposes `/health` plus the first full vertical slice, **auth**
-(`internal/features/auth/`): login and a protected `/me` route, backed by a real Postgres
-connection (`pgx/v5` via `internal/shared/database`), with unit tests alongside the code
-and integration tests in `internal/handlers_test/`. The database schema and sample data
-modeled in `docs/` are now actually consumed by this feature (`users` table). Every other
-business entity (Customer, Vehicle, ServiceOrder, etc.) is still schema/docs only, with no
+framework) exposes `/health` plus two full vertical slices: **auth**
+(`internal/features/auth/`, login and a protected `/me` route) and the **service catalog**
+(`internal/features/servicecatalog/`, protected CRUD over `/api/v1/services` with logical
+deletion), both backed by a real Postgres connection (`pgx/v5` via
+`internal/shared/database`), with unit tests alongside the code and integration tests in
+`internal/handlers_test/`. The database schema and sample data modeled in `docs/` are
+actually consumed by these features (`users` and `services` tables). Every other business
+entity (Customer, Vehicle, ServiceOrder, Quote, etc.) is still schema/docs only, with no
 corresponding Go feature yet — `internal/features/user/` remains an empty placeholder.
 
 ## 2. Technology stack
@@ -64,12 +66,14 @@ cmd/api/main.go            → HTTP entrypoint, wires up the server and register
 internal/features/         → one folder per business feature (vertical slice)
   features/auth/           → implemented slice: handler + service + repository + model
                               (login, /me; unit-tested)
+  features/servicecatalog/ → implemented slice: service catalog CRUD
+                              (/api/v1/services; unit-tested)
   features/user/           → placeholder slice: only has doc.go, no implementation yet
 internal/shared/            → cross-cutting code reused across features — implemented:
                               database (pgx pool), token (JWT), middleware (auth),
                               httpx (JSON/error envelope)
-internal/handlers_test/    → handler/integration tests — implemented (auth_test.go),
-                              skipped when DATABASE_URL is unset
+internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
+                              servicecatalog_test.go), skipped when DATABASE_URL is unset
 docs/                      → domain model (entities.md) and PostgreSQL schema
                               (schema.sql, seed.sql)
 .github/workflows/ci.yml   → CI pipeline
@@ -88,13 +92,13 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 (handler/controller, service, repository, model) together — instead of splitting by
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
-by `internal/features/auth/`; `internal/features/user/` remains an unimplemented
-placeholder folder.
+by `internal/features/auth/` and `internal/features/servicecatalog/`;
+`internal/features/user/` remains an unimplemented placeholder folder.
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`,
 pgx pool), authentication middleware (`internal/shared/middleware`), and JWT issuing/
-verification (`internal/shared/token`) — introduced by the auth feature and reusable by
-future features. See [specs/architecture.md](specs/architecture.md) for the full,
+verification (`internal/shared/token`) — introduced by the auth feature and already reused
+as-is by the service catalog feature, which added no new shared code. See [specs/architecture.md](specs/architecture.md) for the full,
 code-derived description.
 
 ## 5. How to run the application
@@ -135,7 +139,7 @@ go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
 tests alongside each feature/shared package (`internal/features/auth/*_test.go`,
-`internal/shared/*/*_test.go`) plus the integration tests in
+`internal/features/servicecatalog/*_test.go`, `internal/shared/*/*_test.go`) plus the integration tests in
 `internal/handlers_test/`. The integration tests self-skip (`t.Skip`, not fail) when
 `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
@@ -191,6 +195,9 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   protects routes not explicitly listed as public in `cmd/api/main.go`. See
   [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
   authorization (403) is still **to be defined** — not implemented in the MVP.
+- **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
+  defined by the service catalog listing), leaving room for pagination metadata later.
+  Reuse this shape for new list endpoints instead of returning a bare JSON array.
 - **To be defined**: general request/handler error-handling convention beyond the envelope
   above (e.g. a centralized error-mapping helper across features), logging conventions
   beyond BR5 (never log passwords/hashes/tokens), and API versioning conventions.
@@ -348,6 +355,7 @@ flow, the `specs/<feature>/requirements.md|design.md|tasks.md` organization) is 
 [specs/README.md](specs/README.md). The current system architecture, documented
 exclusively from the existing code, is in
 [specs/architecture.md](specs/architecture.md) — keep it up to date when a new feature
-changes the real architecture. No feature folder exists in `specs/` yet; any request to
-implement a feature without a corresponding specification should be treated as ambiguous:
-ask for the requirements before writing code.
+changes the real architecture. Two feature folders exist today (`specs/auth/`,
+`specs/service-catalog/`); any request to implement a feature without a corresponding
+specification should be treated as ambiguous: ask for the requirements before writing
+code.
