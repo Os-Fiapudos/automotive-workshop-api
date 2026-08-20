@@ -47,6 +47,7 @@
 | unitPrice     | number | Unit sale price of the product.                                            |
 | currentStock  | number | Quantity currently available in stock at query time.                       |
 | type          | string | Product category: `PART` (replacement part) or `SUPPLY` (consumable material). |
+| status        | string | Product situation: `ACTIVE` or `INACTIVE`. Starts `ACTIVE`; moved to `INACTIVE` only via explicit deactivation (logical delete). |
 | createdAt     | string | Record creation date/time, generated automatically.                        |
 | updatedAt     | string | Record last update date/time, generated automatically.                     |
 
@@ -165,6 +166,12 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 | Field       | Type   | Description                                          |
 | ----------- | ------ | ------------------------------------------------------- |
 | productType | string | Possible values for `Product.type`: `PART` or `SUPPLY`. |
+
+### ProductStatus
+
+| Field         | Type   | Description                                                              |
+| ------------- | ------ | ---------------------------------------------------------------------------- |
+| productStatus | string | Possible values for `Product.status`: `ACTIVE`, `INACTIVE`.                 |
 
 ### CustomerDocumentType
 

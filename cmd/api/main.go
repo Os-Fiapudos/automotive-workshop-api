@@ -8,6 +8,7 @@ import (
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
+	"automotive-workshop-api/internal/features/product"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
@@ -38,6 +39,9 @@ func main() {
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
 	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
 
+	productRepository := product.NewPostgresProductRepository(pool)
+	productService := product.NewProductService(productRepository)
+
 	router := http.NewServeMux()
 
 	// Public routes (auth FR6).
@@ -49,6 +53,9 @@ func main() {
 
 	// Protected routes.
 	router.Handle("GET /api/v1/auth/me", requireAuth(http.HandlerFunc(authHandler.Me)))
+
+	// Product management routes (protected via requireAuth per RNF02).
+	product.RegisterRoutes(router, productService, requireAuth)
 
 	// Customer Management routes remain unauthenticated for now, matching
 	// specs/customer-management/requirements.md §7.2 ("implemented
