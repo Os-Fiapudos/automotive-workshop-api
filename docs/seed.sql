@@ -13,33 +13,41 @@
 BEGIN;
 
 -- ==== Customers ====
+-- document is stored normalized (digits only) and document_type/status are
+-- required as of the Customer Management feature — see
+-- specs/customer-management/. Documents below are real, check-digit-valid
+-- CPF/CNPJ numbers (not just plausible-looking strings), matching what the
+-- application itself would persist.
 
-INSERT INTO customers (id, name, document, phone, email) VALUES
-    ('a0000000-0000-0000-0000-000000000001', 'João Pedro Silva',        '123.456.789-00', '(11) 91234-5678', 'joao.silva@example.com'),
-    ('a0000000-0000-0000-0000-000000000002', 'Maria Fernanda Costa',    '987.654.321-00', '(11) 99876-5432', 'maria.costa@example.com'),
-    ('a0000000-0000-0000-0000-000000000003', 'Transportadora Rota Sul Ltda', '12.345.678/0001-90', '(11) 3333-4444', 'contato@rotasul.com.br'),
-    ('a0000000-0000-0000-0000-000000000004', 'Carlos Eduardo Almeida',  '111.222.333-44', '(11) 98888-1111', NULL)
+INSERT INTO customers (id, name, document, document_type, phone, email, status) VALUES
+    ('a0000000-0000-0000-0000-000000000001', 'João Pedro Silva',        '12345678909',     'CPF',  '(11) 91234-5678', 'joao.silva@example.com', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000002', 'Maria Fernanda Costa',    '98765432100',     'CPF',  '(11) 99876-5432', 'maria.costa@example.com', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000003', 'Transportadora Rota Sul Ltda', '12345678000195', 'CNPJ', '(11) 3333-4444', 'contato@rotasul.com.br', 'ACTIVE'),
+    ('a0000000-0000-0000-0000-000000000004', 'Carlos Eduardo Almeida',  '11122233396',     'CPF',  '(11) 98888-1111', NULL, 'INACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====
+-- status is required as of the Service Order Opening feature — see
+-- specs/service-order-opening/. Vehicle 5 is kept INACTIVE to exercise the
+-- rejection path (its owner, customer 4, is also INACTIVE).
 
-INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id) VALUES
-    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001'),
-    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002'),
-    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003'),
-    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004')
+INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
+    ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000002', 'DEF4E56', 'Volkswagen', 'Gol',    2020, 'Silver','a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000003', 'GHI7F89', 'Chevrolet',  'Onix',   2022, 'Black', 'a0000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000004', 'JKL0G12', 'Mercedes-Benz', 'Sprinter', 2019, 'White', 'a0000000-0000-0000-0000-000000000003', 'ACTIVE'),
+    ('b0000000-0000-0000-0000-000000000005', 'MNO3H45', 'Honda',      'Civic',  2021, 'Gray',  'a0000000-0000-0000-0000-000000000004', 'INACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Products ====
 
-INSERT INTO products (id, name, description, unit_price, current_stock, type) VALUES
-    ('c0000000-0000-0000-0000-000000000001', 'Oil Filter',            'Engine oil filter, general use.',                  35.90,  42, 'PART'),
-    ('c0000000-0000-0000-0000-000000000002', 'Engine Oil 5W30 (1L)',  'Synthetic engine oil, 1-liter package.',           48.50, 8,  'SUPPLY'),
-    ('c0000000-0000-0000-0000-000000000003', 'Brake Pad',             'Set of front brake pads.',                         129.90, 15, 'PART'),
-    ('c0000000-0000-0000-0000-000000000004', 'Timing Belt',           'Timing belt for the distribution system.',         89.90,  6,  'PART'),
-    ('c0000000-0000-0000-0000-000000000005', 'DOT4 Brake Fluid',      'Brake fluid, 500ml package.',                      22.00,  3,  'SUPPLY'),
-    ('c0000000-0000-0000-0000-000000000006', 'H4 Headlight Bulb',     'Halogen bulb for the front headlight.',            18.50,  25, 'PART')
+INSERT INTO products (id, name, description, unit_price, current_stock, type, status) VALUES
+    ('c0000000-0000-0000-0000-000000000001', 'Oil Filter',            'Engine oil filter, general use.',                  35.90,  42, 'PART',   'ACTIVE'),
+    ('c0000000-0000-0000-0000-000000000002', 'Engine Oil 5W30 (1L)',  'Synthetic engine oil, 1-liter package.',           48.50, 8,  'SUPPLY', 'ACTIVE'),
+    ('c0000000-0000-0000-0000-000000000003', 'Brake Pad',             'Set of front brake pads.',                         129.90, 15, 'PART',   'ACTIVE'),
+    ('c0000000-0000-0000-0000-000000000004', 'Timing Belt',           'Timing belt for the distribution system.',         89.90,  6,  'PART',   'ACTIVE'),
+    ('c0000000-0000-0000-0000-000000000005', 'DOT4 Brake Fluid',      'Brake fluid, 500ml package.',                      22.00,  3,  'SUPPLY', 'ACTIVE'),
+    ('c0000000-0000-0000-0000-000000000006', 'H4 Headlight Bulb',     'Halogen bulb for the front headlight.',            18.50,  25, 'PART',   'ACTIVE')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Services ====
@@ -69,6 +77,16 @@ INSERT INTO service_orders (id, customer_id, vehicle_id, opened_at, status, note
     ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', now() - interval '1 day',   'EM_DIAGNOSTICO',       'Van with intermittent failure to start.'),
     ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000005', now(),                       'RECEBIDA',             'Customer brought it in for alignment and balancing.')
 ON CONFLICT (id) DO NOTHING;
+
+-- ==== Service Order Requested Services ====
+-- Initial demand recorded at order-opening time (see
+-- specs/service-order-opening/) — not the priced quote. Order 5 (RECEBIDA)
+-- is the only one still at that stage; earlier orders had their demand
+-- already superseded by a generated quote.
+
+INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES
+    ('e0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000002')
+ON CONFLICT DO NOTHING;
 
 -- ==== Quotes ====
 -- 1:1 with service_orders. status/responded_at consistent with the service order status.

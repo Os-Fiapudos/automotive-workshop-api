@@ -12,65 +12,108 @@ real architecture of the system.
 ## 1. Architecture overview
 
 The system is a single Go binary (`cmd/api`) that starts an HTTP server using only the
-standard library (`net/http`, Go 1.22 method-pattern routing), with no web framework. It
-exposes `GET /health`, the **auth** feature (`POST /api/v1/auth/login`,
-`GET /api/v1/auth/me`), and the **service catalog** feature (`POST|GET /api/v1/services`,
-`GET|PATCH|DELETE /api/v1/services/{id}`, all protected).
+standard library's `net/http` (Go 1.22+'s method-aware `http.ServeMux` patterns), with no
+third-party web framework/router. It exposes `GET /health` plus the implemented business
+features:
+- **auth** (`internal/features/auth/`, [specs/auth/](auth/)) — `POST /api/v1/auth/login`
+  and the protected `GET /api/v1/auth/me`.
+- **customer** (`internal/features/customer/`, [specs/customer-management/](customer-management/))
+  — the six Customer Management endpoints under `/api/v1/customers`.
+- **servicecatalog** (`internal/features/servicecatalog/`, [specs/service-catalog/](service-catalog/design.md))
+  — the five protected service catalog endpoints: `POST|GET /api/v1/services` and
+  `GET|PATCH|DELETE /api/v1/services/{id}`.
 
-The folder organization follows the **cmd/ + internal/** pattern, with the **vertical
-slice** (organization by feature) demonstrated end to end by `internal/features/auth/` and
-`internal/features/servicecatalog/`: handler, service, repository, and model all live
-together in each package. `internal/features/user/` remains a placeholder (only `doc.go`),
-still to be implemented by a future specification.
+`internal/features/product/` and `internal/features/service-order/` are also present in the
+code but are not yet described in this document; the sections below cover `auth`,
+`customer`, and `servicecatalog` only.
 
-`internal/shared/` now holds genuinely cross-cutting code introduced by the auth feature:
-a Postgres connection pool (`shared/database`), JWT issuing/verification
-(`shared/token`), the authentication middleware (`shared/middleware`), and the JSON
-response/error envelope helpers (`shared/httpx`). The service catalog feature added no new
-shared code — it reuses all four. No feature imports another feature's package directly —
-`auth` and `servicecatalog` depend only on `shared/*`, per the architectural rule in
-[CLAUDE.md](../CLAUDE.md) §9.
+The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
+(organization by feature)** as the adopted convention: each business feature gathers
+handler, service, repository, and model in a single package under
+`internal/features/<feature>/`. `internal/features/auth/`, `internal/features/customer/`,
+and `internal/features/servicecatalog/` implement this end to end (`customer` organized
+internally by responsibility file — `model.go`, `dto.go`, `repository.go`, `service.go`,
+`handler.go`, `errors.go` — rather than by use case; see
+`specs/customer-management/design.md` §1.1 for the rationale).
+`internal/features/user/` remains an empty placeholder (`doc.go` only) — note this is
+unrelated to auth's `users` database table; it's a distinct, not-yet-specified future
+feature.
+
+`internal/shared/` holds cross-cutting code from those features: a single shared Postgres
+connection pool (`shared/database`, first introduced by auth, now used by every feature's
+repositories), JWT issuing/verification (`shared/token`) and the authentication middleware
+(`shared/middleware`) from auth, and CPF/CNPJ validation (`shared/document`) and the
+environment config loader (`shared/config`) from Customer Management. The service catalog
+added no new shared code — it reuses `database`, `apierror`, `httpx.JSON`, and `middleware`
+as-is. **Auth and Customer Management each introduced their own JSON error-envelope
+package** (`shared/httpx` from auth, `shared/apierror` from Customer Management) — the
+service catalog adopted `apierror`, leaving `auth` as the only feature on `httpx`; the
+remaining duplication is flagged, not resolved, in §8 below.
+
+Communication is real for every implemented feature: `main.go` builds the shared pool and
+JWT manager, then wires `auth.NewHandler(...)` (routes: login public, `/me` behind
+`middleware.RequireAuth`), the five `servicecatalog` routes (all behind `RequireAuth`), and
+`customer.RegisterRoutes(...)` (all six routes currently public — see §10, decision 16)
+onto one `*http.ServeMux`.
 
 ## 2. Main components
 
 | Component | Path | State |
 | --- | --- | --- |
-| HTTP entrypoint | `cmd/api/main.go` | Implemented — reads `JWT_SECRET`/`JWT_TTL`/`DATABASE_URL`, opens the DB pool, wires the `auth` and `servicecatalog` handlers and the `RequireAuth` middleware, registers `/health`, the `auth` routes, and the five catalog routes, starts the server on `:8080`. |
-| `auth` feature | `internal/features/auth/` | Implemented — `handler.go` (HTTP), `service.go` (login/lookup logic), `repository.go` (pgx queries), `model.go` (`User`). Unit-tested (`handler_test.go`, `service_test.go`). |
-| `servicecatalog` feature | `internal/features/servicecatalog/` | Implemented — `handler.go` (five REST endpoints), `service.go` (`Catalog`: catalog business rules), `repository.go` (pgx queries over `services`), `model.go` (`Service`). Unit-tested (`handler_test.go`, `service_test.go`). See [specs/service-catalog/](service-catalog/design.md). |
-| `user` feature | `internal/features/user/` | Not implemented — only `doc.go` declaring the package; still a placeholder for a future feature. |
+| HTTP entrypoint | `cmd/api/main.go` | Implemented — loads config (`DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT`), opens the shared Postgres pool, wires `auth`, `customer`, and `servicecatalog`, registers `/health`, the public/protected auth routes, the five catalog routes, and the customer routes, starts the server. |
+| `auth` feature | `internal/features/auth/` | Implemented — `handler.go` (HTTP), `service.go` (login/lookup logic), `repository.go` (pgx queries), `model.go` (`User`). Unit-tested (`handler_test.go`, `service_test.go`). See `specs/auth/`. |
+| `customer` feature | `internal/features/customer/` | Implemented — model, DTOs, Postgres repository, service, HTTP handlers for all 6 endpoints. See `specs/customer-management/`. |
+| `servicecatalog` feature | `internal/features/servicecatalog/` | Implemented — `handler.go` (five REST endpoints), `service.go` (`Catalog`: catalog business rules), `repository.go` (pgx queries over `services`), `model.go` (`Service`). Unit-tested (`handler_test.go`, `service_test.go`). See `specs/service-catalog/`. |
+| `user` feature | `internal/features/user/` | Not implemented — only `doc.go` declaring the package (placeholder for a future feature; unrelated to auth's `users` table). |
 | `features` package (root) | `internal/features/doc.go` | Not implemented — only a package comment. |
-| Shared: database | `internal/shared/database/` | Implemented — `Connect` opens a `pgxpool.Pool` from a `postgres://` URL and validates it with a ping. |
-| Shared: token | `internal/shared/token/` | Implemented — `Manager` issues and verifies HS256 JWTs (`golang-jwt/jwt/v5`). Unit-tested (`token_test.go`), including alg-confusion regression coverage. |
-| Shared: middleware | `internal/shared/middleware/` | Implemented — `RequireAuth` extracts and verifies the `Authorization: Bearer` header, injects the user id into the request context, or responds 401. Unit-tested (`auth_test.go`). |
-| Shared: httpx | `internal/shared/httpx/` | Implemented — `JSON`/`Error` helpers producing the project-wide `{"error":{"code","message"}}` envelope. Unit-tested (`respond_test.go`). |
-| Handler/integration tests | `internal/handlers_test/` | Implemented — `auth_test.go` (login, `/me`) and `servicecatalog_test.go` (catalog CRUD, logical deletion, JWT protection) over real HTTP against the compose Postgres; skipped when `DATABASE_URL` is unset. |
-| Database schema | `docs/schema.sql` | Implemented as plain SQL, including the `users` table and the `services.active` flag / `GENERATED BY DEFAULT` code added by the catalog feature; applied automatically by Postgres on initial volume creation and consumed by `shared/database` + the feature repositories. |
-| Sample data | `docs/seed.sql` | Implemented as plain SQL, including one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`); applied manually via `psql`. |
-| Domain model | `docs/entities.md` | Domain documentation (Customer, Vehicle, Product, Service, ServiceOrder, Quote, ServiceOrderHistory, AuditServices, **User**). `User` and `Service` have corresponding Go code so far. |
-| Local environment | `docker-compose.yml`, `Dockerfile` | Implemented — orchestrates `db` (Postgres), `adminer`, and `api`; `api` requires `JWT_SECRET` (fails fast via compose variable substitution if unset). |
+| Shared: `database` | `internal/shared/database/` | Implemented — `NewPool` builds and pings a `pgxpool.Pool` from a `postgres://` URL. Used by every feature's repositories. (Consolidated from two independent implementations, `NewPool` and `Connect`, that each branch introduced — see §10.) |
+| Shared: `token` | `internal/shared/token/` | Implemented — `Manager` issues and verifies HS256 JWTs (`golang-jwt/jwt/v5`). Unit-tested (`token_test.go`), including alg-confusion regression coverage. |
+| Shared: `middleware` | `internal/shared/middleware/` | Implemented — `RequireAuth` extracts and verifies the `Authorization: Bearer` header, injects the user id into the request context, or responds 401. Unit-tested (`auth_test.go`). |
+| Shared: `httpx` | `internal/shared/httpx/` | Implemented — `JSON`/`Error` helpers producing `{"error":{"code","message"}}`. `Error` is used by `auth` and `middleware`; `JSON` is also the success-response writer of `servicecatalog`. Unit-tested (`respond_test.go`). See §8 re: overlap with `apierror`. |
+| Shared: `apierror` | `internal/shared/apierror/` | Implemented — the JSON error envelope and HTTP status mapping used by `customer` and `servicecatalog` (`{"error":{"code","message","details"?}}`). See §8 re: overlap with `httpx`. |
+| Shared: `document` | `internal/shared/document/` | Implemented — CPF/CNPJ normalize/detect-type/validate (check-digit algorithm, no third-party library), including the alphanumeric CNPJ format. |
+| Shared: `config` | `internal/shared/config/` | Implemented — reads `DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT` from the environment. |
+| Handler/integration tests | `internal/handlers_test/` | Implemented — `auth_test.go`, `customer_test.go`, and `servicecatalog_test.go`, each driving real HTTP against a real Postgres, each independently skipping (not failing) without `DATABASE_URL`/a reachable database. |
+| Database schema | `docs/schema.sql` | Implemented as plain SQL; consumed by the feature repositories (`users` for auth, `customers` — with its `document_type`/`status` columns/enums — for Customer Management, `services` — with the `active` flag and `GENERATED BY DEFAULT` code added by the catalog — for the service catalog). |
+| Sample data | `docs/seed.sql` | Implemented as plain SQL; applied manually via `psql`. Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`), four sample customers, and six sample services (one deliberately inactive). |
+| Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User` and the `Service.active` field. `Customer`, `User`, and `Service` have a corresponding Go implementation. |
+| API documentation | `docs/openapi.yaml` | Implemented for the Customer Management endpoints only (schemas, pagination, error envelope). The auth and service catalog endpoints are not documented here — both `specs/auth/requirements.md` and `specs/service-catalog/requirements.md` scoped RNF10 out as a separate future feature. |
+| Local environment | `docker-compose.yml`, `Dockerfile` | Implemented — orchestrates `db` (Postgres), `adminer`, and `api`; `api` now requires `JWT_SECRET` (fails fast via compose variable substitution if unset). |
 | CI | `.github/workflows/ci.yml` | Implemented — runs `go build ./...`, `go vet ./...`, `go test ./...`. |
 
 ## 3. Responsibilities
 
-- **`cmd/api/main.go`**: the process's entrypoint only. Reads configuration from the
-  environment (`JWT_SECRET`, `JWT_TTL`, `DATABASE_URL`), fails fast (`log.Fatal`) if
-  required configuration is missing or the database connection fails, builds the shared
-  dependencies (token manager, DB pool), wires the `auth` feature, and registers routes —
-  public ones directly, protected ones wrapped in `middleware.RequireAuth`. No business
-  logic, request parsing, or data access lives in `main.go`.
-- **`internal/features/auth/`**: the first concrete vertical slice.
-  - `handler.go` — decodes/validates HTTP input, translates service errors to the standard
-    HTTP error envelope, never logs credentials or tokens.
+- **`cmd/api/main.go`**: the process's single entrypoint. Loads config
+  (`internal/shared/config`), opens the shared Postgres pool (`internal/shared/database`),
+  builds the JWT token manager and both features' repositories/services, builds one
+  `*http.ServeMux`, registers `/health` inline, registers auth's public/protected routes,
+  and delegates every `/api/v1/customers*` route to `customer.RegisterRoutes`. It stays
+  thin — no business logic, request parsing, or data access lives in `main.go` itself, per
+  `CLAUDE.md` §9.4.
+- **`internal/features/auth/`**:
+  - `handler.go` — decodes/validates HTTP input, translates service errors to the HTTP
+    error envelope (`httpx`), never logs credentials or tokens.
   - `service.go` — `Login` (credential check + token issuance) and `UserByID` (identity
     lookup for `/me`); depends only on the `UserFinder`/`TokenIssuer` interfaces it
     declares, not on concrete `shared` types, so it stays unit-testable with fakes.
   - `repository.go` — parameterized `pgx` queries against `users`; maps "no rows" to
     `ErrUserNotFound`.
   - `model.go` — the `User` struct mirroring the `users` table / `docs/entities.md`.
-- **`internal/features/servicecatalog/`**: the second vertical slice, same layer split.
+- **`internal/features/customer/`**: (see `specs/customer-management/design.md` §1.1 for
+  the full rationale for this file layout)
+  - `handler.go` — HTTP layer: request parsing/validation, DTO ⇄ domain conversion, status
+    code mapping (`apierror`). Depends on `service.go`.
+  - `service.go` — one method per use case, orchestrates domain + repository. Depends on
+    the `CustomerRepository` interface (not the concrete Postgres type).
+  - `repository.go` — the `CustomerRepository` interface and its `pgx`-backed
+    implementation. Depends on `model.go` and `internal/shared/document`.
+  - `model.go` — the `Customer` aggregate and its invariants (always starts `ACTIVE`,
+    document only settable through validated construction, no `Activate` method).
+  - `dto.go` — HTTP request/response shapes, independent of the domain type.
+- **`internal/features/servicecatalog/`**: same layer split as `auth`.
   - `handler.go` — decodes/validates HTTP input (JSON body, `{id}` UUID, `active` query
-    param), maps business errors to 400/404/409/500, never returns an internal error text.
+    param), maps business errors to 400/404/409/500 through `httpx`, never returns an
+    internal error text.
   - `service.go` — `Catalog`, the catalog's business rules (required name, non-negative
     price, positive estimated time and code, non-empty update); depends only on the `Store`
     interface it declares, so it is unit-testable with a fake.
@@ -78,25 +121,24 @@ shared code — it reuses all four. No feature imports another feature's package
     caller-supplied-or-generated `code` on insert and the `23505` → `ErrCodeAlreadyExists`
     mapping.
   - `model.go` — the `Service` struct mirroring the `services` table / `docs/entities.md`.
-- **`internal/features/user/`**: intended responsibility unchanged from before (folder
-  convention + package comment) — still no concrete implementation.
-- **`internal/shared/`**: now has concrete content, one subpackage per cross-cutting
-  concern (`database`, `token`, `middleware`, `httpx`) as described in the components table
-  above. Each subpackage is imported by `auth` and by `main.go`; none is feature-specific.
-- Responsibility split within a feature (handler vs. service vs. repository vs. model) is
-  now observable and follows the pattern above: handler = HTTP concerns and error mapping,
-  service = business rules against small interfaces, repository = SQL, model = data shape.
-  Future features are expected to follow the same split.
+- **`internal/features/user/`**: intended responsibility unchanged (folder convention +
+  package comment) — still no concrete implementation.
+- **`internal/shared/`**: genuinely cross-cutting code only (`CLAUDE.md` §9.3), each
+  subpackage imported only by the feature(s) that need it and by `main.go`: `database`
+  (every feature), `token`/`middleware` (auth, plus `middleware` for the catalog routes),
+  `httpx` (auth's error envelope, plus its `JSON` writer used by the service catalog's
+  success responses),
+  `document`/`config`/`apierror` (customer's CPF/CNPJ validation, config loading, and error
+  envelope respectively).
+- Responsibility split within a feature (handler = HTTP concerns and error mapping, service
+  = business rules against interfaces/repository, repository = SQL, model = data shape) is
+  now observable in the implemented features and is expected of future ones too.
 
 ## 4. Flow of the main operations
 
-Observable flows in the code today:
-
 ```
 GET /health → inline handler in main.go → json.Encode({"status":"ok"}) → HTTP response
-```
 
-```
 POST /api/v1/auth/login
   → auth.Handler.Login: decode/validate JSON body (400 on malformed/missing fields)
   → auth.Service.Login(email, password)
@@ -106,9 +148,7 @@ POST /api/v1/auth/login
       → token.Manager.Generate (HS256 JWT, sub=user id, exp=now+TTL)
   → 200 {"access_token", "token_type", "expires_in"}  |  401 generic envelope on
     ErrInvalidCredentials  |  500 on unexpected error (DB/signing failure)
-```
 
-```
 GET /api/v1/auth/me
   → middleware.RequireAuth: extract "Authorization: Bearer <token>", token.Manager.Verify
     (rejects missing header, bad signature, wrong alg, and expired tokens) → 401 on failure,
@@ -116,6 +156,12 @@ GET /api/v1/auth/me
   → auth.Handler.Me → auth.Service.UserByID → Repository.FindByID
   → 200 {"id","code","name","email"} (no password hash)  |  401 if the user no longer
     exists  |  500 on unexpected error
+
+POST/GET/PATCH/DELETE /api/v1/customers... (currently unauthenticated — see §10 decision 16)
+  → customer.handler (parses/validates request, maps errors to apierror's envelope)
+  → customer.CustomerService (business rules: starts ACTIVE, no reactivation, partial update, ...)
+  → customer.CustomerRepository → pgx → Postgres `customers` table
+  → customer.handler (DTO response) → HTTP response
 ```
 
 ```
@@ -130,63 +176,79 @@ POST /api/v1/services  (and GET/PATCH/DELETE on the same prefix)
     409 CODE_ALREADY_EXISTS  |  500 generic envelope
 ```
 
-DELETE is a **logical deletion**: it sets `services.active = false` and never removes the
-row, so history stays intact.
+DELETE on the catalog is a **logical deletion**: it sets `services.active = false` and never
+removes the row, so history stays intact.
 
-No other operation flow is implemented (customer, vehicle, product registration,
+No other feature's operation flow is implemented here (vehicle,
 service orders, quotes, etc.). `docs/entities.md` describes the **data model** of these
 entities and a service order status flow
 (`RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE`),
-but that is domain documentation, not an implemented operation flow in code — the
-transition between these statuses has no associated Go logic yet. **To be defined** once
-these features are specified and implemented.
+but that remains domain documentation only — no Go logic implements it yet. **To be
+defined** once those features are specified and implemented. Note the documented **future**
+invariant (not yet implemented, since Service Order does not exist): opening a service
+order must reject an `INACTIVE` customer (see `specs/customer-management/requirements.md`
+§7.1).
 
 ## 5. Communication between components
 
-The auth feature now demonstrates, in code, the communication pattern declared as a
-convention in [CLAUDE.md](../CLAUDE.md) §9:
+Both implemented features follow the convention declared in [CLAUDE.md](../CLAUDE.md) §9:
 
-- **Within a feature**: `handler.go` → `service.go` → `repository.go`, each layer talking
-  to the next through a small interface declared by the caller (`Service` depends on the
-  `UserFinder`/`TokenIssuer` interfaces it defines, not on `*Repository`/`*token.Manager`
-  directly) — this is what lets `service_test.go`/`handler_test.go` use fakes instead of a
-  real database or signer.
-- **Between a feature and shared code**: `internal/features/auth` imports
-  `internal/shared/{database,token,httpx,middleware}`. `cmd/api/main.go` is the only place
-  that imports both the feature and its shared dependencies, to wire them together.
-- **Between features**: `auth` and `servicecatalog` do not import each other; the only
-  thing they share is `internal/shared/*` (notably `httpx` and `middleware`), which is
-  exactly what the no-direct-import rule prescribes.
+- **Within a feature**: `handler.go` → `service.go` → `repository.go`. `auth`'s `Service`
+  depends on the `UserFinder`/`TokenIssuer` interfaces it defines itself (not on
+  `*Repository`/`*token.Manager` directly), which is what lets its tests use fakes instead
+  of a real database/signer. `customer`'s `service.go` similarly depends only on the
+  `CustomerRepository` interface, and `servicecatalog`'s `Catalog` only on the `Store`
+  interface it declares.
+- **Between a feature and shared code**: `auth` imports
+  `internal/shared/{database,token,httpx,middleware}`; `servicecatalog` imports
+  `internal/shared/httpx` (and is wrapped in `middleware` from `main.go`); `customer`
+  imports `internal/shared/{database,document,config,apierror}`. `cmd/api/main.go` is the
+  only place that imports the features and wires their concrete dependencies together.
+- **Between features**: no feature imports another feature's package directly — `auth`,
+  `customer`, and `servicecatalog` are fully independent of each other; the only thing they
+  share is `internal/shared/*` (notably the `database` pool, each feature holding its own
+  repository wrapping it).
 
 ## 6. Persistence
 
-Persistence is implemented for the `users` and `services` tables via
-`github.com/jackc/pgx/v5` (pool, `pgxpool`), no ORM/query builder.
+Implemented via `github.com/jackc/pgx/v5` (`pgxpool.Pool`), no ORM/query builder, one shared
+pool for the whole process:
 
-- **Driver**: `pgx/v5`, decided and pinned in `go.mod` (`v5.7.2`) as part of the auth
-  feature (`specs/auth/design.md` §2). Plain parameterized SQL, no query builder — the
-  repository pattern is: one exported method per query need
-  (`FindByEmail`/`FindByID`), each delegating to an internal `findBy` helper that runs a
-  single parameterized `SELECT`.
-- **Connection**: `internal/shared/database.Connect(ctx, url)` opens a `pgxpool.Pool` from
-  a `postgres://` URL and validates it with a `Ping`. Called once from `cmd/api/main.go`
-  with `DATABASE_URL` (now actually read, unlike before this feature); the pool is closed
-  via `defer` on shutdown.
-- **Schema**: [docs/schema.sql](../docs/schema.sql) defines all tables, including `users`
-  (added by this feature — `id UUID`, `code BIGINT IDENTITY`, `name`, `email UNIQUE`,
-  `password_hash`, `created_at`/`updated_at`), native Postgres enums, and is applied
+- **Driver**: `pgx/v5`, pinned in `go.mod` at `v5.7.4` (the newest release whose own `go`
+  directive still allows Go 1.22 — see `specs/customer-management/design.md` §0). Plain
+  parameterized SQL throughout.
+- **Connection**: `internal/shared/database.NewPool(ctx, url)` opens a `pgxpool.Pool` and
+  validates it with a `Ping`. Called once from `cmd/api/main.go` with `DATABASE_URL`; the
+  pool is closed via `defer` on shutdown and shared by both features' repositories.
+- **Schema**: [docs/schema.sql](../docs/schema.sql) defines all tables, applied
   automatically by the `db` container only on initial Docker volume creation
   (`docker-entrypoint-initdb.d`), not by application code. No migration tool is used to
-  evolve the schema after initial creation — **to be defined**, see §14 of `CLAUDE.md`.
-- **Seed**: [docs/seed.sql](../docs/seed.sql) populates sample data via manual `psql`,
-  including one administrative user (`admin@workshop.local`) with a bcrypt hash produced by
-  pgcrypto's `crypt()` at insert time — the plaintext dev-only password is documented only
-  in the seed file's SQL comment, never in Go code or logs.
-- **Repository error mapping**: `pgx.ErrNoRows` is mapped to the feature's own sentinel at
-  the repository boundary (`ErrUserNotFound`, `ErrServiceNotFound`), so callers above it
-  never depend on a `pgx` type. The catalog repository additionally maps a `23505` unique
-  violation (via `*pgconn.PgError`) to `ErrCodeAlreadyExists`.
-- **Other entities** (`customers`, `vehicles`, `products`, `service_orders`, `quotes`,
+  evolve the schema after initial creation — **to be defined**, see `CLAUDE.md` §14.
+  - `users` (auth): `id UUID`, `code BIGINT IDENTITY`, `name`, `email UNIQUE`,
+    `password_hash`, `created_at`/`updated_at`.
+  - `customers` (Customer Management): the pre-existing table plus two columns added by
+    this feature, `document_type customer_document_type` and `status customer_status`
+    (two new enums), directly in the `CREATE TABLE` — see
+    `specs/customer-management/design.md` §3.1.
+  - `services` (service catalog): the pre-existing table plus the `active BOOLEAN NOT NULL
+    DEFAULT TRUE` column and `code` switched to `GENERATED BY DEFAULT AS IDENTITY`, so a
+    registration may supply its own code — see `specs/service-catalog/design.md` §2.
+- **Repository pattern**: one interface + implementation per feature (not a generic
+  repository). `auth`'s `Repository` maps `pgx.ErrNoRows` to `ErrUserNotFound`.
+  `customer`'s `CustomerRepository` maps `pgx.ErrNoRows` to `ErrNotFound`, and inspects
+  `pgconn.PgError.ConstraintName` on a `23505` unique-violation to distinguish a duplicate
+  `document` (`ux_customers_document`) from a duplicate `email`
+  (`ux_customers_email` — a pre-existing invariant predating the feature, see
+  `specs/customer-management/requirements.md` §3.4.1) rather than assuming it's always the
+  document. `servicecatalog`'s `Repository` maps `pgx.ErrNoRows` to `ErrServiceNotFound`
+  and a `23505` unique-violation to `ErrCodeAlreadyExists`.
+- **Seed**: [docs/seed.sql](../docs/seed.sql) populates sample data via manual `psql`: one
+  administrative user (`admin@workshop.local`) with a bcrypt hash produced by pgcrypto's
+  `crypt()` at insert time (plaintext dev-only password documented only in the seed file's
+  SQL comment, never in Go code or logs), four sample customers with normalized CPF/CNPJ
+  documents, and six sample services (one deliberately inactive, so the catalog listing has
+  both states).
+- **Other entities** (`vehicles`, `products`, `service_orders`, `quotes`,
   `service_order_history`, `audit_services`): schema exists in
   [docs/schema.sql](../docs/schema.sql) but still has no Go repository.
 
@@ -200,83 +262,99 @@ should any external integration be specified in the future.
 
 ## 8. Error handling
 
-- **Standard JSON error envelope** (RNF04) — decided and implemented in
-  `internal/shared/httpx`: every error response is
-  `{"error": {"code": "...", "message": "..."}}`, written by `httpx.Error`, which itself
-  calls `httpx.JSON` (sets `Content-Type: application/json`, writes the status code, then
-  `json.Encode`s the body). Any encoding failure at that point is only logged
-  (`log.Printf("httpx: encoding response failed: %v", err)`) since the status line is
-  already written — this is the one place a response-encoding error is still unhandled
-  beyond logging, same limitation as the pre-existing `/health` handler.
-- **Mapping domain/database errors to HTTP status codes** — now decided at the handler
-  layer, per feature: `auth.Handler` maps `ErrInvalidCredentials` → 401,
-  `ErrUserNotFound` → 401 (so a token for a deleted user behaves like "unauthenticated",
-  not "not found" — avoids leaking account existence), any other error → 500 with a
-  generic body (the underlying error is logged server-side only, and is checked to never
-  contain a password/token/hash — BR5).
-  `servicecatalog.Handler` follows the same shape: `ValidationError` (via `errors.As`) →
-  400 `INVALID_REQUEST`, `ErrServiceNotFound` → 404 `SERVICE_NOT_FOUND`,
-  `ErrCodeAlreadyExists` → 409 `CODE_ALREADY_EXISTS`, anything else → 500 with the cause
-  logged only.
-  There is no centralized error-handling middleware; each handler performs its own
-  `errors.Is`/`errors.As` mapping in a private `fail`-style helper. Two features now repeat
-  this pattern, so extracting a shared error-mapping helper into `shared/httpx` is a
-  candidate for the next feature — still **to be defined**, not done.
+**Two error-envelope implementations currently coexist** — this is the most significant
+open item this document surfaces, not a design decision to preserve:
+
+- `internal/shared/httpx` (`JSON`/`Error`), used by `auth` and `middleware.RequireAuth`:
+  `{"error": {"code", "message"}}`. Decided in `specs/auth/design.md` §4 ("Future features
+  must reuse these helpers").
+- `internal/shared/apierror` (`Write` + typed constructors), used by `customer` and
+  `servicecatalog`: `{"error": {"code", "message", "details"?}}`. Decided in
+  `specs/customer-management/design.md` §1.5 ("Future features should reuse
+  `internal/shared/apierror`"); the service catalog adopted it on 2026-08-19 instead of
+  keeping a second exception (`specs/service-catalog/design.md` §2).
+
+Both specs independently claimed to set "the" project-wide convention, written in parallel
+without either branch aware of the other. Both packages compile and work correctly today —
+this is a documentation/consistency problem, not a build error — but it means a further
+feature had no unambiguous shared error helper to reach for. `auth` is now the only feature
+still on `httpx`; whether it migrates too is an explicit open decision (see §10 and
+`CLAUDE.md` §17) — its 401/500 response bodies, and `middleware.RequireAuth`'s, would change
+with it, so it was not done while merging the branches.
+
+Per-feature error handling, as implemented today:
+- `auth.Handler` maps `ErrInvalidCredentials` → 401, `ErrUserNotFound` → 401 (so a token
+  for a deleted user behaves like "unauthenticated," not "not found" — avoids leaking
+  account existence), any other error → 500 with a generic body (the underlying error is
+  logged server-side only, checked to never contain a password/token/hash — BR5).
+  `shared/middleware.RequireAuth` responds 401 via the same `httpx.Error` envelope for a
+  missing/malformed `Authorization` header and for any token verification failure (bad
+  signature, wrong algorithm, expired — all folded into one generic `ErrInvalidToken`
+  before reaching the HTTP layer).
+- `customer/handler.go`'s `writeServiceError` maps the feature's sentinel errors
+  (`ErrNotFound`, `ErrDuplicateDocument`, `ErrDuplicateEmail`, `ErrInvalidDocument`) to
+  `apierror`'s envelope; anything else becomes a generic `500` via `apierror.Internal`,
+  never leaking internal error text to the client. HTTP status mapping: `400` for a
+  malformed body or any validation failure (structural or business — **400 was chosen over
+  422** for simplicity), `404` not found, `409` duplicate document/email.
+- `servicecatalog.Handler`'s `fail` helper maps `ValidationError` (via `errors.As`) to
+  `apierror.Validation` (400 `VALIDATION_ERROR`, naming the offending field in `details`),
+  `ErrServiceNotFound` → `apierror.NotFound` (404), `ErrCodeAlreadyExists` →
+  `apierror.Conflict` (409 `CODE_ALREADY_EXISTS`), a body that is not JSON or a non-UUID
+  `{id}` → `apierror.BadRequest` (400 `INVALID_BODY`), anything else →
+  `apierror.Internal` (500) with the cause logged only.
+- There is no centralized error-handling middleware in any feature; each handler performs
+  its own `errors.Is`/`errors.As` mapping. Whether a shared error-mapping helper is worth
+  extracting (on top of resolving the envelope duplication above) is **to be defined**.
 - **Startup fatal errors**: `main.go` uses `log.Fatal`/`log.Fatalf` for missing required
-  configuration (`JWT_SECRET`, `DATABASE_URL`), invalid `JWT_TTL`, database connection
-  failure, and `http.ListenAndServe` failure — unchanged in spirit from before this
-  feature, just with more preconditions to check.
-- **Authentication errors** (FR3): `shared/middleware.RequireAuth` responds 401 via the
-  same `httpx.Error` envelope for a missing/malformed `Authorization` header and for any
-  token verification failure — bad signature, wrong signing algorithm, and expired tokens
-  are all folded into one generic `ErrInvalidToken` before reaching the HTTP layer, so the
-  client cannot distinguish the failure reason.
+  configuration (`DATABASE_URL`, `JWT_SECRET`, malformed `JWT_TTL`), database connection
+  failure, and `http.ListenAndServe` failure.
 
 ## 9. Testing strategy
 
-The convention described in [CLAUDE.md](../CLAUDE.md) §11 is now materialized by the auth
-feature:
+Both implemented features follow the convention in [CLAUDE.md](../CLAUDE.md) §11 — tests
+alongside the code, integration tests in `internal/handlers_test/`, each independently
+skipping without `DATABASE_URL` — but differ, deliberately, on test library choice:
 
-- **Unit tests, alongside the code they test**, stdlib `testing` only (no test library was
-  added — `testify` was considered and explicitly not adopted; see `CLAUDE.md` §11):
-  - `internal/features/auth/service_test.go` — login logic against fake
-    `UserFinder`/`TokenIssuer` implementations (no real DB/signer).
-  - `internal/features/auth/handler_test.go` — HTTP layer via `httptest`, including the
-    500 paths (DB/signing failure) and the malformed/missing-field 400 paths.
-  - `internal/features/servicecatalog/service_test.go` — catalog rules against a fake
-    `Store` (required name, negative price, invalid estimated time/code, empty update,
-    duplicate code, logical deletion).
-  - `internal/features/servicecatalog/handler_test.go` — the five endpoints via `httptest`
-    on the same route patterns as `main.go`, including 400/404/409 paths and a 500 path
-    asserted not to leak the underlying error text.
-  - `internal/shared/token/token_test.go` — generate/verify round trip, expired token
-    rejected, wrong secret rejected, wrong signing algorithm rejected (`none`, `HS384`)
-    as an alg-confusion regression test.
-  - `internal/shared/middleware/auth_test.go` — missing header, wrong scheme, invalid
-    token, valid token injects the user id into context.
-  - `internal/shared/httpx/respond_test.go` — status/body written by `JSON`/`Error`.
-- **Integration tests**, in `internal/handlers_test/` as the convention specified, exercised
-  over real HTTP (`httptest.NewRecorder`/`NewRequest` against the same `http.ServeMux`
-  wiring as `main.go`) and a real Postgres connection:
-  - `internal/handlers_test/auth_test.go` — login success (AC1), invalid credentials with
-    identical body for unknown-email and wrong-password (AC2, BR4), `/me` without a token
-    (AC3), `/me` with an invalid/expired token (AC4), `/me` with a valid token returning the
-    user's public data without leaking the password hash.
-  - `internal/handlers_test/servicecatalog_test.go` — catalog CRUD end to end with a real
-    login token: creation with and without a caller-supplied code (AC1), duplicate code
-    (AC2), invalid price/estimated time (AC3/AC4), active vs. inactive listing (AC5),
-    update persistence (AC6), logical deletion asserted at the row level (AC7), and 401 on
-    every route without a valid token (AC8). Rows created by the tests are removed in
-    `t.Cleanup`, since a logical deletion would otherwise leave them behind.
-  - These tests **skip** (`t.Skip`, not fail) when `DATABASE_URL` is unset, so
-    `go test ./...` stays green in environments without a database (e.g. plain CI without a
-    Postgres service) while still running for real against the compose Postgres locally.
-- **Coverage targets**: none set numerically — **to be defined**, if ever, by a future
-  decision; the practice so far is "every new feature needs tests" (CLAUDE.md §11), not a
-  percentage gate.
-- **Mocks/fakes**: hand-written fakes satisfying the service's own small interfaces
-  (`UserFinder`, `TokenIssuer`, `TokenVerifier`, `Store`), no mocking library — consistent
-  with no test library being added to `go.mod`.
+- **auth**: stdlib `testing` only (no test library adopted — considered and explicitly
+  declined, `specs/auth/design.md` §9). Hand-written fakes satisfy the service's own small
+  interfaces (`UserFinder`, `TokenIssuer`, `TokenVerifier`) — no mocking library.
+  - Unit: `internal/features/auth/service_test.go` (login logic against fakes),
+    `internal/features/auth/handler_test.go` (HTTP layer via `httptest`, including 500 and
+    400 paths), `internal/shared/token/token_test.go` (generate/verify round trip, expired/
+    wrong-secret/wrong-algorithm rejection — alg-confusion regression coverage),
+    `internal/shared/middleware/auth_test.go`, `internal/shared/httpx/respond_test.go`.
+  - Integration: `internal/handlers_test/auth_test.go` — login success/failure (AC1, AC2,
+    BR4), `/me` without/with invalid/with valid token (AC3, AC4).
+- **customer**: stdlib `testing` + `testify` (`require`/`assert`), adopted deliberately
+  (`specs/customer-management/requirements.md` §8).
+  - Unit: `internal/shared/document/*_test.go` (CPF/CNPJ table-driven cases, including the
+    alphanumeric CNPJ format), `internal/features/customer/{model,service}_test.go` against
+    a hand-written in-memory `fakeRepository` — no mocking framework either.
+  - Integration: `internal/handlers_test/customer_test.go` — full CRUD flow, invalid CPF/
+    CNPJ, duplicate document/email (create and update), pagination, logical-deactivation-
+    not-physical-delete, and a test proving the database unique constraint (not just the
+    application pre-check) catches a simulated race condition.
+- **servicecatalog**: stdlib `testing` only, with a hand-written in-memory fake satisfying
+  the `Store` interface the business layer declares — no test library, following the auth
+  slice it extends.
+  - Unit: `internal/features/servicecatalog/service_test.go` (required name, negative
+    price, invalid estimated time/code, empty update, duplicate code, logical deletion),
+    `internal/features/servicecatalog/handler_test.go` (the five endpoints via `httptest`
+    on the same route patterns as `main.go`, including the 400/404/409 paths and a 500 path
+    asserted not to leak the underlying error text).
+  - Integration: `internal/handlers_test/servicecatalog_test.go` — creation with and
+    without a caller-supplied code (AC1), duplicate code (AC2), invalid price/estimated
+    time (AC3/AC4), active vs. inactive listing (AC5), update persistence (AC6), logical
+    deletion asserted at the row level (AC7), and 401 on every route without a valid token
+    (AC8). Rows created by the tests are removed in `t.Cleanup`, since a logical deletion
+    would otherwise leave them behind.
+- **Coverage targets**: none set numerically for any feature — "every new feature needs
+  tests" (`CLAUDE.md` §11), not a percentage gate.
+- CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs `go build/vet/test
+  ./...` with no Postgres service configured, so every feature's integration tests currently
+  run in **skip mode** in CI; provisioning a Postgres service for CI to exercise them for
+  real remains **to be defined**.
 
 ## 10. Identified architectural decisions
 
@@ -284,67 +362,87 @@ Decisions that **are actually observable** in the repository's code/configuratio
 their source:
 
 1. **Organization by feature (vertical slice)**, not by global technical layer — declared
-   in [README.md](../README.md) ("Vertical Slice (Feature-based)") and implemented by
-   `internal/features/auth/` and `internal/features/servicecatalog/`.
-2. **Plain Go stdlib for HTTP**, no framework/router — `go.mod` declares no external
-   dependency, and `main.go` uses `net/http` directly.
+   in [README.md](../README.md) ("Vertical Slice (Feature-based)") and implemented in
+   `internal/features/auth/`, `internal/features/customer/`, and
+   `internal/features/servicecatalog/`.
+2. **Plain Go stdlib for HTTP**, no framework/router — Go 1.22+'s method-aware
+   `http.ServeMux` patterns are used directly by every feature; confirmed sufficient at the
+   current route count.
 3. **PostgreSQL as the database**, with a schema-first design in plain SQL
-   ([docs/schema.sql](../docs/schema.sql)), not generated from Go code/an ORM.
+   ([docs/schema.sql](../docs/schema.sql)), accessed via `pgx v5` (no ORM), one shared
+   connection pool for the whole process.
 4. **UUID technical key + `code` sequential identifier** as the pattern on every registry
-   table — an explicit decision documented in the header of `docs/schema.sql`.
-5. **Status/type enums as native Postgres `ENUM`**, not `CHECK` — with the rationale
-   recorded in `docs/schema.sql` itself ("more compact on disk/index and
-   self-documenting").
+   table (`users`, `customers`, and every other table) — documented in the header of
+   `docs/schema.sql`.
+5. **Status/type enums as native Postgres `ENUM`**, not `CHECK` — rationale recorded in
+   `docs/schema.sql` itself; `customer_document_type` and `customer_status` follow the same
+   pattern.
 6. **Containerized local environment** via Docker Compose with three services (`db`,
-   `adminer`, `api`) — [docker-compose.yml](../docker-compose.yml).
+   `adminer`, `api`) — [docker-compose.yml](../docker-compose.yml); `api` now requires
+   `JWT_SECRET` to start.
 7. **Minimum CI gate**: every change goes through `go build ./...`, `go vet ./...`, and
-   `go test ./...` on GitHub Actions on every push/PR —
-   [.github/workflows/ci.yml](../.github/workflows/ci.yml).
+   `go test ./...` on GitHub Actions on every push/PR.
 8. **Domain identifiers in English**, consistently between `docs/entities.md` and
    `docs/schema.sql` — with a single deliberate exception: `ServiceOrder.status` enum
    values are kept in Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`,
-   `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) by explicit product decision, documented in
-   `docs/entities.md` and in the `service_order_status` enum comment in
-   `docs/schema.sql`.
+   `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) by explicit product decision. Customer
+   Management's own new fields (`documentType`, `status`) and its routes (`/customers`, not
+   `/clientes`) deliberately follow this English convention even though the task that
+   originated the feature was written in Portuguese — see
+   `specs/customer-management/requirements.md` §5.
 9. **`pgx/v5` (pgxpool) as the PostgreSQL driver**, plain parameterized SQL, no ORM/query
-   builder — decided in `specs/auth/design.md` §2, first exercised by
-   `internal/features/auth/repository.go` and `internal/shared/database`.
+   builder — decided independently by both `specs/auth/design.md` §2 and
+   `specs/customer-management/requirements.md` §8; versions reconciled to `v5.7.4` when the
+   branches merged (Go 1.22 compatibility constraint — see `specs/customer-management/design.md` §0).
 10. **JWT (HS256) via `golang-jwt/jwt/v5` for authentication** (RNF02), secret from
     `JWT_SECRET` (never versioned, BR2), every token carries an expiration (BR3) — decided
     in `specs/auth/design.md` §5, implemented in `internal/shared/token`.
 11. **Password hashing with bcrypt** (`golang.org/x/crypto/bcrypt`), passwords never stored
     or logged in plain text (BR1, BR5) — implemented in `internal/features/auth/service.go`
     and `docs/seed.sql`.
-12. **Standard JSON error envelope** `{"error": {"code", "message"}}` (RNF04) as the
-    project-wide convention for error responses, implemented once in
-    `internal/shared/httpx` and reused by every handler — decided in
-    `specs/auth/design.md` §4, meant to be reused by future features rather than
-    reinvented per feature.
-13. **Explicit public-route allowlist** (FR6): routes not listed as public in
-    `cmd/api/main.go` (today, only `/health` and `POST /api/v1/auth/login`) must be
-    registered wrapped in `middleware.RequireAuth`; there is no default-open behavior.
+12. **`testify` as the Customer Management feature's test assertion library**, added
+    deliberately after explicit alignment (`specs/customer-management/requirements.md` §8);
+    the auth feature deliberately did not adopt a test library (`specs/auth/design.md` §9).
+    Both stand as valid per-feature choices — see `CLAUDE.md` §11.
+13. **Explicit public-route allowlist** (FR6, from auth): routes not listed as public in
+    `cmd/api/main.go` should be registered wrapped in `middleware.RequireAuth`. Today only
+    `/health` and `POST /api/v1/auth/login` are public by that rule's original intent; the
+    six Customer Management routes are, in practice, also currently unwrapped/public — see
+    decision 16 below for why that's flagged rather than silently corrected.
 14. **No role/permission model in the MVP** — a valid token is sufficient to reach any
     protected route; there is no 403 path, by explicit scope cut recorded in
     `specs/auth/requirements.md`.
-15. **No test library added** (`testify` considered, not adopted) — unit and integration
-    tests use only the stdlib `testing` package, per `specs/auth/design.md` §9 and
-    `CLAUDE.md` §11.
+15. **Two JSON error envelopes still coexist** (`shared/httpx` and `shared/apierror`) —
+    see §8. Not a decision so much as an unresolved merge outcome; recorded here so it
+    isn't mistaken for an intentional dual-envelope design. Narrowed on 2026-08-19: the
+    service catalog adopted `apierror`, so `auth` (and `middleware.RequireAuth`) is the
+    only remaining `httpx` user.
+16. **The Customer Management routes are not wrapped in `middleware.RequireAuth`.** This
+    technically diverges from decision 13's stated convention. It is left this way
+    deliberately for now — `specs/customer-management/requirements.md` was written and
+    approved before the auth feature existed, explicitly scoped JWT out
+    ("implemented unauthenticated... a dedicated Security feature... will add JWT
+    authentication/authorization... applied on top of the existing routes"), and wrapping
+    the routes now would be a behavioral change (breaking any unauthenticated client/test
+    already exercising them) made silently during a branch merge, which `CLAUDE.md` §17
+    explicitly prohibits. Whether/when to wrap them is an open decision, not a bug.
 
-16. **Caller-supplied but optional `code` on the service catalog**: `services.code` is
+17. **Caller-supplied but optional `code` on the service catalog**: `services.code` is
     `GENERATED BY DEFAULT AS IDENTITY`, so a registration may carry its own code (rejected
     with 409 on collision) or omit it and let the database generate one — decided in
     `specs/service-catalog/design.md` §2 (D1). Every other table keeps
     `GENERATED ALWAYS`.
-17. **Logical deletion in the service catalog**: `DELETE /api/v1/services/{id}` sets
+18. **Logical deletion in the service catalog**: `DELETE /api/v1/services/{id}` sets
     `active = false` and never removes the row, so quotes/service orders referencing it keep
-    their history (D2). Whether other entities adopt the same convention is **to be
-    defined** by their own specifications.
-18. **List responses use an `{"items": [...]}` envelope** (first defined by the catalog
-    listing), leaving room for pagination metadata without a breaking change. Pagination
-    itself is not implemented.
+    their history (D2). Customer Management reached the same conclusion independently for
+    `customers.status`; whether it becomes a project-wide convention is **to be defined**.
+19. **List responses use an `{"items": [...]}` envelope** in the service catalog (its
+    listing has no pagination), while Customer Management's listing carries its own
+    pagination shape — another consistency item for whoever unifies the response
+    conventions.
 
-Any architectural decision outside this list — HTTP framework/router (still plain
-`net/http`), migration tool, linter beyond `gofmt`/`go vet`, authorization/roles, refresh
-tokens, OpenAPI/Swagger documentation, external integrations — **has not been made yet in
-code** and should be treated as **"To be defined"** until resolved by a specification in
+Any architectural decision outside this list (migration tool, linter beyond
+`gofmt`/`go vet`, authorization/roles, refresh tokens, OpenAPI/Swagger documentation for
+auth and the service catalog, external integrations) **has not been made yet in code** and
+should be treated as **"To be defined"** until resolved by a specification in
 `specs/<feature>/design.md`.

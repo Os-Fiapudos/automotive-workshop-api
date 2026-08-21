@@ -83,23 +83,48 @@ func TestCreateHandlerNullEstimatedTimeInPayload(t *testing.T) {
 }
 
 func TestCreateHandlerBadRequests(t *testing.T) {
-	cases := map[string]string{
-		"malformed JSON":      `{oops`,
-		"missing price":       `{"name":"Oil Change"}`,
-		"missing name":        `{"price":10}`,
-		"negative price":      `{"name":"Oil Change","price":-1}`,
-		"zero estimated time": `{"name":"Oil Change","price":10,"estimated_time":0}`,
-		"non positive code":   `{"code":0,"name":"Oil Change","price":10}`,
+	// Error codes come from shared/apierror: a body that is not JSON at all is
+	// INVALID_BODY, a body that parses but breaks a rule is VALIDATION_ERROR.
+	cases := map[string]struct{ payload, wantCode string }{
+		"malformed JSON":      {`{oops`, "INVALID_BODY"},
+		"missing price":       {`{"name":"Oil Change"}`, "VALIDATION_ERROR"},
+		"missing name":        {`{"price":10}`, "VALIDATION_ERROR"},
+		"negative price":      {`{"name":"Oil Change","price":-1}`, "VALIDATION_ERROR"},
+		"zero estimated time": {`{"name":"Oil Change","price":10,"estimated_time":0}`, "VALIDATION_ERROR"},
+		"non positive code":   {`{"code":0,"name":"Oil Change","price":10}`, "VALIDATION_ERROR"},
 	}
-	for name, payload := range cases {
+	for name, testCase := range cases {
 		mux := newTestMux(newFakeStore())
-		rec := do(mux, "POST", "/api/v1/services", payload)
+		rec := do(mux, "POST", "/api/v1/services", testCase.payload)
 		if rec.Code != 400 {
 			t.Fatalf("%s: status = %d, want 400; body: %s", name, rec.Code, rec.Body.String())
 		}
-		if code := decodeErrorCode(t, rec); code != "INVALID_REQUEST" {
-			t.Fatalf("%s: error code = %q, want INVALID_REQUEST", name, code)
+		if code := decodeErrorCode(t, rec); code != testCase.wantCode {
+			t.Fatalf("%s: error code = %q, want %s", name, code, testCase.wantCode)
 		}
+	}
+}
+
+// A field-level violation is reported as an apierror detail, so the client can
+// point at the offending field instead of parsing the message.
+func TestCreateHandlerValidationCarriesFieldDetail(t *testing.T) {
+	mux := newTestMux(newFakeStore())
+	rec := do(mux, "POST", "/api/v1/services", `{"name":"Oil Change","price":-1}`)
+
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details []struct {
+				Field   string `json:"field"`
+				Message string `json:"message"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("invalid JSON: %v; body: %s", err, rec.Body.String())
+	}
+	if len(body.Error.Details) != 1 || body.Error.Details[0].Field != "price" {
+		t.Fatalf("details = %+v", body.Error.Details)
 	}
 }
 
@@ -174,8 +199,8 @@ func TestGetHandler(t *testing.T) {
 	if rec.Code != 404 {
 		t.Fatalf("unknown id: status = %d, want 404", rec.Code)
 	}
-	if code := decodeErrorCode(t, rec); code != "SERVICE_NOT_FOUND" {
-		t.Fatalf("error code = %q, want SERVICE_NOT_FOUND", code)
+	if code := decodeErrorCode(t, rec); code != "NOT_FOUND" {
+		t.Fatalf("error code = %q, want NOT_FOUND", code)
 	}
 
 	rec = do(mux, "GET", "/api/v1/services/not-a-uuid", "")

@@ -5,14 +5,14 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/apierror"
 	"automotive-workshop-api/internal/shared/httpx"
 )
-
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type Handler struct {
 	catalog *Catalog
@@ -68,11 +68,12 @@ func toResponse(s *Service) serviceResponse {
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "malformed JSON body")
+		apierror.Write(w, apierror.BadRequest("request body is not valid JSON"))
 		return
 	}
 	if req.Price == nil {
-		httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "price is required")
+		apierror.Write(w, apierror.Validation("invalid service data",
+			apierror.Detail{Field: "price", Message: "price is required"}))
 		return
 	}
 	created, err := h.catalog.Create(r.Context(), NewService{
@@ -94,7 +95,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("active"); raw != "" {
 		active, err := strconv.ParseBool(raw)
 		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "active must be true or false")
+			apierror.Write(w, apierror.Validation("invalid service filter",
+				apierror.Detail{Field: "active", Message: "active must be true or false"}))
 			return
 		}
 		filter.Active = &active
@@ -131,7 +133,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "malformed JSON body")
+		apierror.Write(w, apierror.BadRequest("request body is not valid JSON"))
 		return
 	}
 	updated, err := h.catalog.Update(r.Context(), id, Changes{
@@ -163,25 +165,30 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 // serviceID validates the path id before it reaches the database, so a malformed
 // id answers 400 instead of surfacing a driver error as 500.
 func serviceID(w http.ResponseWriter, r *http.Request) (string, bool) {
-	id := r.PathValue("id")
-	if !uuidPattern.MatchString(id) {
-		httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "id must be a UUID")
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.BadRequest("id must be a valid UUID"))
 		return "", false
 	}
-	return id, true
+	return id.String(), true
 }
 
 func (h *Handler) fail(w http.ResponseWriter, operation string, err error) {
 	var validation ValidationError
 	switch {
 	case errors.As(err, &validation):
-		httpx.Error(w, http.StatusBadRequest, "INVALID_REQUEST", validation.Message)
+		if validation.Field == "" {
+			apierror.Write(w, apierror.Validation(validation.Message))
+			return
+		}
+		apierror.Write(w, apierror.Validation("invalid service data",
+			apierror.Detail{Field: validation.Field, Message: validation.Message}))
 	case errors.Is(err, ErrServiceNotFound):
-		httpx.Error(w, http.StatusNotFound, "SERVICE_NOT_FOUND", "service not found")
+		apierror.Write(w, apierror.NotFound("service not found"))
 	case errors.Is(err, ErrCodeAlreadyExists):
-		httpx.Error(w, http.StatusConflict, "CODE_ALREADY_EXISTS", "service code already exists")
+		apierror.Write(w, apierror.Conflict("CODE_ALREADY_EXISTS", "service code already exists"))
 	default:
 		log.Printf("servicecatalog: %s failed: %v", operation, err)
-		httpx.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
+		apierror.Write(w, apierror.Internal("unexpected error"))
 	}
 }

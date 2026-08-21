@@ -11,8 +11,8 @@ everything the auth feature already introduced — no new cross-cutting package 
 
 - `internal/features/servicecatalog/` — the feature slice: `handler.go`, `service.go`,
   `repository.go`, `model.go`, `doc.go`.
-- Reused from `internal/shared/`: `database` (pgx pool), `httpx` (JSON/error envelope,
-  RNF04), `middleware.RequireAuth` (FR6/RNF02).
+- Reused from `internal/shared/`: `database` (pgx pool), `apierror` (JSON error envelope,
+  RNF04), `httpx.JSON` (success response writer), `middleware.RequireAuth` (FR6/RNF02).
 - `cmd/api/main.go` — wiring only: builds the slice and registers its five routes wrapped in
   `RequireAuth`.
 
@@ -25,7 +25,17 @@ the domain entity keeps the name from [docs/entities.md](../../docs/entities.md)
 and the entity name is the one fixed by the domain documentation.
 
 No new external dependency (CLAUDE.md §12): `pgconn`, used to identify a unique-violation,
-ships inside the already-pinned `github.com/jackc/pgx/v5` module.
+ships inside the already-pinned `github.com/jackc/pgx/v5` module, and `google/uuid` (path-id
+parsing) was already pinned by the Customer Management feature.
+
+**Error envelope [decision, 2026-08-19]**: this slice was first written against
+`internal/shared/httpx` (`Error`), matching the auth slice it extends. When it was merged
+with `develop`, the Customer Management feature had introduced `internal/shared/apierror`
+(typed constructors, optional per-field `details`) and two newer features had adopted it.
+Decision taken with the project owner: the catalog uses **`apierror`** for every error
+response, so the majority convention has one fewer exception. `auth` still uses `httpx`;
+migrating it stays an explicit open decision recorded in `specs/architecture.md` §10.
+Success responses keep using `httpx.JSON`, which is a plain JSON writer, not an envelope.
 
 ## 2. Data model (FR1, FR2, FR5; BR1–BR4, BR7)
 
@@ -84,8 +94,8 @@ representation would be a project-wide change, not a catalog-only one.
 
 All five routes are **protected** (FR6/RNF02): registered in `main.go` wrapped in
 `middleware.RequireAuth`, which answers 401 for a missing/invalid/expired token (AC8).
-Every error body is the project envelope `{"error":{"code","message"}}` written through
-`shared/httpx` (RNF04).
+Every error body is the project envelope `{"error":{"code","message","details"?}}` written
+through `shared/apierror` (RNF04).
 
 Service representation returned by every endpoint that returns one:
 
@@ -164,11 +174,16 @@ responses (`access_token`, `token_type`).
 
 | HTTP | code | Situation |
 | --- | --- | --- |
-| 400 | `INVALID_REQUEST` | malformed JSON, failed validation, bad id, bad query param |
+| 400 | `INVALID_BODY` | body is not valid JSON, or `{id}` is not a UUID |
+| 400 | `VALIDATION_ERROR` | a rule was broken; the offending field is reported in `details` |
 | 401 | `UNAUTHORIZED` | produced by `middleware.RequireAuth` (FR6) |
-| 404 | `SERVICE_NOT_FOUND` | id not present in the catalog |
+| 404 | `NOT_FOUND` | id not present in the catalog |
 | 409 | `CODE_ALREADY_EXISTS` | code already used by another service (BR2) |
-| 500 | `INTERNAL_ERROR` | unexpected failure; details logged, never returned |
+| 500 | `INTERNAL_ERROR` | unexpected failure; the cause is logged, never returned |
+
+The 400/404/500 codes come from `apierror`'s constructors (`BadRequest`, `Validation`,
+`NotFound`, `Internal`); only the 409 code is feature-specific, exactly like
+`customer`'s `DUPLICATE_DOCUMENT`.
 
 ## 4. Layers and flow
 
@@ -195,12 +210,16 @@ type Store interface {
 Validation errors are a single type carrying the message shown to the caller:
 
 ```go
-type ValidationError struct{ Message string }
+type ValidationError struct {
+    Field   string // request field at fault, empty when the whole request is
+    Message string
+}
 ```
 
-The handler maps it with `errors.As` to 400 `INVALID_REQUEST`, `ErrServiceNotFound` to 404,
-`ErrCodeAlreadyExists` to 409, and anything else to 500 (logging the cause, never returning
-it) — mirroring `internal/features/auth/handler.go`.
+The handler maps it with `errors.As` to `apierror.Validation` (400, with the field as a
+`Detail`), `ErrServiceNotFound` to `apierror.NotFound` (404), `ErrCodeAlreadyExists` to
+`apierror.Conflict` (409), and anything else to `apierror.Internal` (500, logging the cause
+and never returning it) — the same shape as `customer/handler.go`'s `writeServiceError`.
 
 `repository.go` uses plain parameterized `pgx` queries (CLAUDE.md §13):
 

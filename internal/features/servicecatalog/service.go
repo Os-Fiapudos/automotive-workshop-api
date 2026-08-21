@@ -6,8 +6,11 @@ import (
 )
 
 // ValidationError carries a business-rule violation whose message is safe to
-// return to the caller (mapped to HTTP 400 by the handler).
+// return to the caller (mapped to HTTP 400 by the handler). Field names the
+// offending request field, so the handler can report it as an apierror.Detail;
+// it is empty when the violation is about the request as a whole.
 type ValidationError struct {
+	Field   string
 	Message string
 }
 
@@ -57,13 +60,13 @@ func (c *Catalog) Create(ctx context.Context, in NewService) (*Service, error) {
 	in.Description = strings.TrimSpace(in.Description)
 
 	if in.Name == "" {
-		return nil, ValidationError{Message: "name is required"}
+		return nil, ValidationError{Field: "name", Message: "name is required"}
 	}
 	if in.Code != nil && *in.Code <= 0 {
-		return nil, ValidationError{Message: "code must be greater than zero"}
+		return nil, ValidationError{Field: "code", Message: "code must be greater than zero"}
 	}
 	if in.Price < 0 {
-		return nil, ValidationError{Message: "price must not be negative"}
+		return nil, ValidationError{Field: "price", Message: "price must not be negative"}
 	}
 	if err := validateEstimatedTime(in.EstimatedTime); err != nil {
 		return nil, err
@@ -83,7 +86,7 @@ func (c *Catalog) Update(ctx context.Context, id string, changes Changes) (*Serv
 	if changes.Name != nil {
 		name := strings.TrimSpace(*changes.Name)
 		if name == "" {
-			return nil, ValidationError{Message: "name must not be empty"}
+			return nil, ValidationError{Field: "name", Message: "name must not be empty"}
 		}
 		changes.Name = &name
 	}
@@ -92,7 +95,7 @@ func (c *Catalog) Update(ctx context.Context, id string, changes Changes) (*Serv
 		changes.Description = &description
 	}
 	if changes.Price != nil && *changes.Price < 0 {
-		return nil, ValidationError{Message: "price must not be negative"}
+		return nil, ValidationError{Field: "price", Message: "price must not be negative"}
 	}
 	if err := validateEstimatedTime(changes.EstimatedTime); err != nil {
 		return nil, err
@@ -110,7 +113,7 @@ func (c *Catalog) Deactivate(ctx context.Context, id string) error {
 
 func validateEstimatedTime(estimatedTime *int) error {
 	if estimatedTime != nil && *estimatedTime <= 0 {
-		return ValidationError{Message: "estimated_time must be greater than zero"}
+		return ValidationError{Field: "estimated_time", Message: "estimated_time must be greater than zero"}
 	}
 	return nil
 }
