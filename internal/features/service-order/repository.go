@@ -31,11 +31,17 @@ type vehicleRef struct {
 }
 
 // serviceRef is the minimal service-catalog data needed to display a
-// requested service in the response.
+// requested service in the response. Description/Price are only populated
+// by findServiceByID (used to price/snapshot a quote item,
+// specs/service-order-diagnosis-quote/) — findServicesByIDs (used for the
+// order-creation response) leaves them zero, since that response doesn't
+// need them.
 type serviceRef struct {
-	ID   uuid.UUID
-	Code int64
-	Name string
+	ID          uuid.UUID
+	Code        int64
+	Name        string
+	Description string
+	Price       float64
 }
 
 // serviceOrderLookups is the read-only boundary ServiceOrderService depends
@@ -51,14 +57,23 @@ type serviceOrderLookups interface {
 	findVehicleByPlate(ctx context.Context, plate string) (*vehicleRef, error)
 	findMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	findServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*serviceRef, error)
+
+	// Added by specs/service-order-diagnosis-quote/.
+	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*ServiceOrder, error)
+	findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error)
+	findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
-// aggregate. It only has the one write this feature performs — no
-// speculative CRUD methods for reads this feature doesn't need (design.md
-// §3.2).
+// aggregate. It only has the writes this feature performs — no speculative
+// CRUD methods for reads this feature doesn't need (design.md §3.2).
 type ServiceOrderRepository interface {
 	Create(ctx context.Context, order *ServiceOrder) error
+
+	// Added by specs/service-order-diagnosis-quote/.
+	StartDiagnosis(ctx context.Context, order *ServiceOrder) error
+	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
+	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and

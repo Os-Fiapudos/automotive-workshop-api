@@ -67,9 +67,14 @@ func main() {
 	// silently as part of this merge.
 	customer.RegisterRoutes(router, customerService)
 
-	// Service Order Opening routes remain unauthenticated for now, same
-	// rationale as Customer Management above.
-	serviceorder.RegisterRoutes(router, serviceOrderService)
+	// Service Order Opening's own POST /api/v1/service-orders route remains
+	// unauthenticated for now, same rationale as Customer Management above.
+	// The diagnosis/quote routes added by
+	// specs/service-order-diagnosis-quote/ are protected with requireAuth
+	// (requirements.md §7.4) — a deliberate, explicit decision for those
+	// routes specifically, not a silent resolution of the open decision
+	// above.
+	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
 
 	log.Printf("listening on :%s", configuration.Port)
 	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))
