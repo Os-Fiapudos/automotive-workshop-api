@@ -97,22 +97,27 @@ ON CONFLICT (id) DO NOTHING;
 -- Service order 4 (EM_DIAGNOSTICO) has no quote generated yet — a realistic scenario.
 
 -- ==== Quote items (products) ====
+-- applied_description/applied_total_price are new columns added by
+-- specs/service-order-diagnosis-quote/ — description copied from the matching
+-- products row, total = quantity * applied_unit_price.
 
-INSERT INTO quote_products (quote_id, product_id, quantity, applied_unit_price) VALUES
-    ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 1, 35.90),
-    ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002', 1, 48.50),
-    ('f0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000003', 1, 129.90),
-    ('f0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000004', 1, 89.90),
-    ('f0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000005', 1, 22.00)
+INSERT INTO quote_products (quote_id, product_id, quantity, applied_description, applied_unit_price, applied_total_price) VALUES
+    ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 1, 'Engine oil filter, general use.',          35.90,  35.90),
+    ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002', 1, 'Synthetic engine oil, 1-liter package.',   48.50,  48.50),
+    ('f0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000003', 1, 'Set of front brake pads.',                 129.90, 129.90),
+    ('f0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000004', 1, 'Timing belt for the distribution system.', 89.90,  89.90),
+    ('f0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000005', 1, 'Brake fluid, 500ml package.',              22.00,  22.00)
 ON CONFLICT DO NOTHING;
 
 -- ==== Quote items (services) ====
+-- quantity/applied_description/applied_total_price are new columns added by
+-- specs/service-order-diagnosis-quote/.
 
-INSERT INTO quote_services (quote_id, service_id, applied_price) VALUES
-    ('f0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 80.00),
-    ('f0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', 150.00),
-    ('f0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000004', 228.00),
-    ('f0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000002', 120.00)
+INSERT INTO quote_services (quote_id, service_id, quantity, applied_description, applied_price, applied_total_price) VALUES
+    ('f0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 1, 'Engine oil and filter change.',                       80.00,  80.00),
+    ('f0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', 1, 'Inspection and replacement of pads/discs if needed.', 150.00, 150.00),
+    ('f0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000004', 1, 'Replacement of the distribution timing belt.',        228.00, 228.00),
+    ('f0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000002', 1, 'Steering alignment and wheel balancing.',              120.00, 120.00)
 ON CONFLICT DO NOTHING;
 
 -- ==== Service Order History ====

@@ -97,10 +97,32 @@
 | status         | string     | Quote status: `PENDING` (awaiting customer response), `APPROVED` (customer accepted) or `REJECTED` (customer declined). |
 | generatedAt    | string     | Date/time the quote was generated and sent to the customer.                          |
 | respondedAt    | string?    | Date/time the customer responded (approved/rejected). Optional, filled only after a response. |
-| products       | Product[]  | List of products/parts included in the quote.                                        |
-| services       | Service[]  | List of services included in the quote.                                              |
+| products       | QuoteItem[] | List of products/parts included in the quote, each with its own snapshot (see `QuoteItem` below). |
+| services       | QuoteItem[] | List of services included in the quote, each with its own snapshot (see `QuoteItem` below).       |
 | createdAt      | string     | Record creation date/time, generated automatically.                                  |
 | updatedAt      | string     | Record last update date/time, generated automatically.                               |
+
+## QuoteItem
+
+A single line of a `Quote` — a product/part or a service, with the description, quantity,
+and price applied at the moment it was included in the quote. Introduced by
+[specs/service-order-diagnosis-quote](../specs/service-order-diagnosis-quote/); see
+`docs/schema.sql`'s `quote_products`/`quote_services` for the physical model.
+
+| Field         | Type   | Description                                                                       |
+| ------------- | ------ | ------------------------------------------------------------------------------------ |
+| productId     | uuid?  | Reference to the `Product`, when this item is a part/supply. Mutually exclusive with `serviceId`. |
+| serviceId     | uuid?  | Reference to the `Service`, when this item is a service. Mutually exclusive with `productId`.     |
+| description   | string | Product/service description at the moment the item was included (snapshot) — later catalog changes never alter it. |
+| quantity      | number | Quantity of this item in the quote. Must be greater than zero.                       |
+| unitPrice     | number | Unit price applied at the moment the item was included (snapshot).                   |
+| totalValue    | number | `quantity * unitPrice`, calculated by the server (RF06). Never accepted from the API client. |
+
+> **Note**: a referenced `Product` must be `ACTIVE` at composition time. A referenced
+> `Service` only needs to exist — `Service` has no `status` field yet (see the `Service`
+> entity above), so an "inactive service" check is not implemented; this is a known,
+> documented scope limitation (`specs/service-order-diagnosis-quote/requirements.md` §7.3),
+> not an oversight.
 
 ## ServiceOrderHistory
 
@@ -112,7 +134,7 @@ traceability purposes.
 | id             | uuid   | Technical identifier of the history record.                                        |
 | serviceOrderId | uuid   | Reference to the `ServiceOrder` this event belongs to.                             |
 | occurredAt     | string | Date/time the event occurred.                                                      |
-| event          | string | Type of recorded event: `creation`, `approval`, `completion` or `cancellation`.     |
+| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `approval`, `completion` or `cancellation`. |
 | description    | string | Details of what happened in the event.                                             |
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |

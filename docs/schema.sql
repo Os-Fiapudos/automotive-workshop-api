@@ -60,8 +60,17 @@ DO $$ BEGIN
     CREATE TYPE quote_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- 'diagnosis_started' and 'quote_composed' were added by the Service Order
+-- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
 DO $$ BEGIN
-    CREATE TYPE history_event AS ENUM ('creation', 'approval', 'completion', 'cancellation');
+    CREATE TYPE history_event AS ENUM (
+        'creation',
+        'diagnosis_started',
+        'quote_composed',
+        'approval',
+        'completion',
+        'cancellation'
+    );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -252,30 +261,40 @@ COMMENT ON COLUMN quotes.updated_at IS 'Record last update date/time, generated 
 -- of the quote, since the catalog price may change afterward.
 
 CREATE TABLE IF NOT EXISTS quote_products (
-    quote_id            UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
-    product_id          UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
-    quantity            INTEGER NOT NULL CHECK (quantity > 0),
-    applied_unit_price  NUMERIC(12, 2) NOT NULL CHECK (applied_unit_price >= 0),
+    quote_id              UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
+    product_id            UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    quantity              INTEGER NOT NULL CHECK (quantity > 0),
+    applied_description   TEXT NOT NULL,
+    applied_unit_price    NUMERIC(12, 2) NOT NULL CHECK (applied_unit_price >= 0),
+    applied_total_price   NUMERIC(12, 2) NOT NULL CHECK (applied_total_price >= 0),
     PRIMARY KEY (quote_id, product_id)
 );
 
-COMMENT ON TABLE quote_products IS 'Products/parts included in a quote, with the price applied at the time.';
+COMMENT ON TABLE quote_products IS 'Products/parts included in a quote, with the description/price applied at the time.';
 COMMENT ON COLUMN quote_products.quote_id IS 'Reference to the Quote this item belongs to.';
 COMMENT ON COLUMN quote_products.product_id IS 'Reference to the Product included in the quote.';
 COMMENT ON COLUMN quote_products.quantity IS 'Quantity of the product included in the quote.';
+COMMENT ON COLUMN quote_products.applied_description IS 'Product description at the time it was included in the quote (snapshot) — later catalog changes must not alter it.';
 COMMENT ON COLUMN quote_products.applied_unit_price IS 'Unit price of the product at the time it was included in the quote (snapshot).';
+COMMENT ON COLUMN quote_products.applied_total_price IS 'quantity * applied_unit_price, calculated by the server at composition time (snapshot).';
 
 CREATE TABLE IF NOT EXISTS quote_services (
-    quote_id       UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
-    service_id     UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
-    applied_price  NUMERIC(12, 2) NOT NULL CHECK (applied_price >= 0),
+    quote_id              UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
+    service_id            UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
+    quantity               INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    applied_description    TEXT NOT NULL,
+    applied_price          NUMERIC(12, 2) NOT NULL CHECK (applied_price >= 0),
+    applied_total_price    NUMERIC(12, 2) NOT NULL CHECK (applied_total_price >= 0),
     PRIMARY KEY (quote_id, service_id)
 );
 
-COMMENT ON TABLE quote_services IS 'Services included in a quote, with the price applied at the time.';
+COMMENT ON TABLE quote_services IS 'Services included in a quote, with the description/price applied at the time.';
 COMMENT ON COLUMN quote_services.quote_id IS 'Reference to the Quote this item belongs to.';
 COMMENT ON COLUMN quote_services.service_id IS 'Reference to the Service included in the quote.';
-COMMENT ON COLUMN quote_services.applied_price IS 'Price of the service at the time it was included in the quote (snapshot).';
+COMMENT ON COLUMN quote_services.quantity IS 'Quantity of the service included in the quote.';
+COMMENT ON COLUMN quote_services.applied_description IS 'Service description at the time it was included in the quote (snapshot) — later catalog changes must not alter it.';
+COMMENT ON COLUMN quote_services.applied_price IS 'Unit price of the service at the time it was included in the quote (snapshot).';
+COMMENT ON COLUMN quote_services.applied_total_price IS 'quantity * applied_price, calculated by the server at composition time (snapshot).';
 
 -- ---- ServiceOrderHistory ----
 
@@ -293,7 +312,7 @@ COMMENT ON TABLE service_order_history IS 'Trail of events and status changes of
 COMMENT ON COLUMN service_order_history.id IS 'Technical identifier of the history record.';
 COMMENT ON COLUMN service_order_history.service_order_id IS 'Reference to the ServiceOrder this event belongs to.';
 COMMENT ON COLUMN service_order_history.occurred_at IS 'Date/time the event occurred.';
-COMMENT ON COLUMN service_order_history.event IS 'Type of recorded event: creation, approval, completion or cancellation.';
+COMMENT ON COLUMN service_order_history.event IS 'Type of recorded event: creation, diagnosis_started, quote_composed, approval, completion or cancellation.';
 COMMENT ON COLUMN service_order_history.description IS 'Details of what happened in the event.';
 COMMENT ON COLUMN service_order_history.previous_status IS 'Service order status immediately before the event.';
 COMMENT ON COLUMN service_order_history.new_status IS 'Service order status immediately after the event.';

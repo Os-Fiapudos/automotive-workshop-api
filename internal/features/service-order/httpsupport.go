@@ -37,6 +37,24 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.NotFound("requested service not found"))
 	case errors.Is(err, ErrInvalidAggregate):
 		apierror.Write(w, apierror.Validation("invalid service order data"))
+	case errors.Is(err, ErrServiceOrderNotFound):
+		apierror.Write(w, apierror.NotFound("service order not found"))
+	case errors.Is(err, ErrInvalidStatusTransition):
+		apierror.Write(w, apierror.Conflict("INVALID_STATUS_TRANSITION", "service order is not in a status that allows this operation"))
+	case errors.Is(err, ErrDiagnosisNotStarted):
+		apierror.Write(w, apierror.Conflict("DIAGNOSIS_NOT_STARTED", "diagnosis has not started for this service order"))
+	case errors.Is(err, ErrQuoteAlreadyDecided):
+		apierror.Write(w, apierror.Conflict("QUOTE_ALREADY_DECIDED", "quote has already been decided and cannot be altered"))
+	case errors.Is(err, ErrQuoteNotFound):
+		apierror.Write(w, apierror.NotFound("quote not found"))
+	case errors.Is(err, ErrEmptyQuote):
+		apierror.Write(w, apierror.Validation("quote must have at least one item"))
+	case errors.Is(err, ErrInvalidQuantity):
+		apierror.Write(w, apierror.Validation("item quantity must be greater than zero"))
+	case errors.Is(err, ErrProductNotFound):
+		apierror.Write(w, apierror.NotFound("product not found"))
+	case errors.Is(err, ErrProductInactive):
+		apierror.Write(w, apierror.Conflict("PRODUCT_INACTIVE", "product is inactive"))
 	default:
 		apierror.Write(w, apierror.Internal("unexpected error"))
 	}
