@@ -52,12 +52,16 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ==== Services ====
 
-INSERT INTO services (id, name, description, price, estimated_time) VALUES
-    ('d0000000-0000-0000-0000-000000000001', 'Oil Change',              'Engine oil and filter change.',                       80.00,  30),
-    ('d0000000-0000-0000-0000-000000000002', 'Alignment and Balancing', 'Steering alignment and wheel balancing.',             120.00, 60),
-    ('d0000000-0000-0000-0000-000000000003', 'Brake Inspection',        'Inspection and replacement of pads/discs if needed.', 150.00, 90),
-    ('d0000000-0000-0000-0000-000000000004', 'Timing Belt Replacement', 'Replacement of the distribution timing belt.',        250.00, 180),
-    ('d0000000-0000-0000-0000-000000000005', 'Electronic Diagnostics',  'Reading error codes via automotive scanner.',         60.00, NULL)
+-- The last one is deliberately inactive: a retired service kept for history, so the
+-- catalog listing has both states to distinguish (specs/service-catalog AC5).
+
+INSERT INTO services (id, name, description, price, estimated_time, active) VALUES
+    ('d0000000-0000-0000-0000-000000000001', 'Oil Change',              'Engine oil and filter change.',                       80.00,  30,   TRUE),
+    ('d0000000-0000-0000-0000-000000000002', 'Alignment and Balancing', 'Steering alignment and wheel balancing.',             120.00, 60,   TRUE),
+    ('d0000000-0000-0000-0000-000000000003', 'Brake Inspection',        'Inspection and replacement of pads/discs if needed.', 150.00, 90,   TRUE),
+    ('d0000000-0000-0000-0000-000000000004', 'Timing Belt Replacement', 'Replacement of the distribution timing belt.',        250.00, 180,  TRUE),
+    ('d0000000-0000-0000-0000-000000000005', 'Electronic Diagnostics',  'Reading error codes via automotive scanner.',         60.00,  NULL, TRUE),
+    ('d0000000-0000-0000-0000-000000000006', 'Carburetor Cleaning',     'Retired service, kept for historical service orders.', 90.00, 45,   FALSE)
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Service Orders ====

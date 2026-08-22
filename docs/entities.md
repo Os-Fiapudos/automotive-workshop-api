@@ -61,6 +61,7 @@
 | description   | string  | Detailed description of what the service covers.                         |
 | price         | number  | Price charged for performing the service.                                |
 | estimatedTime | number? | Estimated execution time, in minutes. Optional field.                    |
+| active        | boolean | Whether the service is offered in new quotes. Retiring a service deactivates it instead of removing the record. |
 | createdAt     | string  | Record creation date/time, generated automatically.                      |
 | updatedAt     | string  | Record last update date/time, generated automatically.                   |
 

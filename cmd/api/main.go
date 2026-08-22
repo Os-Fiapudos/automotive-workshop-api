@@ -10,6 +10,7 @@ import (
 	"automotive-workshop-api/internal/features/customer"
 	"automotive-workshop-api/internal/features/product"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/servicecatalog"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
 	"automotive-workshop-api/internal/shared/middleware"
@@ -31,6 +32,7 @@ func main() {
 
 	tokens := token.NewManager(configuration.JWTSecret, configuration.JWTTTL)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewRepository(pool), tokens))
+	catalogHandler := servicecatalog.NewHandler(servicecatalog.NewCatalog(servicecatalog.NewRepository(pool)))
 	requireAuth := middleware.RequireAuth(tokens)
 
 	customerRepository := customer.NewPostgresCustomerRepository(pool)
@@ -53,6 +55,13 @@ func main() {
 
 	// Protected routes.
 	router.Handle("GET /api/v1/auth/me", requireAuth(http.HandlerFunc(authHandler.Me)))
+
+	// Service catalog routes (specs/service-catalog, protected per RNF02).
+	router.Handle("POST /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.Create)))
+	router.Handle("GET /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.List)))
+	router.Handle("GET /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Get)))
+	router.Handle("PATCH /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Update)))
+	router.Handle("DELETE /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Delete)))
 
 	// Product management routes (protected via requireAuth per RNF02).
 	product.RegisterRoutes(router, productService, requireAuth)
