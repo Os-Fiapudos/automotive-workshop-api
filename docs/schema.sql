@@ -321,6 +321,27 @@ COMMENT ON COLUMN service_order_history.description IS 'Details of what happened
 COMMENT ON COLUMN service_order_history.previous_status IS 'Service order status immediately before the event.';
 COMMENT ON COLUMN service_order_history.new_status IS 'Service order status immediately after the event.';
 
+-- ---- ServiceOrderTrackingToken ----
+-- Grants a customer read-only access to their own service order's tracking
+-- view without the administrative JWT (specs/service-order-tracking/). One
+-- token is auto-generated per service order at creation time
+-- (service_order_id UNIQUE); only its hash is ever stored.
+
+CREATE TABLE IF NOT EXISTS service_order_tracking_tokens (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
+    token_hash        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at        TIMESTAMPTZ
+);
+
+COMMENT ON TABLE service_order_tracking_tokens IS 'Grants a customer read-only tracking access to their own service order, without the administrative JWT.';
+COMMENT ON COLUMN service_order_tracking_tokens.id IS 'Technical identifier of the token record.';
+COMMENT ON COLUMN service_order_tracking_tokens.service_order_id IS 'Reference to the ServiceOrder this token grants access to. One token per order.';
+COMMENT ON COLUMN service_order_tracking_tokens.token_hash IS 'SHA-256 hash of the token. The raw token is returned to the caller once, at issuance, and never persisted.';
+COMMENT ON COLUMN service_order_tracking_tokens.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN service_order_tracking_tokens.revoked_at IS 'Date/time the token was revoked. NULL while active.';
+
 -- ---- AuditServices ----
 
 CREATE TABLE IF NOT EXISTS audit_services (
@@ -369,7 +390,13 @@ CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON ser
 CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);
--- quotes.service_order_id already has a unique index (UNIQUE above creates one).
+-- quotes.service_order_id and service_order_tracking_tokens.service_order_id already have
+-- unique indexes (UNIQUE above creates one for each).
+
+-- Lookup key for GET /api/v1/acompanhamento/{codigo} (validator hashes the
+-- incoming token, then matches it here).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_service_order_tracking_tokens_token_hash
+    ON service_order_tracking_tokens (token_hash);
 
 -- ---- Frequent workshop queries ----
 

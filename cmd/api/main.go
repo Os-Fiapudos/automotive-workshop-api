@@ -13,6 +13,7 @@ import (
 	"automotive-workshop-api/internal/features/customer"
 	"automotive-workshop-api/internal/features/product"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
+	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
 	"automotive-workshop-api/internal/features/servicecatalog"
 	"automotive-workshop-api/internal/features/vehicle"
 	"automotive-workshop-api/internal/shared/config"
@@ -69,6 +70,9 @@ func main() {
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)
 
+	trackingRepository := servicetracking.NewPostgresTrackingRepository(pool)
+	trackingService := servicetracking.NewTrackingService(trackingRepository)
+
 	router := http.NewServeMux()
 
 	// Public routes (auth FR6).
@@ -115,6 +119,13 @@ func main() {
 	// routes specifically, not a silent resolution of the open decision
 	// above.
 	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+
+	// Service Order Tracking (specs/service-order-tracking, RF12): a
+	// customer-facing route that deliberately never requires the
+	// administrative JWT (requirements.md §4/AC10) — it validates its own
+	// tracking token instead, so it is registered unwrapped, like Service
+	// Order Opening's own creation route above.
+	servicetracking.RegisterRoutes(router, trackingService)
 
 	log.Printf("listening on :%s", configuration.Port)
 	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))

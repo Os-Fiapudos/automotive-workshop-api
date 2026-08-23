@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
 // fakeRepository is an in-memory ServiceOrderRepository + serviceOrderLookups
@@ -53,10 +55,14 @@ func (fake *fakeRepository) seedDecidedQuote(orderID uuid.UUID, status QuoteStat
 	fake.quotes[orderID] = &Quote{ID: uuid.New(), ServiceOrderID: orderID, Status: status}
 }
 
-func (fake *fakeRepository) Create(_ context.Context, order *ServiceOrder) error {
+func (fake *fakeRepository) Create(_ context.Context, order *ServiceOrder) (string, error) {
 	order.Code = int64(len(fake.orders) + 1)
 	fake.orders = append(fake.orders, order)
-	return nil
+	rawToken, err := trackingtoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	return rawToken, nil
 }
 
 func (fake *fakeRepository) findServiceOrderByID(_ context.Context, id uuid.UUID) (*ServiceOrder, error) {

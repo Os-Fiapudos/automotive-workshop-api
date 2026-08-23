@@ -35,6 +35,16 @@ func Conflict(code, message string) *Error {
 	return &Error{Status: http.StatusConflict, Code: code, Message: message}
 }
 
+// Unauthorized builds a 401 error with a feature-specific code (e.g.
+// "INVALID_TRACKING_TOKEN"). Every other apierror-using feature sits behind
+// middleware.RequireAuth, which returns 401 via httpx before a handler is
+// ever reached (CLAUDE.md §8) — this constructor exists for handlers that
+// validate their own non-JWT credential and need to produce a 401 themselves
+// (see internal/features/service-order-tracking).
+func Unauthorized(code, message string) *Error {
+	return &Error{Status: http.StatusUnauthorized, Code: code, Message: message}
+}
+
 // Validation builds a 400 error for invalid/missing request fields, with
 // optional per-field details.
 func Validation(message string, details ...Detail) *Error {

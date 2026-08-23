@@ -145,6 +145,26 @@ traceability purposes.
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |
 
+## ServiceOrderTrackingToken
+
+Grants a customer read-only access to their own `ServiceOrder`'s tracking view
+(`GET /api/v1/acompanhamento/{codigo}`) without the administrative JWT. One token is
+auto-generated per `ServiceOrder` when it is created; only its hash is stored. See
+[specs/service-order-tracking](../specs/service-order-tracking/).
+
+| Field          | Type    | Description                                                                    |
+| -------------- | ------- | ---------------------------------------------------------------------------------- |
+| id             | uuid    | Technical identifier of the token record.                                          |
+| serviceOrderId | uuid    | Reference to the `ServiceOrder` this token grants access to. One token per order.   |
+| tokenHash      | string  | SHA-256 hash of the token. The raw token is returned to the caller once, at issuance, and never persisted. |
+| createdAt      | string  | Record creation date/time, generated automatically.                                |
+| revokedAt      | string? | Date/time the token was revoked. `null` while active.                              |
+
+> **Service Order Opening integration**: `POST /api/v1/service-orders` now also generates
+> this token and returns the raw value once, in a `trackingToken` field on the creation
+> response — see `specs/service-order-opening/design.md`'s cross-reference note and
+> `specs/service-order-tracking/design.md` §5.
+
 ## AuditServices
 
 Records the start and end of the execution of each service within a service order, for
