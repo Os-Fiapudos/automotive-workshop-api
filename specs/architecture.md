@@ -58,6 +58,22 @@ code but are not yet described in this document; the sections below cover `auth`
 > `specs/service-order-query/design.md` for the full design, including why the ticket's
 > two-route suggestion had to become one.
 
+> **Addendum (`specs/service-order-execution/`)**: `service-order` gained four more
+> `requireAuth`-wrapped routes: `POST /api/v1/service-orders/{id}/executions` (start a
+> service execution), `POST /api/v1/service-orders/{id}/executions/{executionId}/finish`
+> (finish one), `POST /api/v1/service-orders/{id}/finalize` (`EM_EXECUCAO` →
+> `FINALIZADA`), and `POST /api/v1/service-orders/{id}/deliver` (`FINALIZADA` →
+> `ENTREGUE`). It also implements `ServiceExecution` — the Go name for the
+> `AuditServices` entity `docs/entities.md` already documented but no feature had built
+> yet — restructuring its table from a start/end event log to one row per execution with
+> its own `started_at`/`ended_at` columns (`docs/schema.sql`), needed to give the finish
+> endpoint a stable execution id to act on. One caveat carried over from planning: no code
+> anywhere implements the `AGUARDANDO_APROVACAO` → `EM_EXECUCAO` transition (quote
+> approval) — this feature treats an order already being `EM_EXECUCAO` as an external
+> precondition, so its endpoints cannot be exercised end-to-end from a freshly opened order
+> through the public API alone yet. See `specs/service-order-execution/design.md` for the
+> full design.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under

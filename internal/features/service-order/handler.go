@@ -48,6 +48,13 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	// that section for why.
 	mux.Handle("GET /api/v1/service-orders", wrap(handler.list))
 	mux.Handle("GET /api/v1/service-orders/{id}", wrap(handler.get))
+
+	// Added by specs/service-order-execution/ — all four requireAuth-wrapped,
+	// per specs/auth/design.md §7's "every new route requires auth" convention.
+	mux.Handle("POST /api/v1/service-orders/{id}/executions", wrap(handler.startExecution))
+	mux.Handle("POST /api/v1/service-orders/{id}/executions/{executionId}/finish", wrap(handler.finishExecution))
+	mux.Handle("POST /api/v1/service-orders/{id}/finalize", wrap(handler.finalizeOrder))
+	mux.Handle("POST /api/v1/service-orders/{id}/deliver", wrap(handler.deliverOrder))
 }
 
 type serviceOrderHandler struct {
@@ -253,4 +260,102 @@ func (handler *serviceOrderHandler) get(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, toDetailResponse(detail))
+}
+
+// startExecution handles POST /api/v1/service-orders/{id}/executions
+// (specs/service-order-execution/).
+func (handler *serviceOrderHandler) startExecution(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	request, apiError := decodeJSON[StartExecutionRequest](r)
+	if apiError != nil {
+		apierror.Write(w, apiError)
+		return
+	}
+	if details := request.Validate(); len(details) > 0 {
+		apierror.Write(w, apierror.Validation("invalid service execution data", details...))
+		return
+	}
+
+	serviceID, err := uuid.Parse(request.ServiceID)
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("requested service not found"))
+		return
+	}
+
+	execution, err := handler.service.StartExecution(r.Context(), id, serviceID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	w.Header().Set("Location", "/api/v1/service-orders/"+id.String()+"/executions/"+execution.ID.String())
+	writeJSON(w, http.StatusCreated, toServiceExecutionResponse(execution))
+}
+
+// finishExecution handles
+// POST /api/v1/service-orders/{id}/executions/{executionId}/finish.
+func (handler *serviceOrderHandler) finishExecution(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+	executionID, err := uuid.Parse(r.PathValue("executionId"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service execution not found"))
+		return
+	}
+
+	request, apiError := decodeOptionalJSON[FinishExecutionRequest](r)
+	if apiError != nil {
+		apierror.Write(w, apiError)
+		return
+	}
+
+	execution, err := handler.service.FinishExecution(r.Context(), id, executionID, request.EndedAt)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toServiceExecutionResponse(execution))
+}
+
+// finalizeOrder handles POST /api/v1/service-orders/{id}/finalize.
+func (handler *serviceOrderHandler) finalizeOrder(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	order, err := handler.service.FinalizeOrder(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toServiceOrderStatusResponse(order))
+}
+
+// deliverOrder handles POST /api/v1/service-orders/{id}/deliver.
+func (handler *serviceOrderHandler) deliverOrder(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	order, err := handler.service.DeliverOrder(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toServiceOrderStatusResponse(order))
 }

@@ -3,6 +3,7 @@ package serviceorder
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -31,6 +32,21 @@ func parseIntParam(r *http.Request, key string, defaultValue int) int {
 func decodeJSON[T any](r *http.Request) (T, *apierror.Error) {
 	var value T
 	if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+		return value, apierror.BadRequest("request body is not valid JSON")
+	}
+	return value, nil
+}
+
+// decodeOptionalJSON behaves like decodeJSON, except a zero-length request
+// body (json.Decode's io.EOF) is treated as "no body sent" rather than an
+// error — used by requests whose entire body is optional, like
+// FinishExecutionRequest's endedAt (design.md §2.5).
+func decodeOptionalJSON[T any](r *http.Request) (T, *apierror.Error) {
+	var value T
+	if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+		if errors.Is(err, io.EOF) {
+			return value, nil
+		}
 		return value, apierror.BadRequest("request body is not valid JSON")
 	}
 	return value, nil
@@ -72,6 +88,14 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.NotFound("product not found"))
 	case errors.Is(err, ErrProductInactive):
 		apierror.Write(w, apierror.Conflict("PRODUCT_INACTIVE", "product is inactive"))
+	case errors.Is(err, ErrServiceExecutionNotFound):
+		apierror.Write(w, apierror.NotFound("service execution not found"))
+	case errors.Is(err, ErrServiceExecutionAlreadyFinished):
+		apierror.Write(w, apierror.Conflict("SERVICE_EXECUTION_ALREADY_FINISHED", "service execution has already been finished"))
+	case errors.Is(err, ErrServiceExecutionEndBeforeStart):
+		apierror.Write(w, apierror.Validation("service execution end date cannot be before its start date"))
+	case errors.Is(err, ErrExecutionsNotCompleted):
+		apierror.Write(w, apierror.Conflict("EXECUTIONS_NOT_COMPLETED", "service order has pending service executions and cannot be finalized"))
 	default:
 		apierror.Write(w, apierror.Internal("unexpected error"))
 	}

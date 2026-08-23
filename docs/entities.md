@@ -140,7 +140,7 @@ traceability purposes.
 | id             | uuid   | Technical identifier of the history record.                                        |
 | serviceOrderId | uuid   | Reference to the `ServiceOrder` this event belongs to.                             |
 | occurredAt     | string | Date/time the event occurred.                                                      |
-| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `approval`, `completion` or `cancellation`. |
+| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `approval`, `completion`, `cancellation` or `delivery` (the last added by [specs/service-order-execution/](../specs/service-order-execution/), for `FINALIZADA` → `ENTREGUE`; `completion` is reused for `EM_EXECUCAO` → `FINALIZADA`). |
 | description    | string | Details of what happened in the event.                                             |
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |
@@ -165,18 +165,21 @@ auto-generated per `ServiceOrder` when it is created; only its hash is stored. S
 > response — see `specs/service-order-opening/design.md`'s cross-reference note and
 > `specs/service-order-tracking/design.md` §5.
 
-## AuditServices
+## AuditServices (ServiceExecution)
 
-Records the start and end of the execution of each service within a service order, for
-time-tracking and productivity control.
+Records one execution of a service within a service order, for time-tracking and
+productivity control. Implemented in Go as `ServiceExecution` by
+[specs/service-order-execution/](../specs/service-order-execution/) — the first feature to
+implement this entity; see that spec's `design.md` §1.3 for why the persisted shape is one
+row per execution (with its own start/end timestamps) rather than a start/end event log.
 
-| Field          | Type   | Description                                                        |
-| -------------- | ------ | ------------------------------------------------------------------- |
-| id             | uuid   | Technical identifier of the audit record.                           |
-| serviceOrderId | uuid   | Reference to the `ServiceOrder` in progress.                        |
-| serviceId      | uuid   | Reference to the `Service` being executed.                          |
-| occurredAt     | string | Date/time the event was recorded.                                   |
-| event          | string | Event milestone: `start` (execution started) or `end` (execution finished). |
+| Field          | Type    | Description                                                        |
+| -------------- | ------- | ------------------------------------------------------------------- |
+| id             | uuid    | Technical identifier of the execution record.                       |
+| serviceOrderId | uuid    | Reference to the `ServiceOrder` in progress.                        |
+| serviceId      | uuid    | Reference to the `Service` being executed.                          |
+| startedAt      | string  | Date/time the execution started.                                    |
+| endedAt        | string? | Date/time the execution finished. `null` while still in progress.   |
 
 ## User
 

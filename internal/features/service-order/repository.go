@@ -79,6 +79,10 @@ type serviceOrderLookups interface {
 	findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error)
 	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error)
 	listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error)
+
+	// Added by specs/service-order-execution/.
+	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error)
+	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
@@ -94,6 +98,12 @@ type ServiceOrderRepository interface {
 	StartDiagnosis(ctx context.Context, order *ServiceOrder) error
 	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
 	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
+
+	// Added by specs/service-order-execution/.
+	StartExecution(ctx context.Context, execution *ServiceExecution) error
+	FinishExecution(ctx context.Context, execution *ServiceExecution) error
+	FinalizeOrder(ctx context.Context, order *ServiceOrder) error
+	DeliverOrder(ctx context.Context, order *ServiceOrder) error
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and

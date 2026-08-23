@@ -62,6 +62,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- 'diagnosis_started' and 'quote_composed' were added by the Service Order
 -- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
+-- 'delivery' was added by the Service Order Execution/Finalization/Delivery feature
+-- (specs/service-order-execution/) for the FINALIZADA -> ENTREGUE transition; that same
+-- feature reuses 'completion' for EM_EXECUCAO -> FINALIZADA.
 DO $$ BEGIN
     CREATE TYPE history_event AS ENUM (
         'creation',
@@ -69,12 +72,9 @@ DO $$ BEGIN
         'quote_composed',
         'approval',
         'completion',
-        'cancellation'
+        'cancellation',
+        'delivery'
     );
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
-    CREATE TYPE audit_event AS ENUM ('start', 'end');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ==== Tables ====
@@ -342,22 +342,26 @@ COMMENT ON COLUMN service_order_tracking_tokens.token_hash IS 'SHA-256 hash of t
 COMMENT ON COLUMN service_order_tracking_tokens.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN service_order_tracking_tokens.revoked_at IS 'Date/time the token was revoked. NULL while active.';
 
--- ---- AuditServices ----
+-- ---- AuditServices (ServiceExecution in Go — specs/service-order-execution/) ----
+-- One row per execution of a service within a service order, not an event log: started_at
+-- is set when execution begins, ended_at stays NULL until it finishes. Restructured from an
+-- earlier start/end event-log shape (specs/service-order-execution/design.md 1.3) before any
+-- Go feature ever implemented this table, so no data migration was needed.
 
 CREATE TABLE IF NOT EXISTS audit_services (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
     service_id        UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
-    occurred_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    event             audit_event NOT NULL
+    started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at          TIMESTAMPTZ
 );
 
-COMMENT ON TABLE audit_services IS 'Start and end of the execution of each service within a service order, for time/productivity tracking.';
-COMMENT ON COLUMN audit_services.id IS 'Technical identifier of the audit record.';
+COMMENT ON TABLE audit_services IS 'One row per execution of a service within a service order (started_at/ended_at), for time/productivity tracking.';
+COMMENT ON COLUMN audit_services.id IS 'Technical identifier of the execution record.';
 COMMENT ON COLUMN audit_services.service_order_id IS 'Reference to the ServiceOrder in progress.';
 COMMENT ON COLUMN audit_services.service_id IS 'Reference to the Service being executed.';
-COMMENT ON COLUMN audit_services.occurred_at IS 'Date/time the event was recorded.';
-COMMENT ON COLUMN audit_services.event IS 'Event milestone: start (execution started) or end (execution finished).';
+COMMENT ON COLUMN audit_services.started_at IS 'Date/time the execution started.';
+COMMENT ON COLUMN audit_services.ended_at IS 'Date/time the execution finished. NULL while still in progress.';
 
 -- =============================================================================
 -- ==== Indexes ====
@@ -429,7 +433,7 @@ CREATE INDEX IF NOT EXISTS ix_quotes_status_pending
 
 -- Service execution audit by service order.
 CREATE INDEX IF NOT EXISTS ix_audit_services_order_service
-    ON audit_services (service_order_id, service_id, occurred_at);
+    ON audit_services (service_order_id, service_id, started_at);
 
 -- ---- Text search (optional) ----
 -- Requires the pg_trgm extension (commented out at the top of the file).

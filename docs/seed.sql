@@ -141,14 +141,15 @@ INSERT INTO service_order_history (id, service_order_id, occurred_at, event, des
     ('11100000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000002', now() - interval '5 days' + interval '1 hour',  'approval',    'Customer approved the quote.',                   'AGUARDANDO_APROVACAO', 'EM_EXECUCAO')
 ON CONFLICT (id) DO NOTHING;
 
--- ==== Service Execution Audit ====
--- Service order 1 (ENTREGUE): oil change with start and end recorded.
+-- ==== Service Execution Audit (ServiceExecution — specs/service-order-execution/) ====
+-- One row per execution, started_at/ended_at instead of a start/end event log
+-- (specs/service-order-execution/design.md §1.3).
+-- Service order 1 (ENTREGUE): oil change execution, started and finished.
 -- Service order 2 (EM_EXECUCAO): brake inspection started, not yet finished.
 
-INSERT INTO audit_services (id, service_order_id, service_id, occurred_at, event) VALUES
-    ('22200000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours', 'start'),
-    ('22200000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours 30 minutes', 'end'),
-    ('22200000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', now() - interval '5 days' + interval '1 hour', 'start')
+INSERT INTO audit_services (id, service_order_id, service_id, started_at, ended_at) VALUES
+    ('22200000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours', now() - interval '10 days' + interval '2 hours 30 minutes'),
+    ('22200000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', now() - interval '5 days' + interval '1 hour', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Users (administrative) ====

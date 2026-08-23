@@ -757,3 +757,226 @@ func TestServiceOrderDetailMalformedIdentifierReturns404(t *testing.T) {
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/not-a-valid-identifier", nil, authToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
+
+// ---- specs/service-order-execution/ ----
+//
+// No endpoint implements AGUARDANDO_APROVACAO -> EM_EXECUCAO yet
+// (requirements.md §2.1) — moveServiceOrderToEmExecucao and approveQuote
+// below reach that precondition directly via SQL, the same "insert the
+// missing precondition directly" pattern insertVehicle/insertProduct/
+// insertService already use for gaps the public API can't fill.
+
+func moveServiceOrderToEmExecucao(t *testing.T, pool *pgxpool.Pool, orderID string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `UPDATE service_orders SET status = 'EM_EXECUCAO' WHERE id = $1`, orderID)
+	require.NoError(t, err)
+}
+
+func approveQuote(t *testing.T, pool *pgxpool.Pool, orderID string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `UPDATE quotes SET status = 'APPROVED' WHERE service_order_id = $1`, orderID)
+	require.NoError(t, err)
+}
+
+// createOrderInExecutionWithRequiredService builds a full order through
+// diagnosis + quote composition (one service line item), then jumps it to
+// EM_EXECUCAO with its quote APPROVED, returning the order and the service
+// id its quote requires an execution for (BR5).
+func createOrderInExecutionWithRequiredService(t *testing.T, server string, pool *pgxpool.Pool, authToken string) (serviceorder.Response, string) {
+	t.Helper()
+
+	order := createServiceOrder(t, server, pool)
+	serviceID := insertService(t, pool)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/diagnosis", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := map[string]any{"items": []map[string]any{{"serviceId": serviceID, "quantity": 1}}}
+	resp = doAuthJSON(t, http.MethodPut, server+"/api/v1/service-orders/"+order.ID+"/quote", body, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	approveQuote(t, pool, order.ID)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	return order, serviceID
+}
+
+func TestServiceExecutionStartSuccess(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, serviceID := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var execution serviceorder.ServiceExecutionResponse
+	decodeBody(t, resp, &execution)
+	assert.Equal(t, order.ID, execution.ServiceOrderID)
+	assert.Equal(t, serviceID, execution.ServiceID)
+	assert.False(t, execution.StartedAt.IsZero())
+	assert.Nil(t, execution.EndedAt)
+}
+
+// TestServiceExecutionStartRejectsBeforeApproval covers the acceptance
+// checklist's "Execução não pode ser iniciada sem orçamento aprovado" (BR2),
+// via the EM_EXECUCAO precondition (requirements.md §2.1).
+func TestServiceExecutionStartRejectsBeforeApproval(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool) // still RECEBIDA
+	serviceID := insertService(t, pool)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestServiceExecutionStartRequiresAuth(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, serviceID := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServiceExecutionFinishSuccess(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, serviceID := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	require.Equal(t, http.StatusCreated, startResp.StatusCode)
+	var started serviceorder.ServiceExecutionResponse
+	decodeBody(t, startResp, &started)
+
+	// No body: the server must default endedAt to now (design.md §2.5).
+	finishResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions/"+started.ID+"/finish", nil, authToken)
+	require.Equal(t, http.StatusOK, finishResp.StatusCode)
+
+	var finished serviceorder.ServiceExecutionResponse
+	decodeBody(t, finishResp, &finished)
+	require.NotNil(t, finished.EndedAt)
+	assert.False(t, finished.EndedAt.Before(finished.StartedAt))
+}
+
+// TestServiceExecutionFinishRejectsEndBeforeStart covers BR4.
+func TestServiceExecutionFinishRejectsEndBeforeStart(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, serviceID := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	require.Equal(t, http.StatusCreated, startResp.StatusCode)
+	var started serviceorder.ServiceExecutionResponse
+	decodeBody(t, startResp, &started)
+
+	before := started.StartedAt.Add(-1 * time.Hour)
+	finishResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions/"+started.ID+"/finish",
+		map[string]any{"endedAt": before.Format(time.RFC3339)}, authToken)
+	assert.Equal(t, http.StatusBadRequest, finishResp.StatusCode)
+}
+
+func TestServiceExecutionFinishRejectsUnknownExecution(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, _ := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions/"+uuid.NewString()+"/finish", nil, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// TestServiceOrderFinalizeRequiresCompletedExecutions covers the acceptance
+// checklist's "Finalização da OS exige execuções concluídas" (BR5).
+func TestServiceOrderFinalizeRequiresCompletedExecutions(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order, serviceID := createOrderInExecutionWithRequiredService(t, server, pool, authToken)
+
+	finalizeResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	assert.Equal(t, http.StatusConflict, finalizeResp.StatusCode, "the required execution has not even started yet")
+
+	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	require.Equal(t, http.StatusCreated, startResp.StatusCode)
+	var started serviceorder.ServiceExecutionResponse
+	decodeBody(t, startResp, &started)
+
+	finalizeResp = doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	assert.Equal(t, http.StatusConflict, finalizeResp.StatusCode, "the required execution has started but not finished")
+
+	finishResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions/"+started.ID+"/finish", nil, authToken)
+	require.Equal(t, http.StatusOK, finishResp.StatusCode)
+
+	finalizeResp = doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	require.Equal(t, http.StatusOK, finalizeResp.StatusCode)
+
+	var finalized serviceorder.Response
+	decodeBody(t, finalizeResp, &finalized)
+	assert.Equal(t, "FINALIZADA", finalized.Status)
+
+	var event, previousStatus, newStatus string
+	err := pool.QueryRow(context.Background(),
+		`SELECT event, previous_status, new_status FROM service_order_history WHERE service_order_id = $1 AND event = 'completion'`,
+		order.ID,
+	).Scan(&event, &previousStatus, &newStatus)
+	require.NoError(t, err, "finalizing must generate a history entry (BR8)")
+	assert.Equal(t, "EM_EXECUCAO", previousStatus)
+	assert.Equal(t, "FINALIZADA", newStatus)
+}
+
+func TestServiceOrderFinalizeRejectsNonEmExecucao(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool) // still RECEBIDA
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestServiceOrderDeliverSuccess(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	finalizeResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	require.Equal(t, http.StatusOK, finalizeResp.StatusCode)
+
+	deliverResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/deliver", nil, authToken)
+	require.Equal(t, http.StatusOK, deliverResp.StatusCode)
+
+	var delivered serviceorder.Response
+	decodeBody(t, deliverResp, &delivered)
+	assert.Equal(t, "ENTREGUE", delivered.Status)
+
+	var event, previousStatus, newStatus string
+	err := pool.QueryRow(context.Background(),
+		`SELECT event, previous_status, new_status FROM service_order_history WHERE service_order_id = $1 AND event = 'delivery'`,
+		order.ID,
+	).Scan(&event, &previousStatus, &newStatus)
+	require.NoError(t, err, "delivering must generate a history entry (BR8)")
+	assert.Equal(t, "FINALIZADA", previousStatus)
+	assert.Equal(t, "ENTREGUE", newStatus)
+}
+
+func TestServiceOrderDeliverRejectsNonFinalizada(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/deliver", nil, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+// TestServiceOrderFinalizedRejectsNewExecutions covers the acceptance
+// checklist's "OS entregue/finalizada não aceita novas alterações
+// operacionais" (BR6).
+func TestServiceOrderFinalizedRejectsNewExecutions(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	serviceID := insertService(t, pool)
+
+	finalizeResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
+	require.Equal(t, http.StatusOK, finalizeResp.StatusCode)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
+		map[string]any{"serviceId": serviceID}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
