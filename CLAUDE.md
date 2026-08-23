@@ -26,21 +26,29 @@ The full domain model (entities, fields, enums) is documented in
 [docs/schema.sql](docs/schema.sql).
 
 **Current state**: the skeleton stage is over. The HTTP server (stdlib `net/http`, no
-framework) exposes `/health` plus two implemented vertical slices:
+framework) exposes `/health` plus the implemented vertical slices:
 - **auth** (`internal/features/auth/`, [specs/auth/](specs/auth/)): administrative login
   (`POST /api/v1/auth/login`) issuing a JWT, and a protected `GET /api/v1/auth/me`.
 - **customer** (`internal/features/customer/`, [specs/customer-management/](specs/customer-management/)):
   full CRUD + logical deactivation for workshop customers (`/api/v1/customers*`, 6
   endpoints), CPF/CNPJ normalization and check-digit validation (including the
   alphanumeric CNPJ format in effect since July 2026).
+- **servicecatalog** (`internal/features/servicecatalog/`, [specs/service-catalog/](specs/service-catalog/)):
+  protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
+  prices, with an `active` flag and logical deletion.
 
-Both are backed by a real Postgres connection (`pgx/v5` via `internal/shared/database`),
-with unit tests alongside the code and integration tests in `internal/handlers_test/`. The
-database schema and sample data modeled in `docs/` are now consumed by both features
-(`users` and `customers` tables). Every other business entity (Vehicle, Product, Service,
-ServiceOrder, etc.) is still schema/docs only, with no corresponding Go feature yet —
-`internal/features/user/` (singular, unrelated to `auth`'s `users` table — an unfortunately
-similar name, see the note in section 3) remains an empty placeholder.
+`internal/features/product/` and `internal/features/service-order/` are also present in the
+code but are not described in this document or in `specs/architecture.md` yet — treat those
+two sections as incomplete rather than authoritative for them.
+
+These slices are backed by a real Postgres connection (`pgx/v5` via
+`internal/shared/database`), with unit tests alongside the code and integration tests in
+`internal/handlers_test/`. The database schema and sample data modeled in `docs/` are now
+consumed by the implemented features (`users`, `customers`, and `services` tables). Every
+other business entity (Vehicle, ServiceOrderHistory, Quote, etc.) is still schema/docs only,
+with no corresponding Go feature yet — `internal/features/user/` (singular, unrelated to
+`auth`'s `users` table — an unfortunately similar name, see the note in section 3) remains
+an empty placeholder.
 
 **The customer endpoints are currently unauthenticated** — `cmd/api/main.go` does not wrap
 `customer.RegisterRoutes` in `middleware.RequireAuth`. `specs/auth/design.md` §7 states the
@@ -93,18 +101,22 @@ internal/features/         → one folder per business feature (vertical slice)
                               (login, /me; unit-tested)
   features/customer/       → implemented slice: handler + service + repository + model
                               (CRUD + deactivation; unit- and integration-tested)
+  features/servicecatalog/ → implemented slice: handler + service + repository + model
+                              (service catalog CRUD over /api/v1/services; unit- and
+                              integration-tested)
   features/user/           → placeholder slice: only has doc.go, no implementation yet.
                               NOTE: unrelated to auth's `users` database table — this is a
                               distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
                               database (pgx pool), token (JWT), middleware (auth),
-                              httpx (JSON/error envelope, used by auth), apierror (JSON/error
-                              envelope, used by customer — see section 8 for why there are
-                              currently two and what that means for new code)
+                              httpx (JSON writer + error envelope, used by auth),
+                              apierror (JSON error envelope, used by customer and
+                              servicecatalog — see section 8 for why there are currently two
+                              and what that means for new code)
                               document (CPF/CNPJ), config (env var loading)
 internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
-                              customer_test.go), each skipped independently when
-                              DATABASE_URL is unset
+                              customer_test.go, servicecatalog_test.go), each skipped
+                              independently when DATABASE_URL is unset
 docs/                      → domain model (entities.md) and PostgreSQL schema
                               (schema.sql, seed.sql)
 .github/workflows/ci.yml   → CI pipeline
@@ -122,16 +134,17 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 (handler/controller, service, repository, model) together — instead of splitting by
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
-by both `internal/features/auth/` and `internal/features/customer/`; `internal/features/user/`
-remains an unimplemented placeholder folder.
+by `internal/features/auth/`, `internal/features/customer/`, and
+`internal/features/servicecatalog/`; `internal/features/user/` remains an unimplemented
+placeholder folder.
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
-pool, shared by both features), authentication middleware (`internal/shared/middleware`),
+pool, shared by every feature), authentication middleware (`internal/shared/middleware`),
 and JWT issuing/verification (`internal/shared/token`) — introduced by the auth feature and
-available to future features; CPF/CNPJ validation (`internal/shared/document`), the API
-config loader (`internal/shared/config`), and a JSON error envelope
-(`internal/shared/apierror`) — introduced by the Customer Management feature. See
-[specs/architecture.md](specs/architecture.md) for the full, code-derived description.
+reused as-is by the service catalog, which added no new shared code; CPF/CNPJ validation
+(`internal/shared/document`), the API config loader (`internal/shared/config`), and a JSON
+error envelope (`internal/shared/apierror`) — introduced by the Customer Management feature.
+See [specs/architecture.md](specs/architecture.md) for the full, code-derived description.
 
 ## 5. How to run the application
 
@@ -173,10 +186,11 @@ docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
 go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
-tests alongside each feature/shared package (`internal/features/{auth,customer}/*_test.go`,
-`internal/shared/*/*_test.go`) plus the integration tests in `internal/handlers_test/`
-(`auth_test.go`, `customer_test.go`). Each integration test file self-skips (`t.Skip`, not
-fail) when `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
+tests alongside each feature/shared package
+(`internal/features/{auth,customer,servicecatalog}/*_test.go`, `internal/shared/*/*_test.go`)
+plus the integration tests in `internal/handlers_test/` (`auth_test.go`, `customer_test.go`,
+`servicecatalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
+`DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
 To also run the integration tests against the local compose Postgres:
 ```bash
@@ -227,7 +241,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
     `auth`'s handler and middleware. Decided in `specs/auth/design.md` §4.
   - `internal/shared/apierror` (`Write` + typed constructors `NotFound`/`Conflict`/
     `Validation`/`BadRequest`/`Internal`) — `{"error": {"code", "message", "details"?}}`,
-    used by `customer`'s handler. Decided in `specs/customer-management/design.md` §1.5.
+    used by `customer`'s and `servicecatalog`'s handlers. Decided in
+    `specs/customer-management/design.md` §1.5; the service catalog adopted it on
+    2026-08-19 (`specs/service-catalog/design.md` §2) rather than keep a second exception,
+    so `auth` is the only feature left on `httpx`.
   Both currently compile and work; this is **not a build conflict, it's an unresolved
   architecture decision** surfaced when the two branches were merged. **Do not silently
   pick one and refactor the other feature to match** — that is a cross-feature change with
@@ -241,7 +258,11 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
   authorization (403) is still **to be defined** — not implemented in the MVP. **The
   Customer Management routes are not currently wrapped in `RequireAuth`** — see section 1's
-  note; this is an open decision, not an oversight to silently fix.
+  note; this is an open decision, not an oversight to silently fix. The service catalog
+  routes are all wrapped in `RequireAuth`.
+- **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
+  defined by the service catalog listing), leaving room for pagination metadata later.
+  Reuse this shape for new list endpoints instead of returning a bare JSON array.
 - **To be defined**: which error envelope (`httpx` vs. `apierror`) becomes the single
   project-wide convention (see above), general request/handler error-handling convention
   beyond the envelope itself (e.g. a centralized error-mapping helper across features),
@@ -428,14 +449,17 @@ flow, the `specs/<feature>/requirements.md|design.md|tasks.md` organization) is 
 [specs/README.md](specs/README.md). The current system architecture, documented
 exclusively from the existing code, is in
 [specs/architecture.md](specs/architecture.md) — keep it up to date when a new feature
-changes the real architecture. Two feature folders exist today: `specs/auth/` and
-`specs/customer-management/`; a request to implement a feature without a corresponding
-specification should be treated as ambiguous: ask for the requirements before writing code.
+changes the real architecture. Three feature folders exist today: `specs/auth/`,
+`specs/customer-management/`, and `specs/service-catalog/`; a request to implement a feature
+without a corresponding specification should be treated as ambiguous: ask for the
+requirements before writing code.
 
-**Open decisions inherited from merging the `auth` and `customer-management` branches**
-(neither should be resolved silently — see section 8 for detail):
-1. Which JSON error envelope (`internal/shared/httpx` vs. `internal/shared/apierror`)
-   becomes the single project-wide convention, and who migrates.
+**Open decisions inherited from merging the feature branches** (none should be resolved
+silently — see section 8 for detail):
+1. Whether `auth` migrates from `internal/shared/httpx` to `internal/shared/apierror`.
+   `customer` and `servicecatalog` use `apierror`; `auth` (and
+   `middleware.RequireAuth`'s 401) still uses `httpx`, so migrating it would change the
+   401/500 bodies of the auth routes — a behavioral change that needs its own decision.
 2. Whether/when the Customer Management routes should be wrapped in
    `middleware.RequireAuth`, per the "every non-public route requires auth" convention
    `specs/auth/design.md` §7 sets going forward.
