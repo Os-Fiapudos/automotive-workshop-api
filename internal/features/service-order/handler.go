@@ -2,10 +2,20 @@ package serviceorder
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/document"
+)
+
+const (
+	defaultPage     = 1
+	defaultPageSize = 20
+	maxPageSize     = 100
 )
 
 // RegisterRoutes registers every Service Order Opening/Diagnosis/Quote
@@ -30,6 +40,14 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	mux.Handle("POST /api/v1/service-orders/{id}/diagnosis", wrap(handler.startDiagnosis))
 	mux.Handle("PUT /api/v1/service-orders/{id}/quote", wrap(handler.composeQuote))
 	mux.Handle("GET /api/v1/service-orders/{id}/quote", wrap(handler.getQuote))
+
+	// Added by specs/service-order-query/ (RNF02: every route here requires
+	// a valid JWT, unlike the create route above). {id} accepts either a
+	// UUID or a sequential code (design.md §1.2) — a separate
+	// GET .../code/{code} route is not implementable under this prefix, see
+	// that section for why.
+	mux.Handle("GET /api/v1/service-orders", wrap(handler.list))
+	mux.Handle("GET /api/v1/service-orders/{id}", wrap(handler.get))
 }
 
 type serviceOrderHandler struct {
@@ -115,4 +133,124 @@ func (handler *serviceOrderHandler) getQuote(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, http.StatusOK, toQuoteResponse(quote))
+}
+
+// list handles GET /api/v1/service-orders (specs/service-order-query/,
+// requirements.md BR1-BR3).
+func (handler *serviceOrderHandler) list(w http.ResponseWriter, r *http.Request) {
+	page := parseIntParam(r, "page", defaultPage)
+	if page < 1 {
+		page = defaultPage
+	}
+	pageSize := parseIntParam(r, "pageSize", defaultPageSize)
+	if pageSize < 1 {
+		pageSize = defaultPageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	filter, details := parseListFilter(r)
+	if len(details) > 0 {
+		apierror.Write(w, apierror.Validation("invalid filter", details...))
+		return
+	}
+
+	items, total, err := handler.service.List(r.Context(), filter, page, pageSize)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toListResponse(items, page, pageSize, total))
+}
+
+// parseListFilter reads/validates the GET /api/v1/service-orders query
+// filters (design.md §1.3). Structural validation (is "code" a number, is
+// "status" one of the six known values, is "createdFrom"/"createdTo" a valid
+// RFC3339 date-time) happens here, mirroring CreateRequest.Validate()'s
+// handler-side call in this same package.
+func parseListFilter(r *http.Request) (ListFilter, []apierror.Detail) {
+	var filter ListFilter
+	var details []apierror.Detail
+	query := r.URL.Query()
+
+	if raw := strings.TrimSpace(query.Get("code")); raw != "" {
+		code, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			details = append(details, apierror.Detail{Field: "code", Message: "must be a valid integer"})
+		} else {
+			filter.Code = &code
+		}
+	}
+
+	if raw := strings.TrimSpace(query.Get("status")); raw != "" {
+		if !isKnownStatus(raw) {
+			details = append(details, apierror.Detail{Field: "status", Message: "must be one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE"})
+		} else {
+			filter.Status = &raw
+		}
+	}
+
+	if raw := strings.TrimSpace(query.Get("document")); raw != "" {
+		filter.CustomerDocument = document.Normalize(raw)
+	}
+
+	if raw := strings.TrimSpace(query.Get("licensePlate")); raw != "" {
+		filter.LicensePlate = strings.ToUpper(raw)
+	}
+
+	if raw := strings.TrimSpace(query.Get("createdFrom")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			details = append(details, apierror.Detail{Field: "createdFrom", Message: "must be an RFC3339 date-time"})
+		} else {
+			filter.CreatedFrom = &parsed
+		}
+	}
+
+	if raw := strings.TrimSpace(query.Get("createdTo")); raw != "" {
+		parsed, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			details = append(details, apierror.Detail{Field: "createdTo", Message: "must be an RFC3339 date-time"})
+		} else {
+			filter.CreatedTo = &parsed
+		}
+	}
+
+	return filter, details
+}
+
+// get handles GET /api/v1/service-orders/{id} (specs/service-order-query/).
+// {id} accepts either the order's technical UUID or its sequential code — a
+// UUID and a bare integer can never be mistaken for each other, so trying
+// uuid.Parse first and falling back to strconv.ParseInt is unambiguous
+// (design.md §1.2/§1.9: a separate GET .../code/{code} route is not
+// implementable under this prefix, this merged route replaces it).
+func (handler *serviceOrderHandler) get(w http.ResponseWriter, r *http.Request) {
+	rawID := r.PathValue("id")
+
+	if id, err := uuid.Parse(rawID); err == nil {
+		detail, err := handler.service.GetDetail(r.Context(), id)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, toDetailResponse(detail))
+		return
+	}
+
+	code, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	detail, err := handler.service.GetDetailByCode(r.Context(), code)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toDetailResponse(detail))
 }

@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"context"
+	"sort"
 
 	"github.com/google/uuid"
 
@@ -12,23 +13,27 @@ import (
 // used only by the service-level unit tests in this package — no mocking
 // framework, same convention as internal/features/customer/fake_repository_test.go.
 type fakeRepository struct {
-	orders         []*ServiceOrder
-	customers      map[uuid.UUID]*customerRef
-	customersByDoc map[string]*customerRef
-	vehicles       map[uuid.UUID]*vehicleRef
-	services       map[uuid.UUID]*serviceRef
-	products       map[uuid.UUID]*productRef
-	quotes         map[uuid.UUID]*Quote // keyed by service order id
+	orders            []*ServiceOrder
+	customers         map[uuid.UUID]*customerRef
+	customersByDoc    map[string]*customerRef
+	vehicles          map[uuid.UUID]*vehicleRef
+	services          map[uuid.UUID]*serviceRef
+	products          map[uuid.UUID]*productRef
+	quotes            map[uuid.UUID]*Quote                 // keyed by service order id
+	requestedServices map[uuid.UUID][]*serviceRef          // keyed by service order id
+	history           map[uuid.UUID][]*ServiceOrderHistory // keyed by service order id
 }
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
-		customers:      make(map[uuid.UUID]*customerRef),
-		customersByDoc: make(map[string]*customerRef),
-		vehicles:       make(map[uuid.UUID]*vehicleRef),
-		services:       make(map[uuid.UUID]*serviceRef),
-		products:       make(map[uuid.UUID]*productRef),
-		quotes:         make(map[uuid.UUID]*Quote),
+		customers:         make(map[uuid.UUID]*customerRef),
+		customersByDoc:    make(map[string]*customerRef),
+		vehicles:          make(map[uuid.UUID]*vehicleRef),
+		services:          make(map[uuid.UUID]*serviceRef),
+		products:          make(map[uuid.UUID]*productRef),
+		quotes:            make(map[uuid.UUID]*Quote),
+		requestedServices: make(map[uuid.UUID][]*serviceRef),
+		history:           make(map[uuid.UUID][]*ServiceOrderHistory),
 	}
 }
 
@@ -165,4 +170,81 @@ func (fake *fakeRepository) findServicesByIDs(_ context.Context, ids []uuid.UUID
 		}
 	}
 	return refs, nil
+}
+
+// setRequestedServices/addHistory seed the query-only projections
+// findRequestedServices/findHistoryByServiceOrderID read back, used by
+// query_service_test.go (specs/service-order-query/).
+func (fake *fakeRepository) setRequestedServices(orderID uuid.UUID, refs []*serviceRef) {
+	fake.requestedServices[orderID] = refs
+}
+
+func (fake *fakeRepository) addHistory(orderID uuid.UUID, entry *ServiceOrderHistory) {
+	fake.history[orderID] = append(fake.history[orderID], entry)
+}
+
+func (fake *fakeRepository) findServiceOrderByCode(_ context.Context, code int64) (*ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code == code {
+			return order, nil
+		}
+	}
+	return nil, ErrServiceOrderNotFound
+}
+
+func (fake *fakeRepository) findRequestedServices(_ context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error) {
+	return fake.requestedServices[serviceOrderID], nil
+}
+
+func (fake *fakeRepository) findHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error) {
+	return fake.history[serviceOrderID], nil
+}
+
+// listServiceOrders is an in-memory equivalent of
+// PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
+// the same way the real SQL query does (design.md §1.3/§1.4), for the
+// service-layer unit tests to exercise without a database.
+func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+	var matched []*ServiceOrderListItem
+	for _, order := range fake.orders {
+		if filter.Code != nil && order.Code != *filter.Code {
+			continue
+		}
+		if filter.Status != nil && string(order.Status) != *filter.Status {
+			continue
+		}
+		customer := fake.customers[order.CustomerID]
+		if filter.CustomerDocument != "" && (customer == nil || customer.Document != filter.CustomerDocument) {
+			continue
+		}
+		vehicle := fake.vehicles[order.VehicleID]
+		if filter.LicensePlate != "" && (vehicle == nil || vehicle.LicensePlate != filter.LicensePlate) {
+			continue
+		}
+		if filter.CreatedFrom != nil && order.CreatedAt.Before(*filter.CreatedFrom) {
+			continue
+		}
+		if filter.CreatedTo != nil && order.CreatedAt.After(*filter.CreatedTo) {
+			continue
+		}
+		matched = append(matched, &ServiceOrderListItem{Order: order, Customer: customer, Vehicle: vehicle})
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		if !matched[i].Order.CreatedAt.Equal(matched[j].Order.CreatedAt) {
+			return matched[i].Order.CreatedAt.After(matched[j].Order.CreatedAt)
+		}
+		return matched[i].Order.Code > matched[j].Order.Code
+	})
+
+	total := len(matched)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return matched[start:end], total, nil
 }

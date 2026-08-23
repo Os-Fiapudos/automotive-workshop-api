@@ -2,11 +2,14 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -517,5 +520,240 @@ func TestServiceOrderGetQuoteNotFoundBeforeComposition(t *testing.T) {
 	order := createServiceOrder(t, server, pool)
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID+"/quote", nil, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// ---- specs/service-order-query/ ----
+
+func TestServiceOrderListRequiresAuth(t *testing.T) {
+	_, server, _ := testServiceOrderServer(t)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders", nil, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServiceOrderDetailRequiresAuth(t *testing.T) {
+	pool, server, _ := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID, nil, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServiceOrderListNoFilterReturnsMostRecentFirst(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	older := createServiceOrder(t, server, pool)
+	time.Sleep(10 * time.Millisecond)
+	newer := createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?pageSize=100", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	require.GreaterOrEqual(t, len(list.Data), 2)
+	positions := make(map[string]int, len(list.Data))
+	for i, item := range list.Data {
+		positions[item.ID] = i
+	}
+	assert.Less(t, positions[newer.ID], positions[older.ID])
+}
+
+func TestServiceOrderListFiltersByCode(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	createServiceOrder(t, server, pool)
+	target := createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+fmt.Sprintf("/api/v1/service-orders?code=%d", target.Code), nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	require.Len(t, list.Data, 1)
+	assert.Equal(t, target.ID, list.Data[0].ID)
+}
+
+func TestServiceOrderListFiltersByStatus(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	received := createServiceOrder(t, server, pool)
+	diagnosing := createServiceOrder(t, server, pool)
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+diagnosing.ID+"/diagnosis", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=EM_DIAGNOSTICO&pageSize=100", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	var ids []string
+	for _, item := range list.Data {
+		ids = append(ids, item.ID)
+	}
+	assert.Contains(t, ids, diagnosing.ID)
+	assert.NotContains(t, ids, received.ID)
+}
+
+func TestServiceOrderListFiltersByCustomerDocument(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID: createdCustomer.ID,
+		VehicleID:  vehicleID,
+	})
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var target serviceorder.Response
+	decodeBody(t, resp, &target)
+	cleanupServiceOrder(t, pool, target.ID)
+
+	createServiceOrder(t, server, pool) // a different customer/vehicle pair
+
+	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?document="+createdCustomer.Document+"&pageSize=100", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	require.Len(t, list.Data, 1)
+	assert.Equal(t, target.ID, list.Data[0].ID)
+}
+
+func TestServiceOrderListFiltersByLicensePlate(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	target := createServiceOrder(t, server, pool)
+	createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?licensePlate="+target.Vehicle.LicensePlate, nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	require.Len(t, list.Data, 1)
+	assert.Equal(t, target.ID, list.Data[0].ID)
+}
+
+func TestServiceOrderListFiltersByCreatedRange(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	target := createServiceOrder(t, server, pool)
+
+	from := target.CreatedAt.Add(-1 * time.Minute).UTC().Format(time.RFC3339)
+	to := target.CreatedAt.Add(1 * time.Minute).UTC().Format(time.RFC3339)
+	resp := doAuthJSON(t, http.MethodGet,
+		server+"/api/v1/service-orders?createdFrom="+url.QueryEscape(from)+"&createdTo="+url.QueryEscape(to), nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	var ids []string
+	for _, item := range list.Data {
+		ids = append(ids, item.ID)
+	}
+	assert.Contains(t, ids, target.ID)
+
+	farFuture := target.CreatedAt.Add(24 * time.Hour).UTC().Format(time.RFC3339)
+	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?createdFrom="+url.QueryEscape(farFuture), nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	decodeBody(t, resp, &list)
+	ids = nil
+	for _, item := range list.Data {
+		ids = append(ids, item.ID)
+	}
+	assert.NotContains(t, ids, target.ID)
+}
+
+func TestServiceOrderListInvalidStatusFilterIsRejected(t *testing.T) {
+	_, server, authToken := testServiceOrderServer(t)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=NOT_A_STATUS", nil, authToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestServiceOrderListPagination(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	for i := 0; i < 3; i++ {
+		createServiceOrder(t, server, pool)
+	}
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?page=1&pageSize=2", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var firstPage serviceorder.ListResponse
+	decodeBody(t, resp, &firstPage)
+	assert.Len(t, firstPage.Data, 2)
+	assert.Equal(t, 1, firstPage.Page)
+	assert.Equal(t, 2, firstPage.PageSize)
+	assert.GreaterOrEqual(t, firstPage.Total, 3)
+}
+
+func TestServiceOrderDetailByIDFullLifecycle(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	productID := insertProduct(t, pool, 35.90, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/diagnosis", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body := map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 2}}}
+	resp = doAuthJSON(t, http.MethodPut, server+"/api/v1/service-orders/"+order.ID+"/quote", body, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID, nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var detail serviceorder.DetailResponse
+	decodeBody(t, resp, &detail)
+
+	assert.Equal(t, order.ID, detail.ID)
+	assert.Equal(t, "AGUARDANDO_APROVACAO", detail.Status)
+	require.NotNil(t, detail.Quote)
+	assert.InDelta(t, 2*35.90, detail.Quote.TotalAmount, 0.0001)
+	require.Len(t, detail.Quote.Items, 1)
+	assert.GreaterOrEqual(t, len(detail.History), 2) // creation + quote_composed (diagnosis_started too)
+}
+
+func TestServiceOrderDetailByIDBeforeDiagnosis(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID, nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var detail serviceorder.DetailResponse
+	decodeBody(t, resp, &detail)
+
+	assert.Equal(t, "RECEBIDA", detail.Status)
+	assert.Nil(t, detail.Quote)
+	require.Len(t, detail.History, 1)
+	assert.Equal(t, "creation", detail.History[0].Event)
+}
+
+func TestServiceOrderDetailByCodeMatchesDetailByID(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+
+	resp := doAuthJSON(t, http.MethodGet, server+fmt.Sprintf("/api/v1/service-orders/%d", order.Code), nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var byCode serviceorder.DetailResponse
+	decodeBody(t, resp, &byCode)
+
+	assert.Equal(t, order.ID, byCode.ID)
+	assert.Equal(t, order.Customer.ID, byCode.Customer.ID)
+	assert.Equal(t, order.Vehicle.ID, byCode.Vehicle.ID)
+}
+
+func TestServiceOrderDetailUnknownIDReturns404(t *testing.T) {
+	_, server, authToken := testServiceOrderServer(t)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+uuid.NewString(), nil, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestServiceOrderDetailUnknownCodeReturns404(t *testing.T) {
+	_, server, authToken := testServiceOrderServer(t)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/999999999", nil, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestServiceOrderDetailMalformedIdentifierReturns404(t *testing.T) {
+	_, server, authToken := testServiceOrderServer(t)
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/not-a-valid-identifier", nil, authToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

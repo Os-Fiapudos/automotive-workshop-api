@@ -17,19 +17,28 @@ import (
 // Customer type — importing internal/features/customer directly would
 // violate the "no direct coupling between features" rule (CLAUDE.md §9.2).
 type customerRef struct {
-	ID     uuid.UUID
-	Code   int64
-	Name   string
-	Active bool
+	ID       uuid.UUID
+	Code     int64
+	Name     string
+	Active   bool
+	Document string
+	Phone    string
 }
 
-// vehicleRef is the vehicle-side equivalent of customerRef.
+// vehicleRef is the vehicle-side equivalent of customerRef. Brand/Model/Year/
+// Color are only needed by the detail view (specs/service-order-query/), left
+// unused (but always populated — same query as everyone else, see
+// scanVehicleRef) by the create flow.
 type vehicleRef struct {
 	ID           uuid.UUID
 	Code         int64
 	LicensePlate string
 	CustomerID   uuid.UUID
 	Active       bool
+	Brand        string
+	Model        string
+	Year         int
+	Color        string
 }
 
 // serviceRef is the minimal service-catalog data needed to display a
@@ -64,6 +73,12 @@ type serviceOrderLookups interface {
 	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*ServiceOrder, error)
 	findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error)
 	findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error)
+
+	// Added by specs/service-order-query/.
+	findServiceOrderByCode(ctx context.Context, code int64) (*ServiceOrder, error)
+	findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error)
+	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error)
+	listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
@@ -149,19 +164,19 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 
 func (repository *PostgresServiceOrderRepository) findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE' FROM customers WHERE id = $1`, id)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE id = $1`, id)
 	return scanCustomerRef(row)
 }
 
 func (repository *PostgresServiceOrderRepository) findCustomerByDocument(ctx context.Context, normalizedDocument string) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE' FROM customers WHERE document = $1`, normalizedDocument)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE document = $1`, normalizedDocument)
 	return scanCustomerRef(row)
 }
 
 func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 	ref := &customerRef{}
-	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active); err != nil {
+	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCustomerNotFound
 		}
@@ -172,19 +187,20 @@ func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 
 func (repository *PostgresServiceOrderRepository) findVehicleByID(ctx context.Context, id uuid.UUID) (*vehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE' FROM vehicles WHERE id = $1`, id)
+		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE id = $1`, id)
 	return scanVehicleRef(row)
 }
 
 func (repository *PostgresServiceOrderRepository) findVehicleByPlate(ctx context.Context, plate string) (*vehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE' FROM vehicles WHERE license_plate = $1`, plate)
+		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE license_plate = $1`, plate)
 	return scanVehicleRef(row)
 }
 
 func scanVehicleRef(row pgx.Row) (*vehicleRef, error) {
 	ref := &vehicleRef{}
-	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active); err != nil {
+	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active,
+		&ref.Brand, &ref.Model, &ref.Year, &ref.Color); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrVehicleNotFound
 		}

@@ -18,7 +18,7 @@ func newTestService(repo *fakeRepository) *ServiceOrderService {
 func seedActiveCustomerAndVehicle(repo *fakeRepository) (customerID, vehicleID uuid.UUID) {
 	customerID = uuid.New()
 	vehicleID = uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true}, normalizedDocument)
+	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true, Document: normalizedDocument}, normalizedDocument)
 	repo.addVehicle(&vehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
 	return customerID, vehicleID
 }

@@ -27,3 +27,11 @@ Ordered implementation checklist, each item traceable to a `design.md` section.
 - [x] T11 — `go build ./...`, `go vet ./...`, `go test ./...` all pass. (CLAUDE.md §6/§7)
 - [x] T12 — Review against `requirements.md`'s acceptance criteria (§5) before calling the
       feature done.
+- [x] T13 — `docs/openapi.yaml`: document `GET /api/v1/acompanhamento/{codigo}` (added after
+      the fact, on request — the original requirements/design/tasks above never scoped
+      OpenAPI documentation in or out, unlike `auth`/`service-catalog`, which explicitly
+      deferred it). Added a `tracking` tag, a `trackingToken` `apiKey`/header security
+      scheme (distinct from `bearerAuth`, matching the `X-Tracking-Token` header this route
+      actually reads), the `ServiceOrderTracking`/`...Vehicle`/`...Milestone` schemas
+      mirroring `trackingResponse`/`trackingVehicleDTO`/`trackingMilestoneDTO` field-for-
+      field (AC6, AC9), and `INVALID_TRACKING_TOKEN` added to `ErrorEnvelope`'s `code` enum.

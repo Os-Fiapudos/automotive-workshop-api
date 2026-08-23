@@ -47,6 +47,17 @@ code but are not yet described in this document; the sections below cover `auth`
 > since, like `product`/`service-order`, this document's per-feature sections were not kept
 > current for every implemented feature.
 
+> **Addendum (`specs/service-order-query/`)**: `service-order` (the same package/feature
+> `service-order-opening` and `service-order-diagnosis-quote` extend, not a new one) gained
+> two read-only, `requireAuth`-wrapped routes: `GET /api/v1/service-orders` (paginated,
+> filterable listing) and `GET /api/v1/service-orders/{id}` (full detail — `{id}` accepts
+> either the order's UUID or its sequential code, since Go 1.22's `http.ServeMux` cannot
+> host a separate literal `.../code/{code}` route alongside the pre-existing `{id}/quote`/
+> `{id}/diagnosis` routes at the same path depth; discovered the same way decision 18 below
+> was, by actually registering the routes, not just `go build`/`go vet`/`go test`). See
+> `specs/service-order-query/design.md` for the full design, including why the ticket's
+> two-route suggestion had to become one.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under
