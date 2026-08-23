@@ -2,13 +2,19 @@ openapi: 3.0.3
 info:
   title: automotive-workshop-api — Customer & Vehicle Management
   description: >
-    Customer Management and Vehicle Management endpoints for the automotive
-    workshop API. See specs/customer-management/ and specs/vehicle-management/
-    for the requirements and design behind these contracts. Other domain
-    entities (Product, Service, ServiceOrder, Quote) are documented in
-    docs/entities.md but not yet implemented/exposed via HTTP. Vehicle routes
-    require a JWT (see the bearerAuth security scheme); Customer routes do not
-    (see specs/customer-management/requirements.md §7.2).
+    Customer Management, Vehicle Management, Service Order listing/detail
+    (specs/service-order-query/), and Service Order Tracking
+    (specs/service-order-tracking/) endpoints for the automotive workshop
+    API. See specs/customer-management/, specs/vehicle-management/,
+    specs/service-order-query/, and specs/service-order-tracking/ for the
+    requirements and design behind these contracts. Other domain
+    entities/endpoints (Product, Service catalog, Auth, Service Order
+    creation/diagnosis/quote) are documented in docs/entities.md or their own
+    specs/ folder but not documented here yet. Vehicle and Service Order
+    Query routes require a JWT (see the bearerAuth security scheme);
+    Customer routes do not (see specs/customer-management/requirements.md
+    §7.2); Service Order Tracking uses neither — it validates its own
+    per-order tracking token instead (see the trackingToken security scheme).
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
@@ -21,6 +27,17 @@ tags:
     description: >
       Create and maintain workshop vehicles, each linked to an existing,
       active customer. Every endpoint requires a valid JWT.
+  - name: service-orders
+    description: >
+      List and view the detail of service orders (specs/service-order-query/).
+      Read-only — creation/diagnosis/quote endpoints are not documented here
+      (see specs/service-order-opening/, specs/service-order-diagnosis-quote/).
+      Every endpoint requires a valid JWT.
+  - name: tracking
+    description: >
+      Customer-facing, JWT-free service order tracking (RF12,
+      specs/service-order-tracking/). Authenticates with a per-order tracking
+      token instead of the administrative JWT.
 
 paths:
   /api/v1/customers:
@@ -431,6 +448,182 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /api/v1/service-orders:
+    get:
+      tags: [service-orders]
+      summary: List service orders (paginated, filterable)
+      description: >
+        Most recent orders first (by creation date, order code as a
+        tiebreaker). All filters are optional and combine with AND.
+      operationId: listServiceOrders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: query
+          description: Exact match on the service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+        - name: status
+          in: query
+          description: Exact match on the service order's status.
+          schema:
+            type: string
+            enum:
+              [
+                RECEBIDA,
+                EM_DIAGNOSTICO,
+                AGUARDANDO_APROVACAO,
+                EM_EXECUCAO,
+                FINALIZADA,
+                ENTREGUE,
+              ]
+        - name: document
+          in: query
+          description: Customer CPF/CNPJ, formatted or unformatted (normalized before matching).
+          schema:
+            type: string
+          example: "123.456.789-09"
+        - name: licensePlate
+          in: query
+          description: Vehicle license plate, legacy or Mercosul format.
+          schema:
+            type: string
+          example: ABC1D23
+        - name: createdFrom
+          in: query
+          description: Inclusive lower bound on the order's creation date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          description: Inclusive upper bound on the order's creation date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of service orders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderList"
+        "400":
+          description: An invalid filter value (e.g. an unknown status, or a non-integer code/malformed date).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/service-orders/{id}:
+    get:
+      tags: [service-orders]
+      summary: Retrieve a service order's full detail, by id or by code
+      description: >
+        {id} accepts either the order's technical id (a UUID) or its
+        sequential code (an integer) — the two value spaces never overlap, so
+        the server tells them apart automatically. Both forms return the same
+        ServiceOrderDetail shape: customer, vehicle, status, notes, the
+        services requested at opening, the composed quote (its item values
+        are the quote's own stored snapshot, never the catalog's current
+        price — absent/null when no quote has been composed yet), and the
+        full status-change history, oldest first. A related customer,
+        vehicle, product, or service that has since become inactive is still
+        shown.
+      operationId: getServiceOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The service order's UUID or its sequential code.
+          schema:
+            type: string
+          examples:
+            byId:
+              summary: By technical id
+              value: "b0000000-0000-0000-0000-000000000001"
+            byCode:
+              summary: By sequential code
+              value: "1"
+      responses:
+        "200":
+          description: The service order's full detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderDetail"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id/code, or {id} is neither a valid
+            UUID nor a valid integer (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/acompanhamento/{codigo}:
+    get:
+      tags: [tracking]
+      summary: Look up a service order's public tracking view
+      description: >
+        Customer-facing read view (RF12) — never accepts or requires the
+        administrative JWT (specs/service-order-tracking/requirements.md
+        AC10); authenticates with the X-Tracking-Token header instead (see
+        the trackingToken security scheme). The response is a deliberately
+        limited projection, distinct from the administrative
+        ServiceOrderDetail: only the order's code, current status, a partial
+        vehicle identification (license plate, brand, model, year, color —
+        no id/code/status/owning customer), and the milestone trail (event,
+        previous/new status, occurredAt — no free-text description). Customer
+        PII (CPF/CNPJ, phone, e-mail), internal ids, and any other order are
+        never present (AC6-AC9).
+      operationId: getServiceOrderTracking
+      security:
+        - trackingToken: []
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: The service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: The service order's public tracking view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderTracking"
+        "401":
+          description: >
+            The X-Tracking-Token header is missing, malformed, wrong,
+            belongs to a different service order, or has been revoked (code
+            `INVALID_TRACKING_TOKEN`) — all deliberately indistinguishable
+            from each other, so a wrong token never reveals which specific
+            way it was wrong (AC2, AC4, AC5).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: >
+            No service order with this code, or {codigo} is not a valid
+            integer (code `NOT_FOUND`) — checked before the token, so it
+            takes precedence regardless of what token was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -438,9 +631,20 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: >
-        Required on every Vehicle Management route (RNF02). Not required on
-        Customer Management routes (see
-        specs/customer-management/requirements.md §7.2).
+        Required on every Vehicle Management route and every Service Order
+        Query route (RNF02). Not required on Customer Management routes (see
+        specs/customer-management/requirements.md §7.2), and not accepted at
+        all by the Service Order Tracking route (see trackingToken).
+    trackingToken:
+      type: apiKey
+      in: header
+      name: X-Tracking-Token
+      description: >
+        Per-service-order token, issued once as the trackingToken field of
+        POST /api/v1/service-orders's creation response (there is no
+        separate issuance endpoint). Deliberately a distinct header, not
+        Authorization: Bearer, so it can never be confused with the
+        administrative JWT (specs/service-order-tracking/requirements.md §0).
 
   parameters:
     CustomerId:
@@ -660,6 +864,329 @@ components:
         totalPages:
           type: integer
 
+    ServiceOrderCustomerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    ServiceOrderVehicleSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        licensePlate:
+          type: string
+
+    ServiceOrderListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        customer:
+          $ref: "#/components/schemas/ServiceOrderCustomerSummary"
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderVehicleSummary"
+        status:
+          type: string
+          enum:
+            [
+              RECEBIDA,
+              EM_DIAGNOSTICO,
+              AGUARDANDO_APROVACAO,
+              EM_EXECUCAO,
+              FINALIZADA,
+              ENTREGUE,
+            ]
+        openedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ServiceOrderList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderListItem"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    ServiceOrderCustomerDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        document:
+          type: string
+        phone:
+          type: string
+
+    ServiceOrderVehicleDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        licensePlate:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    ServiceOrderRequestedService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    ServiceOrderQuoteItem:
+      type: object
+      description: >
+        Description/unitPrice/total are the quote's own stored snapshot from
+        the moment the item was composed, never the catalog's current price
+        (specs/service-order-diagnosis-quote/).
+      properties:
+        productId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+          format: double
+        total:
+          type: number
+          format: double
+
+    ServiceOrderQuote:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        serviceOrderId:
+          type: string
+          format: uuid
+        totalAmount:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderQuoteItem"
+        generatedAt:
+          type: string
+          format: date-time
+        respondedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ServiceOrderHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+        event:
+          type: string
+          enum:
+            [
+              creation,
+              diagnosis_started,
+              quote_composed,
+              approval,
+              completion,
+              cancellation,
+            ]
+        description:
+          type: string
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+
+    ServiceOrderDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        customer:
+          $ref: "#/components/schemas/ServiceOrderCustomerDetail"
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderVehicleDetail"
+        status:
+          type: string
+          enum:
+            [
+              RECEBIDA,
+              EM_DIAGNOSTICO,
+              AGUARDANDO_APROVACAO,
+              EM_EXECUCAO,
+              FINALIZADA,
+              ENTREGUE,
+            ]
+        notes:
+          type: string
+        requestedServices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderRequestedService"
+        quote:
+          allOf:
+            - $ref: "#/components/schemas/ServiceOrderQuote"
+          nullable: true
+          description: Absent/null until a quote has been composed.
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderHistoryEntry"
+        openedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ServiceOrderTrackingVehicle:
+      type: object
+      description: >
+        Deliberately partial — no id, code, status, or owning customer
+        (specs/service-order-tracking/requirements.md AC6).
+      properties:
+        licensePlate:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    ServiceOrderTrackingMilestone:
+      type: object
+      description: >
+        A status-change event, without the internal id or free-text
+        description an administrative history entry carries (AC6).
+      properties:
+        event:
+          type: string
+          enum:
+            [
+              creation,
+              diagnosis_started,
+              quote_composed,
+              approval,
+              completion,
+              cancellation,
+            ]
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    ServiceOrderTracking:
+      type: object
+      description: >
+        The public tracking contract — a distinct type from the
+        administrative ServiceOrderDetail, with no shared fields beyond code
+        and status (AC9). Never contains CPF/CNPJ, phone, e-mail, internal
+        ids, or any other service order (AC7, AC8).
+      properties:
+        code:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum:
+            [
+              RECEBIDA,
+              EM_DIAGNOSTICO,
+              AGUARDANDO_APROVACAO,
+              EM_EXECUCAO,
+              FINALIZADA,
+              ENTREGUE,
+            ]
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderTrackingVehicle"
+        milestones:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderTrackingMilestone"
+
     ErrorEnvelope:
       type: object
       properties:
@@ -678,6 +1205,7 @@ components:
                   CUSTOMER_NOT_FOUND,
                   CUSTOMER_INACTIVE,
                   DUPLICATE_LICENSE_PLATE,
+                  INVALID_TRACKING_TOKEN,
                   INTERNAL_ERROR,
                 ]
             message:

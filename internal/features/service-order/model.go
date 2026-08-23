@@ -21,6 +21,30 @@ const (
 	StatusAguardandoAprovacao Status = "AGUARDANDO_APROVACAO"
 )
 
+// knownStatusValues lists every value docs/entities.md's ServiceOrderStatus
+// enum documents, including the three (EM_EXECUCAO, FINALIZADA, ENTREGUE)
+// this package has no transition method for yet — used only to validate the
+// GET /api/v1/service-orders "status" filter (specs/service-order-query/),
+// not as a set of statuses this package can construct or transition into.
+var knownStatusValues = []string{
+	string(StatusRecebida),
+	string(StatusEmDiagnostico),
+	string(StatusAguardandoAprovacao),
+	"EM_EXECUCAO",
+	"FINALIZADA",
+	"ENTREGUE",
+}
+
+// isKnownStatus reports whether value is one of knownStatusValues.
+func isKnownStatus(value string) bool {
+	for _, known := range knownStatusValues {
+		if value == known {
+			return true
+		}
+	}
+	return false
+}
+
 // ServiceOrder is the domain aggregate for this feature. It cannot be
 // constructed in any status other than RECEBIDA — there is no setter for
 // Status and no other constructor (requirements.md §3.6).
@@ -167,4 +191,19 @@ func calculateTotal(items []QuoteItem) float64 {
 		total += item.Total
 	}
 	return total
+}
+
+// ServiceOrderHistory is a single audit-trail entry of a ServiceOrder's
+// status changes (docs/entities.md), read-only from this package's
+// perspective — every row is written by service-order-opening (the
+// "creation" event) or service-order-diagnosis-quote ("diagnosis_started",
+// "quote_composed"); specs/service-order-query/ only ever reads them back.
+type ServiceOrderHistory struct {
+	ID             uuid.UUID
+	ServiceOrderID uuid.UUID
+	OccurredAt     time.Time
+	Event          string
+	Description    string
+	PreviousStatus Status
+	NewStatus      Status
 }
