@@ -30,6 +30,23 @@ features:
 code but are not yet described in this document; the sections below cover `auth`,
 `customer`, `vehicle`, and `servicecatalog` only.
 
+> **Addendum (`specs/service-order-tracking/`)**: a fifth implemented feature exists beyond
+> the four described below — `service-order-tracking`
+> (`internal/features/service-order-tracking/`, Go package `servicetracking`), the
+> customer-facing `GET /api/v1/acompanhamento/{codigo}` (RF12). Unlike every feature
+> described in this document, it is deliberately **not** wrapped in `middleware.RequireAuth`
+> — it validates its own high-entropy tracking token (`internal/shared/trackingtoken`,
+> sent via the `X-Tracking-Token` header) instead of the administrative JWT. It reuses
+> `shared/apierror` (the envelope its closest sibling, `service-order`, uses) and reads
+> `service_orders`/`vehicles`/`service_order_history` directly via SQL, the same
+> cross-feature-table-read-without-a-Go-import pattern `service-order` already established
+> for `vehicles`/`customers`. `service-order` itself gained one change for this: its
+> `POST /api/v1/service-orders` now also auto-generates the tracking token in the same
+> creation transaction, returned once as `trackingToken` in that response. See
+> `specs/service-order-tracking/design.md` for the full design — not folded into §1/§2 below
+> since, like `product`/`service-order`, this document's per-feature sections were not kept
+> current for every implemented feature.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under

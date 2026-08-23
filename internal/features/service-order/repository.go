@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
 // customerRef is the minimal customer data this feature needs to resolve
@@ -68,7 +70,10 @@ type serviceOrderLookups interface {
 // aggregate. It only has the writes this feature performs — no speculative
 // CRUD methods for reads this feature doesn't need (design.md §3.2).
 type ServiceOrderRepository interface {
-	Create(ctx context.Context, order *ServiceOrder) error
+	// Create persists order and returns the raw tracking token generated for
+	// it (specs/service-order-tracking/design.md §5) — only that call ever
+	// sees the raw value; the database only ever stores its hash.
+	Create(ctx context.Context, order *ServiceOrder) (trackingToken string, err error)
 
 	// Added by specs/service-order-diagnosis-quote/.
 	StartDiagnosis(ctx context.Context, order *ServiceOrder) error
@@ -86,15 +91,16 @@ func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrder
 	return &PostgresServiceOrderRepository{pool: pool}
 }
 
-// Create persists order, its requested services, and its creation history
-// event in a single transaction (RNF07, design.md §3.3): if any step fails,
-// everything is rolled back — the API never leaves a service order without
-// its creation history entry, or a requested service link without the order
-// it belongs to.
-func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *ServiceOrder) error {
+// Create persists order, its requested services, its creation history event,
+// and its auto-generated tracking token in a single transaction (RNF07,
+// design.md §3.3; specs/service-order-tracking/design.md §5): if any step
+// fails, everything is rolled back — the API never leaves a service order
+// without its creation history entry or its tracking token, or a requested
+// service link without the order it belongs to.
+func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *ServiceOrder) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
@@ -104,7 +110,7 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 		 RETURNING code, opened_at, created_at, updated_at`,
 		order.ID, order.CustomerID, order.VehicleID, order.Notes,
 	).Scan(&order.Code, &order.OpenedAt, &order.CreatedAt, &order.UpdatedAt); err != nil {
-		return err
+		return "", err
 	}
 
 	for _, serviceID := range order.RequestedServiceIDs {
@@ -112,7 +118,7 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 			`INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES ($1, $2)`,
 			order.ID, serviceID,
 		); err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -121,10 +127,24 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 		 VALUES ($1, 'creation', $2, $3, $3)`,
 		order.ID, "Service order opened.", string(order.Status),
 	); err != nil {
-		return err
+		return "", err
 	}
 
-	return tx.Commit(ctx)
+	rawToken, err := trackingtoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO service_order_tracking_tokens (service_order_id, token_hash) VALUES ($1, $2)`,
+		order.ID, trackingtoken.Hash(rawToken),
+	); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return rawToken, nil
 }
 
 func (repository *PostgresServiceOrderRepository) findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error) {

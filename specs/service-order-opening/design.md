@@ -266,6 +266,14 @@ never passed in on insert — the column's `DEFAULT 'RECEBIDA'` (already in `doc
 is the single source of truth for the initial value, which is also why a `status` field in
 the request body has nothing to bind to even if present (§8 of `requirements.md`).
 
+> **Cross-reference (added by `specs/service-order-tracking/`)**: `Create` now also
+> generates a tracking token (`internal/shared/trackingtoken.Generate`) and inserts its hash
+> into `service_order_tracking_tokens` as a fourth statement inside this same transaction,
+> returning the raw token as an additional return value
+> (`Create(ctx, order) (trackingToken string, err error)`) instead of a bare `error`. Same
+> RNF07 atomicity guarantee, extended to also cover the token. See
+> `specs/service-order-tracking/design.md` §5 for the full rationale.
+
 ### 3.4 Duplicate requested service ids
 
 `requestedServiceIds` is not deduplicated by the service layer before being handed to
@@ -323,9 +331,18 @@ or, identifying customer/vehicle by document/plate instead of id:
     { "id": "d0000000-...-0001", "code": 1, "name": "Oil Change" }
   ],
   "createdAt": "2026-08-17T12:00:00Z",
-  "updatedAt": "2026-08-17T12:00:00Z"
+  "updatedAt": "2026-08-17T12:00:00Z",
+  "trackingToken": "9f2c...64-hex-chars"
 }
 ```
+
+> **Cross-reference (added by `specs/service-order-tracking/`)**: `trackingToken` is the raw
+> customer-tracking token auto-generated for this order in the same transaction as its
+> creation (`design.md` §3.3 of this document is extended accordingly). It is returned only
+> here, once — never on any other response, and never logged (RNF08). See
+> `specs/service-order-tracking/design.md` §5 for the full design and
+> `specs/service-order-tracking/requirements.md` for the requirement it satisfies (RF12).
+> This document's own requirements are unchanged; the field is additive.
 
 `customer`/`vehicle`/`requestedServices` are summarized (id, code, and the one or two
 fields useful for display), not full `Customer`/`Vehicle`/`Service` payloads — this

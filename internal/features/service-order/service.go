@@ -27,10 +27,11 @@ type CreateInput struct {
 // handler does not have to make its own follow-up repository calls
 // (design.md §4.2).
 type CreateResult struct {
-	Order    *ServiceOrder
-	Customer *customerRef
-	Vehicle  *vehicleRef
-	Services []*serviceRef
+	Order         *ServiceOrder
+	Customer      *customerRef
+	Vehicle       *vehicleRef
+	Services      []*serviceRef
+	TrackingToken string
 }
 
 // ServiceOrderService orchestrates the Service Order Opening use case on top
@@ -81,7 +82,8 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		return nil, err
 	}
 
-	if err := service.repository.Create(ctx, order); err != nil {
+	trackingToken, err := service.repository.Create(ctx, order)
+	if err != nil {
 		return nil, err
 	}
 
@@ -90,7 +92,13 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		return nil, err
 	}
 
-	return &CreateResult{Order: order, Customer: customer, Vehicle: vehicle, Services: requestedServices}, nil
+	return &CreateResult{
+		Order:         order,
+		Customer:      customer,
+		Vehicle:       vehicle,
+		Services:      requestedServices,
+		TrackingToken: trackingToken,
+	}, nil
 }
 
 func (service *ServiceOrderService) resolveCustomer(ctx context.Context, input CreateInput) (*customerRef, error) {
