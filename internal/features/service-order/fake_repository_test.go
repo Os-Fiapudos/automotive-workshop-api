@@ -3,6 +3,7 @@ package serviceorder
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -22,6 +23,7 @@ type fakeRepository struct {
 	quotes            map[uuid.UUID]*Quote                 // keyed by service order id
 	requestedServices map[uuid.UUID][]*serviceRef          // keyed by service order id
 	history           map[uuid.UUID][]*ServiceOrderHistory // keyed by service order id
+	executions        map[uuid.UUID][]*ServiceExecution    // keyed by service order id
 }
 
 func newFakeRepository() *fakeRepository {
@@ -34,6 +36,7 @@ func newFakeRepository() *fakeRepository {
 		quotes:            make(map[uuid.UUID]*Quote),
 		requestedServices: make(map[uuid.UUID][]*serviceRef),
 		history:           make(map[uuid.UUID][]*ServiceOrderHistory),
+		executions:        make(map[uuid.UUID][]*ServiceExecution),
 	}
 }
 
@@ -198,6 +201,51 @@ func (fake *fakeRepository) findRequestedServices(_ context.Context, serviceOrde
 
 func (fake *fakeRepository) findHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error) {
 	return fake.history[serviceOrderID], nil
+}
+
+// ---- specs/service-order-execution/ ----
+
+func (fake *fakeRepository) StartExecution(_ context.Context, execution *ServiceExecution) error {
+	execution.StartedAt = time.Now().UTC()
+	fake.executions[execution.ServiceOrderID] = append(fake.executions[execution.ServiceOrderID], execution)
+	return nil
+}
+
+func (fake *fakeRepository) FinishExecution(_ context.Context, execution *ServiceExecution) error {
+	for _, existing := range fake.executions[execution.ServiceOrderID] {
+		if existing.ID == execution.ID {
+			endedAt := execution.EndedAt
+			if endedAt == nil {
+				now := time.Now().UTC()
+				endedAt = &now
+			}
+			existing.EndedAt = endedAt
+			execution.EndedAt = endedAt
+			return nil
+		}
+	}
+	return ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) FinalizeOrder(_ context.Context, order *ServiceOrder) error {
+	return nil
+}
+
+func (fake *fakeRepository) DeliverOrder(_ context.Context, order *ServiceOrder) error {
+	return nil
+}
+
+func (fake *fakeRepository) findServiceExecutionByID(_ context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error) {
+	for _, execution := range fake.executions[serviceOrderID] {
+		if execution.ID == executionID {
+			return execution, nil
+		}
+	}
+	return nil, ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) findServiceExecutionsByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error) {
+	return fake.executions[serviceOrderID], nil
 }
 
 // listServiceOrders is an in-memory equivalent of

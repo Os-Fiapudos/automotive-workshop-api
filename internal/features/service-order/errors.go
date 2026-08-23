@@ -69,4 +69,22 @@ var (
 	// ErrProductInactive is returned when a quote item references a product
 	// that exists but is not ACTIVE.
 	ErrProductInactive = errors.New("product is inactive")
+
+	// ErrServiceExecutionNotFound is returned when finishing a service
+	// execution that does not exist for the identified service order
+	// (specs/service-order-execution/).
+	ErrServiceExecutionNotFound = errors.New("service execution not found")
+
+	// ErrServiceExecutionAlreadyFinished is returned when attempting to
+	// finish a service execution that already has an end date.
+	ErrServiceExecutionAlreadyFinished = errors.New("service execution has already been finished")
+
+	// ErrServiceExecutionEndBeforeStart is returned when a service
+	// execution's end date is before its start date (BR4).
+	ErrServiceExecutionEndBeforeStart = errors.New("service execution end date cannot be before its start date")
+
+	// ErrExecutionsNotCompleted is returned when finalizing a service order
+	// whose required executions (one per approved-quote service line item)
+	// are not all complete (BR5).
+	ErrExecutionsNotCompleted = errors.New("service order has pending service executions and cannot be finalized")
 )

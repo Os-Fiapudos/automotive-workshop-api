@@ -13,26 +13,30 @@ type Status string
 // Status values. StatusRecebida is the only one Service Order Opening
 // produces; StatusEmDiagnostico/StatusAguardandoAprovacao are introduced by
 // the Diagnosis and Quote Composition feature (see startDiagnosis/
-// markAwaitingApproval below). Later transitions (EM_EXECUCAO, FINALIZADA,
-// ENTREGUE) still belong to future features.
+// markAwaitingApproval below). StatusEmExecucao/StatusFinalizada/
+// StatusEntregue are consumed (not produced) by
+// specs/service-order-execution/ — see finalize/deliver below and that
+// spec's requirements.md §2.1 for why reaching EM_EXECUCAO itself is still
+// an external precondition, not a transition this codebase implements yet.
 const (
 	StatusRecebida            Status = "RECEBIDA"
 	StatusEmDiagnostico       Status = "EM_DIAGNOSTICO"
 	StatusAguardandoAprovacao Status = "AGUARDANDO_APROVACAO"
+	StatusEmExecucao          Status = "EM_EXECUCAO"
+	StatusFinalizada          Status = "FINALIZADA"
+	StatusEntregue            Status = "ENTREGUE"
 )
 
 // knownStatusValues lists every value docs/entities.md's ServiceOrderStatus
-// enum documents, including the three (EM_EXECUCAO, FINALIZADA, ENTREGUE)
-// this package has no transition method for yet — used only to validate the
-// GET /api/v1/service-orders "status" filter (specs/service-order-query/),
-// not as a set of statuses this package can construct or transition into.
+// enum documents — used to validate the GET /api/v1/service-orders "status"
+// filter (specs/service-order-query/).
 var knownStatusValues = []string{
 	string(StatusRecebida),
 	string(StatusEmDiagnostico),
 	string(StatusAguardandoAprovacao),
-	"EM_EXECUCAO",
-	"FINALIZADA",
-	"ENTREGUE",
+	string(StatusEmExecucao),
+	string(StatusFinalizada),
+	string(StatusEntregue),
 }
 
 // isKnownStatus reports whether value is one of knownStatusValues.
@@ -106,6 +110,27 @@ func (order *ServiceOrder) markAwaitingApproval() error {
 		return ErrDiagnosisNotStarted
 	}
 	order.Status = StatusAguardandoAprovacao
+	return nil
+}
+
+// finalize transitions the order from EM_EXECUCAO to FINALIZADA
+// (specs/service-order-execution/requirements.md §4, BR5 — the service layer
+// checks the required-executions rule before calling this).
+func (order *ServiceOrder) finalize() error {
+	if order.Status != StatusEmExecucao {
+		return ErrInvalidStatusTransition
+	}
+	order.Status = StatusFinalizada
+	return nil
+}
+
+// deliver transitions the order from FINALIZADA to ENTREGUE
+// (specs/service-order-execution/requirements.md §4, BR7).
+func (order *ServiceOrder) deliver() error {
+	if order.Status != StatusFinalizada {
+		return ErrInvalidStatusTransition
+	}
+	order.Status = StatusEntregue
 	return nil
 }
 
