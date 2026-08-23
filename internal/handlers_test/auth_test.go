@@ -28,7 +28,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	if url == "" {
 		t.Skip("DATABASE_URL not set; skipping integration tests")
 	}
-	pool, err := database.Connect(context.Background(), url)
+	pool, err := database.NewPool(context.Background(), url)
 	if err != nil {
 		t.Fatalf("database connect: %v", err)
 	}

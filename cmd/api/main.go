@@ -2,58 +2,89 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
 	"automotive-workshop-api/internal/features/auth"
+	"automotive-workshop-api/internal/features/customer"
+	"automotive-workshop-api/internal/features/product"
+	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/servicecatalog"
+	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
-	"automotive-workshop-api/internal/shared/httpx"
 	"automotive-workshop-api/internal/shared/middleware"
 	"automotive-workshop-api/internal/shared/token"
 )
 
 func main() {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		log.Fatal("JWT_SECRET is required")
-	}
-	ttl := time.Hour
-	if raw := os.Getenv("JWT_TTL"); raw != "" {
-		parsed, err := time.ParseDuration(raw)
-		if err != nil {
-			log.Fatalf("invalid JWT_TTL %q: %v", raw, err)
-		}
-		ttl = parsed
-	}
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL is required")
+	configuration, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	pool, err := database.Connect(context.Background(), databaseURL)
+	ctx := context.Background()
+	pool, err := database.NewPool(ctx, configuration.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database connection failed: %v", err)
+		log.Fatal(err)
 	}
 	defer pool.Close()
 
-	tokens := token.NewManager(secret, ttl)
+	tokens := token.NewManager(configuration.JWTSecret, configuration.JWTTTL)
 	authHandler := auth.NewHandler(auth.NewService(auth.NewRepository(pool), tokens))
+	catalogHandler := servicecatalog.NewHandler(servicecatalog.NewCatalog(servicecatalog.NewRepository(pool)))
 	requireAuth := middleware.RequireAuth(tokens)
 
-	mux := http.NewServeMux()
+	customerRepository := customer.NewPostgresCustomerRepository(pool)
+	customerService := customer.NewCustomerService(customerRepository)
 
-	// Public routes (FR6). Everything not listed here must be registered
-	// wrapped in requireAuth.
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+
+	productRepository := product.NewPostgresProductRepository(pool)
+	productService := product.NewProductService(productRepository)
+
+	router := http.NewServeMux()
+
+	// Public routes (auth FR6).
+	router.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 
 	// Protected routes.
-	mux.Handle("GET /api/v1/auth/me", requireAuth(http.HandlerFunc(authHandler.Me)))
+	router.Handle("GET /api/v1/auth/me", requireAuth(http.HandlerFunc(authHandler.Me)))
 
-	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	// Service catalog routes (specs/service-catalog, protected per RNF02).
+	router.Handle("POST /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.Create)))
+	router.Handle("GET /api/v1/services", requireAuth(http.HandlerFunc(catalogHandler.List)))
+	router.Handle("GET /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Get)))
+	router.Handle("PATCH /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Update)))
+	router.Handle("DELETE /api/v1/services/{id}", requireAuth(http.HandlerFunc(catalogHandler.Delete)))
+
+	// Product management routes (protected via requireAuth per RNF02).
+	product.RegisterRoutes(router, productService, requireAuth)
+
+	// Customer Management routes remain unauthenticated for now, matching
+	// specs/customer-management/requirements.md §7.2 ("implemented
+	// unauthenticated... a dedicated Security feature... will add JWT
+	// authentication/authorization as a cross-cutting concern applied on
+	// top of the existing routes"). Wrapping them in requireAuth is a
+	// one-line follow-up (router.Handle(pattern, requireAuth(handler)) per
+	// route, or a small helper) once that's explicitly decided — not done
+	// silently as part of this merge.
+	customer.RegisterRoutes(router, customerService)
+
+	// Service Order Opening's own POST /api/v1/service-orders route remains
+	// unauthenticated for now, same rationale as Customer Management above.
+	// The diagnosis/quote routes added by
+	// specs/service-order-diagnosis-quote/ are protected with requireAuth
+	// (requirements.md §7.4) — a deliberate, explicit decision for those
+	// routes specifically, not a silent resolution of the open decision
+	// above.
+	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+
+	log.Printf("listening on :%s", configuration.Port)
+	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))
 }
