@@ -27,9 +27,15 @@ INSERT INTO customers (id, name, document, document_type, phone, email, status) 
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====
--- status is required as of the Service Order Opening feature — see
--- specs/service-order-opening/. Vehicle 5 is kept INACTIVE to exercise the
--- rejection path (its owner, customer 4, is also INACTIVE).
+-- status is required as of the Vehicle Management feature — see
+-- specs/vehicle-management/. The last vehicle belongs to a customer that is
+-- itself INACTIVE above; that customer's pre-existing vehicle stays exactly
+-- as it is (seed data isn't run through the application's own create-time
+-- "customer must be ACTIVE" check), illustrating that inactivity only blocks
+-- *new* creation, never hides existing history (requirements.md BR8). This
+-- also doubles as fixture data for Service Order Opening (see
+-- specs/service-order-opening/): vehicle 5 being INACTIVE (owned by the
+-- also-INACTIVE customer 4) exercises its rejection path.
 
 INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
     ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),

@@ -18,13 +18,14 @@ Database access uses `pgx v5`; tests use the stdlib `testing` package plus `test
 
 **Vertical Slice (Feature-based)** — Organized by functionality; each feature gathers its own
 layers (handler, service, repository, model) in `internal/features/<feature>/`. See
-[specs/architecture.md](specs/architecture.md) for the current, code-observed architecture
-and [specs/customer-management/](specs/customer-management/) for the first implemented
-feature's requirements/design/tasks.
+[specs/architecture.md](specs/architecture.md) for the current, code-observed architecture,
+[specs/customer-management/](specs/customer-management/) for the first implemented
+feature's requirements/design/tasks, and [specs/vehicle-management/](specs/vehicle-management/)
+for the second.
 
 ## API
 
-The Customer Management feature is implemented and documented in
+The Customer Management and Vehicle Management features are implemented and documented in
 [docs/openapi.yaml](docs/openapi.yaml):
 
 ```
@@ -35,6 +36,20 @@ GET    /api/v1/customers/document/{document}
 PATCH  /api/v1/customers/{id}
 DELETE /api/v1/customers/{id}   (logical deactivation, not a physical delete)
 ```
+
+```
+POST   /api/v1/vehicles
+GET    /api/v1/vehicles
+GET    /api/v1/vehicles/{id}
+GET    /api/v1/vehicles/plate/{plate}
+GET    /api/v1/vehicles/customer/{customerId}
+PATCH  /api/v1/vehicles/{id}    (brand, model, year, color only)
+DELETE /api/v1/vehicles/{id}    (logical deactivation, not a physical delete)
+```
+
+Unlike Customer Management, every Vehicle Management route requires a JWT
+(`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
+[specs/vehicle-management/](specs/vehicle-management/).
 
 ## Database
 
@@ -77,12 +92,13 @@ Works the same way on PowerShell, Bash, Git Bash, macOS, and Linux.
 go test ./...
 ```
 
-Unit tests (`internal/shared/document/*_test.go`, `internal/features/customer/*_test.go`)
-run with no external dependency. Integration tests
-(`internal/handlers_test/customer_test.go`) connect to a real Postgres via `DATABASE_URL`
-(defaulting to the local docker-compose credentials) and **skip themselves** — they don't
-fail — when that database isn't reachable, so `go test ./...` passes either way. Start
-`docker compose up -d db` first to actually exercise them.
+Unit tests (`internal/shared/document/*_test.go`, `internal/features/customer/*_test.go`,
+`internal/features/vehicle/*_test.go`) run with no external dependency. Integration tests
+(`internal/handlers_test/customer_test.go`, `internal/handlers_test/vehicle_test.go`) connect
+to a real Postgres via `DATABASE_URL` (defaulting to the local docker-compose credentials)
+and **skip themselves** — they don't fail — when that database isn't reachable, so
+`go test ./...` passes either way. Start `docker compose up -d db` first to actually exercise
+them.
 
 ## Project structure
 
@@ -107,6 +123,10 @@ flowchart TD
   n5 --> n30
   n31("model.go, dto.go, repository.go, service.go, handler.go, errors.go, doc.go")
   n30 --> n31
+  n40["vehicle/"]
+  n5 --> n40
+  n41("model.go, plate.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
+  n40 --> n41
   n8("doc.go")
   n5 --> n8
   n9["shared/"]
@@ -125,7 +145,7 @@ flowchart TD
   n9 --> n10
   n11["handlers_test/"]
   n4 --> n11
-  n12("customer_test.go")
+  n12("customer_test.go, vehicle_test.go")
   n11 --> n12
   n21["docs/"]
   n0 --> n21
@@ -147,6 +167,10 @@ flowchart TD
   n27 --> n38
   n39("requirements.md, design.md, tasks.md")
   n38 --> n39
+  n42["vehicle-management/"]
+  n27 --> n42
+  n43("requirements.md, design.md, tasks.md")
+  n42 --> n43
   n13("go.mod")
   n0 --> n13
   n14(".gitignore")

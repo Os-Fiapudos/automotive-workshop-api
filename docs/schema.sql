@@ -31,15 +31,15 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
     CREATE TYPE customer_document_type AS ENUM ('CPF', 'CNPJ');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
     CREATE TYPE customer_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- NOTE: the values of this enum are a deliberate exception to the "everything in
@@ -131,7 +131,7 @@ COMMENT ON COLUMN vehicles.model IS 'Vehicle model (e.g. Uno, Gol).';
 COMMENT ON COLUMN vehicles.year IS 'Vehicle manufacturing/model year.';
 COMMENT ON COLUMN vehicles.color IS 'Vehicle predominant color.';
 COMMENT ON COLUMN vehicles.customer_id IS 'Reference to the owning Customer.';
-COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; used by other features (e.g. Service Order Opening) to validate a vehicle before use.';
+COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically. Also consulted by other features (e.g. Service Order Opening) to reject an INACTIVE vehicle before use.';
 COMMENT ON COLUMN vehicles.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN vehicles.updated_at IS 'Record last update date/time, generated automatically.';
 
