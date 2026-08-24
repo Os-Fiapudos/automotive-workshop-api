@@ -59,19 +59,22 @@ decision**, not yet made — do not wrap them without confirming first (see sect
 
 ## 2. Technology stack
 
-- **Language**: Go 1.22 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  pins `go-version: "1.22"`, so `go.mod` and [Dockerfile](Dockerfile)'s build image
-  (`golang:1.22-alpine`) must stay compatible with that exact version. When adding or
-  upgrading a dependency, check that its own `go` directive (and its transitive
-  dependencies') doesn't exceed 1.22 — `go get`/`go mod tidy` will otherwise silently raise
-  `go.mod`'s `go` line past what CI can build. This has already happened twice (once for
-  `pgx`, once merging in a `rogpeppe/go-internal` transitive bump pulled in by `testify`);
-  both times the fix was pinning the offending module at the newest release that still
-  requires ≤ Go 1.22, not bumping CI/the Dockerfile — see
-  `specs/customer-management/design.md` §0.
+- **Language**: Go 1.25 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.25"`, and [Dockerfile](Dockerfile) builds on `golang:1.25-alpine`.
+  These three must stay in sync; when adding or upgrading a dependency, check that its own
+  `go` directive (and its transitive dependencies') doesn't exceed 1.25.
+  **Changed on 2026-08-24, from 1.22.** The project was pinned to Go 1.22 and several
+  dependencies were deliberately held back to stay under that ceiling. The security analysis
+  in [docs/security-report.md](docs/security-report.md) showed the pin had become the
+  project's largest vulnerability source: 28 reachable vulnerabilities under Go 1.22.12, and
+  it blocked the fix for a High-severity SQL-injection advisory in `pgx`. Raising the line to
+  1.25 took the reachable count to zero. Historical notes about the 1.22 ceiling in
+  `specs/auth/`, `specs/customer-management/`, and `specs/service-catalog/` are records of
+  decisions made at the time — they are no longer the rule.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
-  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, pinned at `v5.7.4` for Go 1.22
-  compatibility), `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
+  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
+  by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
+  `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
   `specs/auth/design.md` §2), `golang.org/x/crypto` (bcrypt, same feature),
   `github.com/google/uuid` (from the Customer Management feature), and
   `github.com/stretchr/testify` (test-only, adopted by Customer Management; the auth
@@ -394,10 +397,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 15. Rules specific to working with Go
 
-- Go 1.22, per `go.mod` and CI's pinned `go-version: "1.22"` — do not use syntax/features
-  from newer versions, and check every dependency's own `go` directive stays ≤ 1.22 before
+- Go 1.25, per `go.mod` and CI's pinned `go-version: "1.25"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.25 before
   `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
-  (`golang:1.22-alpine`) in sync with whatever `go.mod` requires.
+  (`golang:1.25-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported

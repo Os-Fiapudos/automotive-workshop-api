@@ -129,3 +129,15 @@ SAST fixes (requirements §9).
 Verification commands: `go build ./...`, `go vet ./...` pass; `go test ./...` passes both
 with a database (13 packages ok) and without one (integration tests skip, exit 0);
 `scripts/coverage.sh` exits 0 with a database and 1 without `DATABASE_URL`.
+
+## Follow-up completed (2026-08-24)
+
+- [x] **T13. Raise the project to Go 1.25** (report §6.1, requirements §9)
+      Decided by the team after the CI `security` job failed on DEP-01/DEP-02. `go.mod`,
+      `Dockerfile`, and the `build`/`coverage` jobs moved to 1.25; `pgx` v5.7.4 → v5.10.0,
+      `x/text` v0.22.0 → v0.41.0, `x/crypto` v0.31.0 → v0.55.0.
+      Verified: `govulncheck` under `GOTOOLCHAIN=go1.25.14` reports `No vulnerabilities
+      found` (28 reachable before); `gosec` `Issues: 0`; build, vet and the full suite pass;
+      coverage gate unchanged at 80.0% / 88.3% / 83.6%.
+      Note: BR-Q8 still holds — the scanners never entered `go.mod`. What changed `go.mod`
+      was this deliberate upgrade, not the tooling.

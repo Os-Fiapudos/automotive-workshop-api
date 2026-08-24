@@ -173,3 +173,10 @@ Recorded here rather than left implicit in the code:
   be applied here, so they became residual risks R1/R2 in `docs/security-report.md` with
   raising the project's Go version recorded as the recommended follow-up. That upgrade stays
   out of scope (§7): it changes the build for every feature and is the team's decision.
+- **Follow-up taken the same day.** The CI `security` job failed on those two advisories, and
+  the team decided to raise the project to Go 1.25 rather than allowlist or silence them.
+  Applied: `go.mod`, `Dockerfile`, and the `build`/`coverage` CI jobs moved to 1.25; `pgx` to
+  v5.10.0 and `golang.org/x/text` to v0.41.0. `govulncheck` reports no vulnerabilities under
+  the toolchain CI builds with, and the gate figures did not move. Recorded in
+  `docs/security-report.md` §6.1; `CLAUDE.md` §2 and §15 were updated, since the 1.22 ceiling
+  they documented is no longer the rule.

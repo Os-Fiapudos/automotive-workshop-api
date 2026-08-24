@@ -12,7 +12,7 @@ coverage), RNF08 (logs without sensitive data), and RNF09 (SAST and dependency a
 | Branch | `feature/FP24-qualidade-e-seguranca` |
 | Commit analyzed | `4ede2476d85fe7944a5e5e0172a9f7e9aafecbe3` (pre-fix baseline) |
 | Analysis date | 2026-08-24 |
-| Module Go version | 1.22 (`go.mod`, CI, `Dockerfile`) |
+| Module Go version | 1.22 at analysis time; **raised to 1.25 on the same day** — see §6.1 |
 | Analyzed | All Go source under `cmd/` and `internal/`, the full dependency tree in `go.mod`/`go.sum`, log call sites, API error responses, and versioned files for secrets |
 | Not analyzed | Deployed infrastructure, the Postgres server configuration, container images beyond the Go build stage, and any environment outside this repository |
 
@@ -122,9 +122,9 @@ findings follows the `gosec` classification.
 | SAST-01 | High | `internal/features/product/repository.go` | G115 — integer overflow in `int` → `rune` conversion | **Fixed** |
 | SAST-02 | Medium | `cmd/api/main.go` | G114 — HTTP server without timeouts | **Fixed** |
 | SAST-03 | Low | `cmd/api/main.go` | G104 — unhandled error on the health response | **Fixed** |
-| DEP-01 | High | `github.com/jackc/pgx/v5@v5.7.4` | GO-2026-5004 — SQL injection via placeholder confusion with dollar-quoted string literals | **Not fixed** — residual risk R1 |
-| DEP-02 | Medium | `golang.org/x/text@v0.22.0` | GO-2026-5970 — infinite loop on invalid input | **Not fixed** — residual risk R1 |
-| STD-01 | High | Go standard library 1.22.12 | 26 reachable standard-library vulnerabilities, all fixed in Go 1.23–1.25 | **Not fixed** — residual risk R2 |
+| DEP-01 | High | `github.com/jackc/pgx/v5@v5.7.4` | GO-2026-5004 — SQL injection via placeholder confusion with dollar-quoted string literals | **Fixed** — see §6.1 |
+| DEP-02 | Medium | `golang.org/x/text@v0.22.0` | GO-2026-5970 — infinite loop on invalid input | **Fixed** — see §6.1 |
+| STD-01 | High | Go standard library 1.22.12 | 26 reachable standard-library vulnerabilities, all fixed in Go 1.23–1.25 | **Fixed** — see §6.1 |
 | CFG-01 | Medium | `docker-compose.yml`, `.env.example` | `sslmode=disable` on the database connection | **Not fixed** — residual risk R3 |
 | CFG-02 | Low | `docs/openapi.yaml`, integration tests, compose defaults | Development credentials present in versioned files | **Accepted** — residual risk R4 |
 | ARCH-01 | Medium | `cmd/api/main.go` | Customer and service-order-creation routes are unauthenticated; no role-based authorization anywhere | **Not fixed** — residual risks R5, R6 |
@@ -186,10 +186,9 @@ literals in github.com/jackc/pgx". Reachable trace reported by `govulncheck`:
   the driver's own sanitizer, below the level application code controls — it cannot be
   ruled out from application review alone.
 - **Recommendation**: upgrade to `github.com/jackc/pgx/v5` v5.9.2 or later.
-- **Why not fixed here**: pgx v5.9.2 declares `go 1.25.0`. This module is pinned to Go 1.22
-  in `go.mod`, CI, and the `Dockerfile` (`CLAUDE.md` §2), so the upgrade cannot be applied
-  without first raising the project's Go version. There is no backport: the OSV advisory
-  lists a single fixed version, 5.9.2. See residual risk R1.
+- **Initially blocked, then fixed**: pgx v5.9.2 declares `go 1.25.0`, and the OSV advisory
+  lists no backport, so the upgrade was impossible while the project was pinned to Go 1.22.
+  That pin was raised the same day (§6.1) and pgx moved to v5.10.0.
 
 ### DEP-02 — Infinite loop in golang.org/x/text v0.22.0 (Medium)
 
@@ -200,7 +199,8 @@ literals in github.com/jackc/pgx". Reachable trace reported by `govulncheck`:
   hanging the goroutine that processes it. The reachable path is connection setup rather
   than request handling, which limits exposure to attacker-controlled input.
 - **Recommendation**: upgrade `golang.org/x/text` to v0.39.0 or later.
-- **Why not fixed here**: v0.39.0 declares `go 1.25.0` — same Go 1.22 ceiling as DEP-01.
+- **Initially blocked, then fixed**: v0.39.0 declares `go 1.25.0` — same ceiling as DEP-01,
+  lifted by the Go 1.25 upgrade (§6.1). `golang.org/x/text` moved to v0.41.0.
 
 ### STD-01 — 26 reachable standard-library vulnerabilities under Go 1.22 (High, aggregate)
 
@@ -221,11 +221,10 @@ several certificate-parsing and TLS-handshake denial-of-service issues.
   supported line), in `go.mod`, `.github/workflows/ci.yml`, and `Dockerfile` together. That
   single change also unblocks DEP-01 and DEP-02, taking the reachable count from 28 to
   approximately zero.
-- **Why not fixed here**: raising the Go version is a project-wide decision that changes
-  the build for every feature and contradicts a constraint recorded in `CLAUDE.md` §2 and
-  §15. It is explicitly out of scope for this delivery
-  (`specs/quality-and-security/requirements.md` §7) and is the single highest-value
-  follow-up this report recommends. See residual risk R2.
+- **Initially out of scope, then decided and applied**: raising the Go version is a
+  project-wide decision, so it was reported as the highest-value follow-up rather than done
+  unilaterally. The team took that decision on 2026-08-24, after the CI `security` job made
+  the finding concrete by failing. See §6.1.
 
 ### CFG-01 — `sslmode=disable` (Medium)
 
@@ -272,14 +271,49 @@ reaches every protected route.
 | SAST-03 | Encode error logged in the `/health` handler (`cmd/api/main.go`) | `gosec` v2.28.0: `Issues: 0` |
 
 Before: `gosec` reported 3 issues (1 High, 1 Medium, 1 Low) over 84 files / 8,184 lines.
-After: 0 issues over 84 files / 8,183 lines (`security/gosec.json`).
+After: 0 issues over 84 files / 8,183 lines (`security/gosec.json`), and still 0 over the
+merged tree (91 files / 9,012 lines).
+
+### 6.1 Go 1.25 upgrade — DEP-01, DEP-02 and STD-01
+
+Applied on 2026-08-24, after the CI `security` job failed on DEP-01 and DEP-02 and made the
+trade-off concrete. Every one of these three findings had the same single blocker: the Go
+1.22 pin. Raising it resolves all three at once.
+
+| Change | From | To |
+|--------|------|-----|
+| `go.mod` Go directive | `go 1.22.0` | `go 1.25.0` |
+| CI `build` and `coverage` jobs | `go-version: "1.22"` | `go-version: "1.25"` |
+| `Dockerfile` build image | `golang:1.22-alpine` | `golang:1.25-alpine` |
+| `github.com/jackc/pgx/v5` | v5.7.4 | v5.10.0 (advisory fixed in 5.9.2) |
+| `golang.org/x/text` | v0.22.0 | v0.41.0 (advisory fixed in 0.39.0) |
+| `golang.org/x/crypto` | v0.31.0 | v0.55.0 |
+| `golang.org/x/sync` (indirect) | v0.11.0 | v0.22.0 |
+
+**Evidence**:
+
+- `govulncheck` v1.7.0 under `GOTOOLCHAIN=go1.25.14` — the toolchain `actions/setup-go`
+  with `go-version: "1.25"` resolves to — reports **`No vulnerabilities found`**, against 28
+  reachable before. The one remaining advisory sits in a module that is required but never
+  called.
+- `gosec` v2.28.0 over the upgraded tree: `Issues: 0`.
+- `go build ./...`, `go vet ./...` and `go test ./...` all pass; pgx v5.10.0 needed no code
+  change.
+- `scripts/coverage.sh`: 80.0% / 88.3% / 83.6%, gate green — the upgrade moved no coverage
+  figure.
+
+**Note on standard-library findings and toolchain drift**: `govulncheck` reports standard
+library advisories relative to the toolchain running it. `actions/setup-go` with
+`go-version: "1.25"` always installs the newest 1.25.x patch, so the job self-heals shortly
+after each Go security release. In the window between a release and its availability, the
+job will go red — correctly, since the binary being built does carry the unpatched library.
 
 ## 7. Residual risks
 
 | ID | Risk | Justification | Residual risk if not acted on |
 |----|------|---------------|-------------------------------|
-| R1 | DEP-01, DEP-02 unpatched | Both fixed versions require Go ≥ 1.25; the module is pinned to 1.22 | A High-severity SQL-injection advisory remains in the database driver. Mitigating factors: all application queries are parameterized and no input is concatenated into SQL |
-| R2 | 26 standard-library vulnerabilities (STD-01) | Raising the Go version is out of scope for this ticket and contradicts `CLAUDE.md` §2 | Every TLS, HTTP, and certificate-parsing fix from Go 1.23 onward is missing from the deployed binary, including request smuggling reachable from every handler |
+| ~~R1~~ | ~~DEP-01, DEP-02 unpatched~~ | **Resolved 2026-08-24** by the Go 1.25 upgrade (§6.1) | None — both modules are on fixed versions |
+| ~~R2~~ | ~~26 standard-library vulnerabilities (STD-01)~~ | **Resolved 2026-08-24** by the Go 1.25 upgrade (§6.1) | Residual only as toolchain drift: the CI job goes red between a Go security release and its availability in `setup-go`, which is the correct signal |
 | R3 | `sslmode=disable` (CFG-01) | The repository configures only the local environment | Credentials and query traffic in clear text if the setting reaches a deployed environment |
 | R4 | Development credentials versioned (CFG-02) | Documented dev-only fixtures; tests need deterministic credentials | Account takeover if the same values are ever reused outside local development |
 | R5 | Customer and order-creation routes unauthenticated (ARCH-01) | Open decision, `CLAUDE.md` §17.2 | Personal data readable and writable without authentication |
@@ -287,9 +321,10 @@ After: 0 issues over 84 files / 8,183 lines (`security/gosec.json`).
 | R7 | No migration tool | Out of scope; `CLAUDE.md` §14 records it as undefined | `docs/schema.sql` is entirely `CREATE TABLE IF NOT EXISTS`, so it cannot alter an existing database. Observed in practice during this analysis: a local volume missing `service_order_tracking_tokens` and the `quotes.version` / `sent_at` / `sent_version` columns produced 52 integration-test failures. CI is unaffected (fresh database per run); shared environments would silently drift |
 | R8 | Two competing error envelopes (`httpx` vs `apierror`) | Open decision, `CLAUDE.md` §17.1 | Inconsistent error contract across features. No data exposure — both envelopes were verified to emit generic messages |
 
-**Recommended order of action**: R2 first — raising Go to 1.25 closes STD-01 and unblocks
-R1 in the same change, removing 28 reachable vulnerabilities. R5 next, as it is the only
-finding that exposes personal data with no attacker sophistication at all.
+**Recommended order of action**: R1 and R2 were the top two and are now resolved — raising
+Go to 1.25 removed all 28 reachable vulnerabilities in one change. **R5 is now the highest
+open risk**: it is the only remaining finding that exposes personal data with no attacker
+sophistication at all.
 
 ## 8. Secrets review (AC11)
 
@@ -345,10 +380,18 @@ The three requirements this report covers are met and verifiable:
 - **RNF09**: SAST and dependency analysis run on every push, pinned to exact tool versions,
   publishing their raw output as artifacts.
 
-All three SAST findings were fixed with evidence; `gosec` now reports zero issues. The
-dependency and standard-library findings were not fixed, for one shared reason: **the Go
-1.22 pin blocks every available fix**. That pin is the most significant security finding in
-this report — it accounts for all 28 reachable vulnerabilities, and a single upgrade
-to Go 1.25 resolves them. It is recommended as the immediate follow-up, out of scope here
-only because changing the project's Go version is a decision for the team rather than for
-this ticket.
+All three SAST findings were fixed with evidence; `gosec` reports zero issues.
+
+The dependency and standard-library findings shared a single blocker — **the Go 1.22 pin
+blocked every available fix**, accounting for all 28 reachable vulnerabilities. This was
+first reported as the recommended follow-up rather than done unilaterally, since changing
+the project's Go version is a decision for the team. The team took that decision the same
+day, after the CI `security` job failed on it, and the upgrade to Go 1.25 was applied
+(§6.1): `govulncheck` now reports **no vulnerabilities** under the toolchain CI builds with.
+
+What remains open is not a scanner finding but an architectural one: **the customer routes
+and the service-order creation route are still unauthenticated (R5), and there is no
+role-based authorization anywhere (R6)**. Both are recorded open decisions in `CLAUDE.md`
+§17 and §13. R5 is now the highest open risk in this report — personal data reachable
+without a token needs no sophistication to exploit, and closing it is a one-line change per
+route once the decision is made.
