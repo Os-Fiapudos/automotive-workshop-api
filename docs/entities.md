@@ -184,6 +184,33 @@ row per execution (with its own start/end timestamps) rather than a start/end ev
 | startedAt      | string  | Date/time the execution started.                                    |
 | endedAt        | string? | Date/time the execution finished. `null` while still in progress.   |
 
+## StockMovement
+
+Ledger of every change to a `Product`'s stock balance. Two producers write to it: a
+product's own manual adjustment (`serviceOrderId` absent —
+[specs/product-management](../specs/product-management/)) and a service order's
+parts/supplies usage deduction and its reversal (`serviceOrderId` present —
+[specs/service-order-stock-usage](../specs/service-order-stock-usage/)).
+
+| Field              | Type    | Description                                                                    |
+| ------------------ | ------- | ---------------------------------------------------------------------------------- |
+| id                 | uuid    | Technical identifier of the movement record.                                       |
+| productId          | uuid    | Reference to the `Product` whose balance changed.                                  |
+| serviceOrderId     | uuid?   | Reference to the `ServiceOrder` this movement was deducted for/restored to. Absent for a manual product adjustment. |
+| type               | string  | `ENTRY` (adds to stock) or `EXIT` (removes from stock).                            |
+| quantity           | number  | Absolute quantity moved. Always greater than zero; direction is given by `type`.   |
+| previousStock      | number  | Product `currentStock` immediately before this movement.                           |
+| newStock           | number  | Product `currentStock` immediately after this movement.                            |
+| reason             | string? | Free-form justification. Required for a manual product adjustment; absent for a service-order usage/reversal movement, whose `serviceOrderId` already explains it. |
+| reversedMovementId | uuid?   | For a reversal `ENTRY`, the original `EXIT` movement it undoes. Absent for every other movement. A movement is reversed at most once. |
+| occurredAt         | string  | Date/time the movement occurred.                                                   |
+
+> **Note**: a service-order usage deduction requires the order to be `EM_EXECUCAO`, the
+> product to be `ACTIVE`, and the resulting balance to never go negative — see
+> `specs/service-order-stock-usage/requirements.md`. The deducted quantity is independent
+> from any quantity budgeted in the order's `Quote` — it is tracked here, not reconciled
+> against `QuoteItem.quantity`.
+
 ## User
 
 Administrative user of the API (authentication only in the MVP — no user CRUD).
@@ -244,3 +271,9 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 | Field         | Type   | Description                                                              |
 | ------------- | ------ | ---------------------------------------------------------------------------- |
 | vehicleStatus | string | Possible values for `Vehicle.status`: `ACTIVE`, `INACTIVE`. |
+
+### StockMovementType
+
+| Field             | Type   | Description                                                       |
+| ----------------- | ------ | ----------------------------------------------------------------------- |
+| stockMovementType | string | Possible values for `StockMovement.type`: `ENTRY`, `EXIT`. |

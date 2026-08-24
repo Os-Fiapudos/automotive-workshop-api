@@ -3,13 +3,15 @@ package product
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 type fakeRepository struct {
-	byID   map[uuid.UUID]*Product
-	usedIn map[uuid.UUID]bool
+	byID      map[uuid.UUID]*Product
+	usedIn    map[uuid.UUID]bool
+	movements []*StockMovement
 }
 
 func newFakeRepository() *fakeRepository {
@@ -102,7 +104,7 @@ func (fake *fakeRepository) Update(_ context.Context, product *Product) error {
 	return nil
 }
 
-func (fake *fakeRepository) AdjustStock(_ context.Context, id uuid.UUID, delta int) (*Product, error) {
+func (fake *fakeRepository) AdjustStock(_ context.Context, id uuid.UUID, movement *StockMovement) (*Product, error) {
 	product, ok := fake.byID[id]
 	if !ok {
 		return nil, ErrNotFound
@@ -110,12 +112,44 @@ func (fake *fakeRepository) AdjustStock(_ context.Context, id uuid.UUID, delta i
 	if !product.IsActive() {
 		return nil, ErrInactiveProduct
 	}
+
+	delta := movement.Quantity
+	if movement.Type == MovementTypeExit {
+		delta = -movement.Quantity
+	}
 	if delta < 0 && product.CurrentStock+delta < 0 {
 		return nil, ErrInsufficientStock
 	}
+
+	movement.PreviousStock = product.CurrentStock
 	product.CurrentStock += delta
+	movement.NewStock = product.CurrentStock
+	movement.CreatedAt = time.Now().UTC()
+	fake.movements = append(fake.movements, movement)
+
 	productCopy := *product
 	return &productCopy, nil
+}
+
+func (fake *fakeRepository) ListMovements(_ context.Context, productID uuid.UUID, page, pageSize int) ([]*StockMovement, int, error) {
+	var matched []*StockMovement
+	for _, movement := range fake.movements {
+		if movement.ProductID == productID {
+			matched = append(matched, movement)
+		}
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].CreatedAt.After(matched[j].CreatedAt) })
+
+	total := len(matched)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return matched[start:end], total, nil
 }
 
 func (fake *fakeRepository) IsUsedInQuotesOrOrders(_ context.Context, id uuid.UUID) (bool, error) {
