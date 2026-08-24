@@ -107,3 +107,222 @@ func TestProductService(t *testing.T) {
 		assert.Equal(t, 5, balance.CurrentStock)
 	})
 }
+
+// TestProductServiceLookups covers the code-based lookup path and the not-found
+// branches, none of which were exercised before (specs/quality-and-security/design.md §5).
+func TestProductServiceLookups(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("GetByCode returns the product", func(t *testing.T) {
+		repo := newFakeRepository()
+		service := NewProductService(repo)
+
+		code := int64(777)
+		created, err := service.Create(ctx, &code, "Bateria 60Ah", "Bateria selada", 480.00, 4, "PART")
+		require.NoError(t, err)
+
+		found, err := service.GetByCode(ctx, 777)
+		require.NoError(t, err)
+		assert.Equal(t, created.ID, found.ID)
+		assert.Equal(t, int64(777), found.Code)
+	})
+
+	t.Run("GetByCode on unknown code returns ErrNotFound", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+
+		_, err := service.GetByCode(ctx, 999999)
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("Get on unknown id returns ErrNotFound", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+
+		_, err := service.Get(ctx, uuid.New())
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("GetStockBalance on unknown id returns ErrNotFound", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+
+		_, err := service.GetStockBalance(ctx, uuid.New())
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
+// TestProductServiceListFilters covers the filter-parsing branches of List: an unknown
+// type string is ignored rather than rejected, and status is passed through verbatim.
+func TestProductServiceListFilters(t *testing.T) {
+	ctx := context.Background()
+
+	repo := newFakeRepository()
+	service := NewProductService(repo)
+
+	_, err := service.Create(ctx, nil, "Óleo 5W30", "Sintético", 55.00, 20, "SUPPLY")
+	require.NoError(t, err)
+	part, err := service.Create(ctx, nil, "Disco de Freio", "Ventilado", 220.00, 6, "PART")
+	require.NoError(t, err)
+
+	t.Run("filters by type", func(t *testing.T) {
+		partType := "PART"
+		products, total, err := service.List(ctx, 1, 20, &partType, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 1, total)
+		require.Len(t, products, 1)
+		assert.Equal(t, part.ID, products[0].ID)
+	})
+
+	t.Run("unknown type filter is ignored", func(t *testing.T) {
+		unknown := "GADGET"
+		_, total, err := service.List(ctx, 1, 20, &unknown, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 2, total, "an unparseable type filter must not silently drop results")
+	})
+
+	t.Run("filters by status", func(t *testing.T) {
+		inactive := "INACTIVE"
+		_, err := service.Deactivate(ctx, part.ID)
+		require.NoError(t, err)
+
+		products, total, err := service.List(ctx, 1, 20, nil, &inactive)
+		require.NoError(t, err)
+		assert.Equal(t, 1, total)
+		require.Len(t, products, 1)
+		assert.Equal(t, part.ID, products[0].ID)
+	})
+
+	t.Run("empty filter strings are treated as absent", func(t *testing.T) {
+		empty := ""
+		_, total, err := service.List(ctx, 1, 20, &empty, &empty)
+		require.NoError(t, err)
+		assert.Equal(t, 2, total)
+	})
+}
+
+// TestProductServiceUpdateBranches covers the validation branches of UpdateDetails
+// reached through the service, plus updating a product that does not exist.
+func TestProductServiceUpdateBranches(t *testing.T) {
+	ctx := context.Background()
+
+	newProduct := func(t *testing.T) (*ProductService, *Product) {
+		t.Helper()
+		service := NewProductService(newFakeRepository())
+		created, err := service.Create(ctx, nil, "Pastilha", "Dianteira", 100.00, 10, "PART")
+		require.NoError(t, err)
+		return service, created
+	}
+
+	t.Run("blank name is rejected", func(t *testing.T) {
+		service, created := newProduct(t)
+		blank := "   "
+		_, err := service.Update(ctx, created.ID, UpdateInput{Name: &blank})
+		assert.ErrorIs(t, err, ErrInvalidType)
+	})
+
+	t.Run("negative unit price is rejected", func(t *testing.T) {
+		service, created := newProduct(t)
+		negative := -1.00
+		_, err := service.Update(ctx, created.ID, UpdateInput{UnitPrice: &negative})
+		assert.ErrorIs(t, err, ErrInvalidUnitPrice)
+	})
+
+	t.Run("unknown type is rejected", func(t *testing.T) {
+		service, created := newProduct(t)
+		unknown := "GADGET"
+		_, err := service.Update(ctx, created.ID, UpdateInput{Type: &unknown})
+		assert.ErrorIs(t, err, ErrInvalidType)
+	})
+
+	t.Run("description and type are updated", func(t *testing.T) {
+		service, created := newProduct(t)
+		description := "  Traseira  "
+		productType := "SUPPLY"
+
+		updated, err := service.Update(ctx, created.ID, UpdateInput{Description: &description, Type: &productType})
+		require.NoError(t, err)
+		assert.Equal(t, "Traseira", updated.Description, "description should be trimmed")
+		assert.Equal(t, TypeSupply, updated.Type)
+	})
+
+	t.Run("unknown product is rejected", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		name := "Whatever"
+		_, err := service.Update(ctx, uuid.New(), UpdateInput{Name: &name})
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("deactivating an unknown product is rejected", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		_, err := service.Deactivate(ctx, uuid.New())
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+}
+
+// TestProductServiceAdjustStockBranches covers the stock-adjustment failure paths:
+// invalid movement type, unknown product, inactive product, and the domain validations
+// on quantity and reason (RN01).
+func TestProductServiceAdjustStockBranches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("invalid movement type is rejected", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		_, _, err := service.AdjustStock(ctx, uuid.New(), "TRANSFER", 1, "Motivo")
+		assert.ErrorIs(t, err, ErrInvalidMovementType)
+	})
+
+	t.Run("unknown product is rejected", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		_, _, err := service.AdjustStock(ctx, uuid.New(), "ENTRY", 1, "Motivo")
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("quantity must be positive", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		require.NoError(t, err)
+
+		_, _, err = service.AdjustStock(ctx, created.ID, "ENTRY", 0, "Motivo")
+		assert.ErrorIs(t, err, ErrInvalidQuantity)
+	})
+
+	t.Run("reason is required", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		require.NoError(t, err)
+
+		_, _, err = service.AdjustStock(ctx, created.ID, "ENTRY", 5, "   ")
+		assert.ErrorIs(t, err, ErrEmptyReason)
+	})
+
+	t.Run("inactive product cannot be adjusted", func(t *testing.T) {
+		service := NewProductService(newFakeRepository())
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		require.NoError(t, err)
+		_, err = service.Deactivate(ctx, created.ID)
+		require.NoError(t, err)
+
+		_, _, err = service.AdjustStock(ctx, created.ID, "ENTRY", 5, "Reposição")
+		assert.ErrorIs(t, err, ErrInactiveProduct)
+	})
+}
+
+// TestProductServiceCreateValidations covers the domain validations rejected before the
+// repository is ever reached.
+func TestProductServiceCreateValidations(t *testing.T) {
+	ctx := context.Background()
+	service := NewProductService(newFakeRepository())
+
+	t.Run("unknown type is rejected", func(t *testing.T) {
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", 10.00, 1, "GADGET")
+		assert.ErrorIs(t, err, ErrInvalidType)
+	})
+
+	t.Run("negative unit price is rejected", func(t *testing.T) {
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", -1.00, 1, "PART")
+		assert.ErrorIs(t, err, ErrInvalidUnitPrice)
+	})
+
+	t.Run("negative initial stock is rejected", func(t *testing.T) {
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", 10.00, -1, "PART")
+		assert.ErrorIs(t, err, ErrInvalidStock)
+	})
+}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -412,4 +413,142 @@ func ptr[T any](v T) *T {
 
 func stringValue(i int) string {
 	return strconv.Itoa(i)
+}
+
+// TestProductNotFoundAndMalformedIdentifiers covers the 404 and 400 branches of every
+// product route, which the happy-path flows above never reach
+// (specs/quality-and-security/design.md §5).
+func TestProductNotFoundAndMalformedIdentifiers(t *testing.T) {
+	server, _, token := testProductServer(t)
+
+	unknownID := uuid.NewString()
+
+	t.Run("unknown id returns 404 on every route", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			method string
+			path   string
+			body   any
+		}{
+			{"get", http.MethodGet, "/api/v1/produtos/" + unknownID, nil},
+			{"update", http.MethodPatch, "/api/v1/produtos/" + unknownID, product.UpdateRequest{Name: ptr("Novo nome")}},
+			{"deactivate", http.MethodDelete, "/api/v1/produtos/" + unknownID, nil},
+			{"stock balance", http.MethodGet, "/api/v1/produtos/" + unknownID + "/estoque", nil},
+			{"stock adjustment", http.MethodPost, "/api/v1/produtos/" + unknownID + "/estoque/ajustes",
+				product.StockAdjustmentRequest{Type: "ENTRY", Quantity: 1, Reason: "Reposição"}},
+			{"movements", http.MethodGet, "/api/v1/produtos/" + unknownID + "/movimentacoes", nil},
+		}
+
+		for _, testCase := range cases {
+			t.Run(testCase.name, func(t *testing.T) {
+				response := doAuthJSON(t, testCase.method, server.URL+testCase.path, testCase.body, token)
+				assert.Equal(t, http.StatusNotFound, response.StatusCode)
+			})
+		}
+	})
+
+	t.Run("malformed uuid returns 400", func(t *testing.T) {
+		for _, path := range []string{
+			"/api/v1/produtos/not-a-uuid",
+			"/api/v1/produtos/not-a-uuid/estoque",
+			"/api/v1/produtos/not-a-uuid/movimentacoes",
+		} {
+			response := doAuthJSON(t, http.MethodGet, server.URL+path, nil, token)
+			assert.Equal(t, http.StatusBadRequest, response.StatusCode, "path %s", path)
+		}
+	})
+
+	t.Run("malformed json body returns 400", func(t *testing.T) {
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/produtos", bytes.NewReader([]byte("{not json")))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+token)
+
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, response.StatusCode)
+	})
+}
+
+// TestProductListFilters covers the query-parameter branches of the list handler:
+// type and status filters, pagination bounds, and unparseable values.
+func TestProductListFilters(t *testing.T) {
+	server, pool, token := testProductServer(t)
+
+	createProductFixture(t, server, pool, token, "SUPPLY", 5)
+
+	t.Run("filters by type and status", func(t *testing.T) {
+		response := doAuthJSON(t, http.MethodGet,
+			server.URL+"/api/v1/produtos?type=SUPPLY&status=ACTIVE&page=1&pageSize=100", nil, token)
+		require.Equal(t, http.StatusOK, response.StatusCode)
+
+		var list product.ListResponse
+		decodeBody(t, response, &list)
+		assert.GreaterOrEqual(t, list.Total, 1)
+	})
+
+	t.Run("page size above the maximum is clamped", func(t *testing.T) {
+		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos?page=1&pageSize=5000", nil, token)
+		require.Equal(t, http.StatusOK, response.StatusCode)
+
+		var list product.ListResponse
+		decodeBody(t, response, &list)
+		assert.LessOrEqual(t, len(list.Data), 100, "page size must be clamped to the documented maximum")
+	})
+
+	t.Run("non-numeric pagination falls back to defaults", func(t *testing.T) {
+		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos?page=abc&pageSize=xyz", nil, token)
+		assert.Equal(t, http.StatusOK, response.StatusCode)
+	})
+
+}
+
+// TestProductRepositoryPersistence exercises the repository methods that no HTTP route
+// reaches: lookup by sequential code and the in-use check that guards physical deletion.
+func TestProductRepositoryPersistence(t *testing.T) {
+	server, pool, token := testProductServer(t)
+	repository := product.NewPostgresProductRepository(pool)
+	ctx := context.Background()
+
+	created := createProductFixture(t, server, pool, token, "PART", 3)
+
+	t.Run("finds a product by its sequential code", func(t *testing.T) {
+		found, err := repository.FindByCode(ctx, created.Code)
+		require.NoError(t, err)
+		assert.Equal(t, created.ID, found.ID.String())
+		assert.Equal(t, created.Name, found.Name)
+	})
+
+	t.Run("unknown code returns ErrNotFound", func(t *testing.T) {
+		_, err := repository.FindByCode(ctx, 999999999)
+		assert.ErrorIs(t, err, product.ErrNotFound)
+	})
+
+	t.Run("unused product is not referenced by any quote", func(t *testing.T) {
+		id, err := uuid.Parse(created.ID)
+		require.NoError(t, err)
+
+		used, err := repository.IsUsedInQuotesOrOrders(ctx, id)
+		require.NoError(t, err)
+		assert.False(t, used)
+	})
+}
+
+// createProductFixture creates a product through the real API and registers its cleanup.
+func createProductFixture(t *testing.T, server *httptest.Server, pool *pgxpool.Pool, token, productType string, stock int) product.Response {
+	t.Helper()
+
+	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+		Name:         "Fixture " + strconv.Itoa(rand.Intn(1000000)),
+		Description:  "Created by the integration suite",
+		UnitPrice:    ptr(99.90),
+		CurrentStock: ptr(stock),
+		Type:         productType,
+	}, token)
+	require.Equal(t, http.StatusCreated, response.StatusCode)
+
+	var created product.Response
+	decodeBody(t, response, &created)
+	cleanupProduct(t, pool, created.ID)
+	return created
 }
