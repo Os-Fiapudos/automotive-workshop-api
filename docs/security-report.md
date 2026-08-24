@@ -100,6 +100,13 @@ Enforcement: `scripts/coverage.sh` exits non-zero when any gated package is belo
 threshold, and the CI `coverage` job runs it on every push, so a regression breaks the
 build rather than being noticed later.
 
+**Re-measured after merging `develop`** (stock usage for service orders, average execution
+time metric, README update): service-order 80.0%, product 88.3%, tracking 83.6% — all still
+passing, but service-order now sits exactly on the threshold, having lost 0.7pp to the
+incoming code. The next feature that adds service-order statements without tests will break
+the gate. `gosec` was re-run over the merged tree (91 files, 9,012 lines) and still reports
+`Issues: 0`.
+
 **Caveat, stated explicitly**: without `DATABASE_URL` the integration tests skip themselves
 and the same three packages measure 26.8% / 20.8% / 6.6%. The 80% claim is only valid with
 a database present. The script refuses to run without one, precisely so that a passing

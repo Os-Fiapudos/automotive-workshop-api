@@ -95,6 +95,35 @@ code but are not yet described in this document; the sections below cover `auth`
 > `specs/service-order-diagnosis-quote/design.md` §1.6. See
 > `specs/service-order-quote-decision/design.md` for the full design.
 
+> **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
+> `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
+> a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/
+> `ServiceExecution` data — average duration in minutes, grouped by service, over completed
+> executions only (`ended_at IS NOT NULL`; an in-progress execution is excluded, not
+> counted as zero). Optional `serviceId`/`startDate`/`endDate` filters, no pagination (the
+> result is bounded by the number of distinct services with a qualifying execution, not by
+> execution volume). See `specs/service-order-metrics/design.md` for the full design.
+
+> **Addendum (`specs/service-order-stock-usage/`)**: `service-order` gained three more
+> `requireAuth`-wrapped routes: `POST /api/v1/service-orders/{id}/stock-movements` (deduct
+> one or more parts/supplies from stock against an `EM_EXECUCAO` order, all-or-nothing per
+> request), `GET /api/v1/service-orders/{id}/stock-movements` (list the movements recorded
+> against an order), and `POST .../stock-movements/{movementId}/reversal` (undo a previously
+> registered deduction, restoring the quantity and linking back to the original movement).
+> This is the first feature to persist to `docs/schema.sql`'s new `stock_movements` table —
+> a ledger **shared** with `internal/features/product/`'s own manual stock adjustments
+> (`POST /api/v1/produtos/{id}/estoque/ajustes`), distinguished by a nullable
+> `service_order_id`, rather than two separate "stock movement" concepts in the same domain.
+> That product feature's `StockMovement` domain type and `POST .../estoque/ajustes` endpoint
+> already existed but were a stub before this change — `AdjustStock` only updated
+> `products.current_stock`, and `GET /produtos/{id}/movimentacoes` always returned an empty
+> array; this feature's schema work fixed that as a small, explicitly-scoped byproduct (its
+> `AdjustStock` now writes to `stock_movements` too, and `listMovements` reads it back), not
+> a broader refactor of `product`. As with every other cross-feature table read/write in this
+> codebase, `service-order` and `product` each write to `stock_movements` through their own
+> SQL — neither imports the other's Go package (CLAUDE.md §9.2). See
+> `specs/service-order-stock-usage/design.md` for the full design.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under

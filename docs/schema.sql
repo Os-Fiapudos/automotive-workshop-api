@@ -89,6 +89,14 @@ DO $$ BEGIN
     );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Added by specs/service-order-stock-usage/. Shared by both a product's own
+-- manual stock adjustments (internal/features/product, service_order_id
+-- NULL) and a service order's parts/supplies usage deductions and their
+-- reversals (service_order_id set) — see stock_movements below.
+DO $$ BEGIN
+    CREATE TYPE stock_movement_type AS ENUM ('ENTRY', 'EXIT');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- ==== Tables ====
 
 -- ---- Customer ----
@@ -383,6 +391,38 @@ COMMENT ON COLUMN audit_services.service_id IS 'Reference to the Service being e
 COMMENT ON COLUMN audit_services.started_at IS 'Date/time the execution started.';
 COMMENT ON COLUMN audit_services.ended_at IS 'Date/time the execution finished. NULL while still in progress.';
 
+-- ---- StockMovement ----
+-- Ledger of every stock balance change (specs/service-order-stock-usage/design.md §0):
+-- both a product's own manual ENTRY/EXIT adjustment (internal/features/product,
+-- service_order_id NULL) and a service order's parts/supplies usage EXIT (and its
+-- ENTRY reversal), service_order_id set. Written from each feature's own SQL — no
+-- Go-level import between the product and service-order packages (CLAUDE.md §9.2).
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id            UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    service_order_id      UUID REFERENCES service_orders (id) ON DELETE CASCADE,
+    type                  stock_movement_type NOT NULL,
+    quantity              INTEGER NOT NULL CHECK (quantity > 0),
+    previous_stock        INTEGER NOT NULL,
+    new_stock             INTEGER NOT NULL,
+    reason                TEXT,
+    reversed_movement_id  UUID REFERENCES stock_movements (id) ON DELETE RESTRICT,
+    occurred_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE stock_movements IS 'Ledger of every stock balance change: manual product adjustments and service-order usage deductions/reversals.';
+COMMENT ON COLUMN stock_movements.id IS 'Technical identifier of the movement record.';
+COMMENT ON COLUMN stock_movements.product_id IS 'Reference to the Product whose balance changed.';
+COMMENT ON COLUMN stock_movements.service_order_id IS 'Reference to the ServiceOrder this movement was deducted for/restored to, when applicable. NULL for a manual product adjustment. ON DELETE CASCADE, matching audit_services/service_order_history — deleting an order removes its own audit trail.';
+COMMENT ON COLUMN stock_movements.type IS 'ENTRY (adds to stock) or EXIT (removes from stock).';
+COMMENT ON COLUMN stock_movements.quantity IS 'Absolute quantity moved. Always positive; direction is given by type.';
+COMMENT ON COLUMN stock_movements.previous_stock IS 'Product current_stock immediately before this movement.';
+COMMENT ON COLUMN stock_movements.new_stock IS 'Product current_stock immediately after this movement.';
+COMMENT ON COLUMN stock_movements.reason IS 'Free-form justification, required for a manual product adjustment. NULL for a service-order usage/reversal movement, whose service_order_id already explains it.';
+COMMENT ON COLUMN stock_movements.reversed_movement_id IS 'For a reversal ENTRY, the original EXIT movement it undoes. NULL for every other movement. A movement is reversed at most once (enforced at the application layer).';
+COMMENT ON COLUMN stock_movements.occurred_at IS 'Date/time the movement occurred.';
+
 -- =============================================================================
 -- ==== Indexes ====
 -- =============================================================================
@@ -414,6 +454,8 @@ CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON ser
 CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_product_id ON stock_movements (product_id);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_service_order_id ON stock_movements (service_order_id);
 -- quotes.service_order_id and service_order_tracking_tokens.service_order_id already have
 -- unique indexes (UNIQUE above creates one for each).
 

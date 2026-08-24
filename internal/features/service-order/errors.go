@@ -95,4 +95,25 @@ var (
 	// service-order-tracking's ErrTokenInvalid (all of these are
 	// deliberately indistinguishable from the caller's perspective, 401).
 	ErrTrackingTokenInvalid = errors.New("tracking token is invalid, revoked, or does not match this service order")
+
+	// ErrEmptyStockUsage is returned when a stock usage request has no items
+	// (specs/service-order-stock-usage/).
+	ErrEmptyStockUsage = errors.New("stock usage must include at least one item")
+
+	// ErrInsufficientStock is returned when a usage deduction would take a
+	// product's balance negative.
+	ErrInsufficientStock = errors.New("insufficient stock balance for this product")
+
+	// ErrStockMovementNotFound is returned when the identified stock
+	// movement does not exist for the identified service order.
+	ErrStockMovementNotFound = errors.New("stock movement not found")
+
+	// ErrStockMovementAlreadyReversed is returned when attempting to reverse
+	// a movement that has already been reversed.
+	ErrStockMovementAlreadyReversed = errors.New("stock movement has already been reversed")
+
+	// ErrStockMovementNotReversible is returned when attempting to reverse a
+	// movement that is not an EXIT usage deduction (e.g. an ENTRY reversal
+	// itself).
+	ErrStockMovementNotReversible = errors.New("stock movement is not reversible")
 )

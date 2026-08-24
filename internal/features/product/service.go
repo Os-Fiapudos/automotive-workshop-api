@@ -222,20 +222,33 @@ func (service *ProductService) AdjustStock(ctx context.Context, id uuid.UUID, ra
 		return nil, nil, err
 	}
 
-	delta := quantity
-	if movementType == MovementTypeExit {
-		delta = -quantity
-	}
-
-	updatedProduct, err := service.repository.AdjustStock(ctx, id, delta)
+	updatedProduct, err := service.repository.AdjustStock(ctx, id, movement)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	movement.PreviousStock = existingProduct.CurrentStock - delta
-	movement.NewStock = updatedProduct.CurrentStock
-
 	return updatedProduct, movement, nil
+}
+
+// ListMovements retrieves the paginated stock movement history for a product.
+//
+// Args:
+//
+//	ctx(context.Context): request context
+//	id(uuid.UUID): product ID
+//	page(int): 1-based page number
+//	pageSize(int): items per page
+//
+// Returns:
+//
+//	movements([]*StockMovement): page of movements
+//	total(int): total movement count for this product
+//	err(error): ErrNotFound if product does not exist
+func (service *ProductService) ListMovements(ctx context.Context, id uuid.UUID, page, pageSize int) ([]*StockMovement, int, error) {
+	if _, err := service.repository.FindByID(ctx, id); err != nil {
+		return nil, 0, err
+	}
+	return service.repository.ListMovements(ctx, id, page, pageSize)
 }
 
 // GetStockBalance retrieves current stock balance information for a product.
