@@ -94,6 +94,15 @@ code but are not yet described in this document; the sections below cover `auth`
 > `specs/service-order-diagnosis-quote/design.md` §1.6. See
 > `specs/service-order-quote-decision/design.md` for the full design.
 
+> **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
+> `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
+> a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/
+> `ServiceExecution` data — average duration in minutes, grouped by service, over completed
+> executions only (`ended_at IS NOT NULL`; an in-progress execution is excluded, not
+> counted as zero). Optional `serviceId`/`startDate`/`endDate` filters, no pagination (the
+> result is bounded by the number of distinct services with a qualifying execution, not by
+> execution volume). See `specs/service-order-metrics/design.md` for the full design.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under

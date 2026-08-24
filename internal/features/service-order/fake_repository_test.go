@@ -297,6 +297,61 @@ func (fake *fakeRepository) findServiceExecutionsByServiceOrderID(_ context.Cont
 	return fake.executions[serviceOrderID], nil
 }
 
+// findAverageExecutionTimeByService is an in-memory equivalent of
+// PostgresServiceOrderRepository.findAverageExecutionTimeByService, filtering
+// and aggregating the same way the real SQL query does
+// (specs/service-order-metrics/design.md §1.6), for the service-layer unit
+// tests to exercise without a database.
+func (fake *fakeRepository) findAverageExecutionTimeByService(_ context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
+	type accumulator struct {
+		ref   *serviceRef
+		count int
+		total time.Duration
+	}
+	byService := make(map[uuid.UUID]*accumulator)
+
+	for _, executions := range fake.executions {
+		for _, execution := range executions {
+			if execution.EndedAt == nil {
+				continue
+			}
+			if filter.ServiceID != nil && execution.ServiceID != *filter.ServiceID {
+				continue
+			}
+			if filter.StartDate != nil && execution.StartedAt.Before(*filter.StartDate) {
+				continue
+			}
+			if filter.EndDate != nil && execution.StartedAt.After(*filter.EndDate) {
+				continue
+			}
+
+			acc, ok := byService[execution.ServiceID]
+			if !ok {
+				acc = &accumulator{ref: fake.services[execution.ServiceID]}
+				byService[execution.ServiceID] = acc
+			}
+			acc.count++
+			acc.total += execution.EndedAt.Sub(execution.StartedAt)
+		}
+	}
+
+	var metrics []*ServiceMetric
+	for serviceID, acc := range byService {
+		if acc.ref == nil || acc.count == 0 {
+			continue
+		}
+		metrics = append(metrics, &ServiceMetric{
+			ServiceID:              serviceID,
+			ServiceCode:            acc.ref.Code,
+			ServiceName:            acc.ref.Name,
+			ExecutionCount:         acc.count,
+			AverageDurationMinutes: acc.total.Minutes() / float64(acc.count),
+		})
+	}
+	sort.Slice(metrics, func(i, j int) bool { return metrics[i].ServiceName < metrics[j].ServiceName })
+	return metrics, nil
+}
+
 // listServiceOrders is an in-memory equivalent of
 // PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
 // the same way the real SQL query does (design.md §1.3/§1.4), for the

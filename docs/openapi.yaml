@@ -1547,6 +1547,56 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /api/v1/service-orders/metrics/average-execution-time:
+    get:
+      tags: [service-orders]
+      summary: Average service execution time, grouped by service
+      description: >
+        specs/service-order-metrics/. Only completed executions (with an
+        endedAt) participate; a still-in-progress execution is excluded, not
+        treated as zero. Duration is reported in minutes
+        (averageDurationMinutes). A service with no completed execution is
+        absent from the result rather than shown with a zero count; no data
+        at all (or a filter matching nothing) returns 200 with an empty
+        `services` array, never an error. All filters are optional and
+        combine with AND.
+      operationId: getAverageExecutionTime
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: serviceId
+          in: query
+          description: Restrict the result to a single service.
+          schema:
+            type: string
+            format: uuid
+        - name: startDate
+          in: query
+          description: Inclusive lower bound on the execution's start date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          description: Inclusive upper bound on the execution's start date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: One entry per service with at least one completed execution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AverageExecutionTimeResponse"
+        "400":
+          description: An invalid filter value (malformed serviceId, startDate, or endDate).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
   /api/v1/acompanhamento/{codigo}:
     get:
       tags: [tracking]
@@ -2071,6 +2121,32 @@ components:
           type: integer
         totalPages:
           type: integer
+
+    AverageExecutionTimeResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceMetric"
+
+    ServiceMetric:
+      type: object
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+        serviceCode:
+          type: integer
+          format: int64
+        serviceName:
+          type: string
+        executionCount:
+          type: integer
+        averageDurationMinutes:
+          type: number
+          format: double
+          description: Average execution duration, in minutes.
 
     ServiceOrderCustomerDetail:
       type: object
