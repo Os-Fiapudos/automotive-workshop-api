@@ -39,5 +39,15 @@ services:
       db:
         condition: service_healthy
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    restart: unless-stopped
+    environment:
+      SWAGGER_JSON: /openapi.yaml
+    volumes:
+      - ./docs/openapi.yaml:/openapi.yaml:ro
+    ports:
+      - "${SWAGGER_UI_PORT:-8082}:8080"
+
 volumes:
   db_data:
