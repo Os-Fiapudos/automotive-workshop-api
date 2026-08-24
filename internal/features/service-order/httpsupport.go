@@ -96,6 +96,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.Validation("service execution end date cannot be before its start date"))
 	case errors.Is(err, ErrExecutionsNotCompleted):
 		apierror.Write(w, apierror.Conflict("EXECUTIONS_NOT_COMPLETED", "service order has pending service executions and cannot be finalized"))
+	case errors.Is(err, ErrTrackingTokenInvalid):
+		apierror.Write(w, apierror.Unauthorized("INVALID_TRACKING_TOKEN", "tracking token is invalid, revoked, or does not match this service order"))
 	default:
 		apierror.Write(w, apierror.Internal("unexpected error"))
 	}

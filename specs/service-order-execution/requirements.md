@@ -40,6 +40,14 @@ This feature covers exactly three things:
     service order that was moved to `EM_EXECUCAO` some other way (e.g. directly in the
     database, as today's tests already do for fixtures the API can't produce, such as
     vehicles and catalog products).
+
+  > **Resolved by `specs/service-order-quote-decision/`**: that feature implements
+  > `AGUARDANDO_APROVACAO → EM_EXECUCAO` (approval) and, on rejection,
+  > `AGUARDANDO_APROVACAO → CANCELADA` (a status this spec's six-value enum did not
+  > originally include — see that feature's requirements.md §3/§5). This feature's own tests
+  > still reach `EM_EXECUCAO` via direct SQL fixtures rather than the real approval endpoint,
+  > since rewriting them was outside this spec's scope; that remains a valid, if now
+  > superseded-in-practice, way to set up the precondition.
 - Notifications, quote/price calculation, editing a delivered order, and anything else not
   explicitly listed below.
 

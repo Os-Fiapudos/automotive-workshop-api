@@ -75,15 +75,19 @@ type quoteItemResponse struct {
 	Total       float64 `json:"total"`
 }
 
-// QuoteResponse is the JSON representation of a Quote.
+// QuoteResponse is the JSON representation of a Quote. Version/SentAt/
+// SentVersion are added by specs/service-order-quote-decision/.
 type QuoteResponse struct {
 	ID             string              `json:"id"`
 	Code           int64               `json:"code"`
 	ServiceOrderID string              `json:"serviceOrderId"`
 	TotalAmount    float64             `json:"totalAmount"`
 	Status         string              `json:"status"`
+	Version        int                 `json:"version"`
 	Items          []quoteItemResponse `json:"items"`
 	GeneratedAt    time.Time           `json:"generatedAt"`
+	SentAt         *time.Time          `json:"sentAt,omitempty"`
+	SentVersion    *int                `json:"sentVersion,omitempty"`
 	RespondedAt    *time.Time          `json:"respondedAt,omitempty"`
 }
 
@@ -110,9 +114,34 @@ func toQuoteResponse(quote *Quote) QuoteResponse {
 		ServiceOrderID: quote.ServiceOrderID.String(),
 		TotalAmount:    quote.TotalAmount,
 		Status:         string(quote.Status),
+		Version:        quote.Version,
 		Items:          items,
 		GeneratedAt:    quote.GeneratedAt,
+		SentAt:         quote.SentAt,
+		SentVersion:    quote.SentVersion,
 		RespondedAt:    quote.RespondedAt,
+	}
+}
+
+// quoteDecisionResponse is the public, customer-facing response for
+// POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar|reprovar —
+// deliberately a reduced projection distinct from the administrative
+// QuoteResponse (no internal ids, no item breakdown), same "reduced read
+// projection" principle service-order-tracking's trackingResponse already
+// established for this same unauthenticated, customer-facing surface.
+type quoteDecisionResponse struct {
+	Code        int64      `json:"code"`
+	QuoteStatus string     `json:"quoteStatus"`
+	OrderStatus string     `json:"orderStatus"`
+	RespondedAt *time.Time `json:"respondedAt"`
+}
+
+func toQuoteDecisionResponse(order *ServiceOrder, quote *Quote) quoteDecisionResponse {
+	return quoteDecisionResponse{
+		Code:        order.Code,
+		QuoteStatus: string(quote.Status),
+		OrderStatus: string(order.Status),
+		RespondedAt: quote.RespondedAt,
 	}
 }
 

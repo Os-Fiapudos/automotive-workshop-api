@@ -83,6 +83,16 @@ type serviceOrderLookups interface {
 	// Added by specs/service-order-execution/.
 	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error)
 	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error)
+
+	// Added by specs/service-order-quote-decision/: resolves the order
+	// identified by its public code first (so an unknown code always maps to
+	// ErrServiceOrderNotFound regardless of the token), then checks
+	// tokenHash against that specific order's active tracking token
+	// (ErrTrackingTokenInvalid otherwise) — same precedence as
+	// service-order-tracking's FindByCodeAndTokenHash, reading
+	// service_order_tracking_tokens directly via SQL rather than importing
+	// that feature's Go package (CLAUDE.md §9.2).
+	findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
@@ -104,6 +114,19 @@ type ServiceOrderRepository interface {
 	FinishExecution(ctx context.Context, execution *ServiceExecution) error
 	FinalizeOrder(ctx context.Context, order *ServiceOrder) error
 	DeliverOrder(ctx context.Context, order *ServiceOrder) error
+
+	// Added by specs/service-order-quote-decision/.
+
+	// SendQuote records quote as sent (sent_at/sent_version) and transitions
+	// order from EM_DIAGNOSTICO to AGUARDANDO_APROVACAO, transactionally.
+	SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error)
+
+	// DecideQuote records the customer's decision on quote (APPROVED or
+	// REJECTED, per decision), transitions order accordingly (EM_EXECUCAO or
+	// CANCELADA), and writes the corresponding history entry, all in one
+	// transaction (RNF07): a failure at any step, including the history
+	// insert, rolls back every other write this call made.
+	DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error)
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and
@@ -252,6 +275,42 @@ func (repository *PostgresServiceOrderRepository) findMissingServiceIDs(ctx cont
 		}
 	}
 	return missing, nil
+}
+
+// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// (specs/service-order-quote-decision/design.md): the order is resolved by
+// code first, so an unknown code always maps to ErrServiceOrderNotFound
+// regardless of the token; only then is tokenHash checked against that
+// order's active tracking token, mirroring
+// service-order-tracking.PostgresTrackingRepository.FindByCodeAndTokenHash.
+func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error) {
+	order := &ServiceOrder{}
+	err := repository.pool.QueryRow(ctx,
+		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
+		 FROM service_orders WHERE code = $1`, code,
+	).Scan(&order.ID, &order.Code, &order.CustomerID, &order.VehicleID, &order.OpenedAt,
+		&order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrServiceOrderNotFound
+		}
+		return nil, err
+	}
+
+	var matches bool
+	if err := repository.pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM service_order_tracking_tokens
+			WHERE service_order_id = $1 AND token_hash = $2 AND revoked_at IS NULL
+		)`, order.ID, tokenHash,
+	).Scan(&matches); err != nil {
+		return nil, err
+	}
+	if !matches {
+		return nil, ErrTrackingTokenInvalid
+	}
+
+	return order, nil
 }
 
 // findServicesByIDs loads the display data (code, name) for a set of

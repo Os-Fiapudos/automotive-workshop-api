@@ -190,6 +190,17 @@ already that status, but idempotent either way), and inserts into `service_order
 (`event = 'quote_composed'`). All in one transaction; any failure rolls back the quote,
 its items, and the order's status transition together.
 
+> **Erratum (`specs/service-order-quote-decision/`)**: the `UPDATE service_orders` statement
+> described above no longer exists. That feature's own requirements attributed the
+> `EM_DIAGNOSTICO → AGUARDANDO_APROVACAO` transition to an explicit "send the quote to the
+> customer" step this design did not have, and moved it to a new `SendQuote` repository
+> method instead — see `specs/service-order-quote-decision/design.md` §1.2/§1.5 for the
+> resolution and its traceability. This paragraph is left as originally written, per
+> `specs/README.md`'s "a specification should not be changed just to make the code fit" rule:
+> it was correct for what this feature implemented at the time; the later feature is the one
+> that changed the requirement, and records that change in its own spec rather than rewriting
+> this one.
+
 ### 1.7 API layer
 
 Reuses `internal/shared/apierror`, same as the rest of the feature. New status mapping,

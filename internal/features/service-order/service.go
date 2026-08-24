@@ -34,16 +34,24 @@ type CreateResult struct {
 	TrackingToken string
 }
 
-// ServiceOrderService orchestrates the Service Order Opening use case on top
-// of a ServiceOrderRepository and its read-only lookups. There is one
-// method — Create — since this feature has exactly one use case.
+// ServiceOrderService orchestrates every use case on the ServiceOrder
+// aggregate on top of a ServiceOrderRepository and its read-only lookups.
+// notifier is the quote-sent notification port
+// (specs/service-order-quote-decision/, see quote_notifier.go) — always
+// non-nil; NewServiceOrderService defaults it to NoOpQuoteNotifier when nil
+// is passed, so existing callers (and tests) that only care about the other
+// use cases don't have to wire one explicitly.
 type ServiceOrderService struct {
 	repository ServiceOrderRepository
 	lookups    serviceOrderLookups
+	notifier   QuoteNotifier
 }
 
-func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOrderLookups) *ServiceOrderService {
-	return &ServiceOrderService{repository: repository, lookups: lookups}
+func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOrderLookups, notifier QuoteNotifier) *ServiceOrderService {
+	if notifier == nil {
+		notifier = NoOpQuoteNotifier{}
+	}
+	return &ServiceOrderService{repository: repository, lookups: lookups, notifier: notifier}
 }
 
 // Create resolves the customer and vehicle referenced by input, validates

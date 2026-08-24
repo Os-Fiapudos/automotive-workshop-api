@@ -54,7 +54,7 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	customerService := customer.NewCustomerService(customerRepository)
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil)
 
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
@@ -419,10 +419,12 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 	assert.InDelta(t, 2*35.90+80.00, quote.TotalAmount, 0.0001)
 	require.Len(t, quote.Items, 2)
 
+	// Composing a quote no longer transitions the order by itself — only
+	// sending it does (specs/service-order-quote-decision/).
 	var status string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", status)
+	assert.Equal(t, "EM_DIAGNOSTICO", status)
 
 	// Stock must be untouched by composing a quote (requirements.md §3.8).
 	assert.Equal(t, stockBefore, productStock(t, pool, productID))
@@ -701,7 +703,7 @@ func TestServiceOrderDetailByIDFullLifecycle(t *testing.T) {
 	decodeBody(t, resp, &detail)
 
 	assert.Equal(t, order.ID, detail.ID)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", detail.Status)
+	assert.Equal(t, "EM_DIAGNOSTICO", detail.Status, "composing a quote no longer transitions the order — only sending it does (specs/service-order-quote-decision/)")
 	require.NotNil(t, detail.Quote)
 	assert.InDelta(t, 2*35.90, detail.Quote.TotalAmount, 0.0001)
 	require.Len(t, detail.Quote.Items, 1)
