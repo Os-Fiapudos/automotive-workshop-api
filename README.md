@@ -26,10 +26,12 @@ Database access uses `pgx v5`; tests use the stdlib `testing` package plus `test
 
 **Vertical Slice (Feature-based)** — Organized by functionality; each feature gathers its own
 layers (handler, service, repository, model) in `internal/features/<feature>/`. See
-[specs/architecture.md](specs/architecture.md) for the current, code-observed architecture,
-[specs/customer-management/](specs/customer-management/) for the first implemented
-feature's requirements/design/tasks, and [specs/vehicle-management/](specs/vehicle-management/)
-for the second.
+[specs/architecture.md](specs/architecture.md) for the current, code-observed architecture.
+Each implemented feature has its own requirements/design/tasks under `specs/`: `auth`,
+`customer-management`, `service-catalog`, `vehicle-management`, `product-management`, and the
+service order flow split into `service-order-opening`, `service-order-diagnosis-quote`,
+`service-order-quote-decision`, `service-order-execution`, `service-order-stock-usage`,
+`service-order-query`, `service-order-metrics`, and `service-order-tracking`.
 
 ## API
 
@@ -82,6 +84,7 @@ GET    /api/v1/produtos/{id}/movimentacoes
 POST   /api/v1/service-orders                                     (unauthenticated)
 GET    /api/v1/service-orders
 GET    /api/v1/service-orders/{id}                                 (id or sequential code)
+GET    /api/v1/service-orders/metrics/average-execution-time
 POST   /api/v1/service-orders/{id}/diagnosis
 PUT    /api/v1/service-orders/{id}/quote
 GET    /api/v1/service-orders/{id}/quote
@@ -90,6 +93,9 @@ POST   /api/v1/service-orders/{id}/executions
 POST   /api/v1/service-orders/{id}/executions/{executionId}/finish
 POST   /api/v1/service-orders/{id}/finalize
 POST   /api/v1/service-orders/{id}/deliver
+POST   /api/v1/service-orders/{id}/stock-movements
+GET    /api/v1/service-orders/{id}/stock-movements
+POST   /api/v1/service-orders/{id}/stock-movements/{movementId}/reversal
 ```
 
 ```
@@ -164,13 +170,15 @@ Works the same way on PowerShell, Bash, Git Bash, macOS, and Linux.
 go test ./...
 ```
 
-Unit tests (`internal/shared/document/*_test.go`, `internal/features/customer/*_test.go`,
-`internal/features/vehicle/*_test.go`) run with no external dependency. Integration tests
-(`internal/handlers_test/customer_test.go`, `internal/handlers_test/vehicle_test.go`) connect
-to a real Postgres via `DATABASE_URL` (defaulting to the local docker-compose credentials)
-and **skip themselves** — they don't fail — when that database isn't reachable, so
-`go test ./...` passes either way. Start `docker compose up -d db` first to actually exercise
-them.
+Unit tests run alongside each feature/shared package (`internal/features/*/*_test.go`,
+`internal/shared/*/*_test.go`) with no external dependency. Integration tests in
+`internal/handlers_test/` (one file per feature: `auth_test.go`, `customer_test.go`,
+`vehicle_test.go`, `product_test.go`, `servicecatalog_test.go`, `service_order_test.go`,
+`service_order_quote_decision_test.go`, `service_order_metrics_test.go`,
+`service_order_tracking_test.go`) connect to a real Postgres via `DATABASE_URL` (defaulting
+to the local docker-compose credentials) and **skip themselves** — they don't fail — when
+that database isn't reachable, so `go test ./...` passes either way. Start
+`docker compose up -d db` first to actually exercise them.
 
 ## Project structure
 
@@ -189,16 +197,36 @@ flowchart TD
   n4 --> n5
   n6["user/"]
   n5 --> n6
-  n7("doc.go")
+  n7("doc.go — placeholder, unimplemented")
   n6 --> n7
+  n50["auth/"]
+  n5 --> n50
+  n51("model.go, dto.go, repository.go, service.go, handler.go, doc.go")
+  n50 --> n51
   n30["customer/"]
   n5 --> n30
   n31("model.go, dto.go, repository.go, service.go, handler.go, errors.go, doc.go")
   n30 --> n31
+  n52["servicecatalog/"]
+  n5 --> n52
+  n53("model.go, dto.go, repository.go, service.go, handler.go, doc.go")
+  n52 --> n53
   n40["vehicle/"]
   n5 --> n40
   n41("model.go, plate.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
   n40 --> n41
+  n54["product/"]
+  n5 --> n54
+  n55("model.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
+  n54 --> n55
+  n56["service-order/"]
+  n5 --> n56
+  n57("model.go + execution_*.go, quote_*.go, query_*.go, metrics_*.go, stockusage_*.go, handler.go, doc.go")
+  n56 --> n57
+  n58["service-order-tracking/"]
+  n5 --> n58
+  n59("model.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
+  n58 --> n59
   n8("doc.go")
   n5 --> n8
   n9["shared/"]
@@ -209,15 +237,23 @@ flowchart TD
   n32 --> n33
   n34["apierror/"]
   n9 --> n34
+  n60["httpx/"]
+  n9 --> n60
   n35["config/"]
   n9 --> n35
   n36["database/"]
   n9 --> n36
+  n61["token/"]
+  n9 --> n61
+  n62["middleware/"]
+  n9 --> n62
+  n63["trackingtoken/"]
+  n9 --> n63
   n10("doc.go")
   n9 --> n10
   n11["handlers_test/"]
   n4 --> n11
-  n12("customer_test.go, vehicle_test.go")
+  n12("auth_test.go, customer_test.go, vehicle_test.go, product_test.go, servicecatalog_test.go, service_order_test.go, service_order_quote_decision_test.go, service_order_metrics_test.go, service_order_tracking_test.go")
   n11 --> n12
   n21["docs/"]
   n0 --> n21
@@ -235,14 +271,25 @@ flowchart TD
   n27 --> n28
   n29("architecture.md")
   n27 --> n29
+  n64["auth/"]
+  n27 --> n64
   n38["customer-management/"]
   n27 --> n38
-  n39("requirements.md, design.md, tasks.md")
-  n38 --> n39
+  n65["service-catalog/"]
+  n27 --> n65
   n42["vehicle-management/"]
   n27 --> n42
-  n43("requirements.md, design.md, tasks.md")
-  n42 --> n43
+  n66["product-management/"]
+  n27 --> n66
+  n67["service-order-opening/, service-order-diagnosis-quote/, service-order-quote-decision/, service-order-execution/, service-order-stock-usage/, service-order-query/, service-order-metrics/, service-order-tracking/"]
+  n27 --> n67
+  n39("each: requirements.md, design.md, tasks.md")
+  n38 --> n39
+  n64 --> n39
+  n65 --> n39
+  n42 --> n39
+  n66 --> n39
+  n67 --> n39
   n13("go.mod")
   n0 --> n13
   n14(".gitignore")
