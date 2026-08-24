@@ -202,8 +202,16 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
-- No additional linter is configured (no `.golangci.yml`, no `golangci-lint`, no
-  `.editorconfig`). **To be defined**: whether a more complete linter (e.g.
+- `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
+  CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
+  versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
+  [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
+  are recorded in [docs/security-report.md](docs/security-report.md).
+- `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
+  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
+  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+- No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
+  `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
   baseline.
 - Do not run `go build`, `go vet`, and `go test` with flags that suppress errors; CI runs
