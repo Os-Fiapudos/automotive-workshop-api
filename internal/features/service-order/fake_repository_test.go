@@ -25,6 +25,8 @@ type fakeRepository struct {
 	history           map[uuid.UUID][]*ServiceOrderHistory // keyed by service order id
 	executions        map[uuid.UUID][]*ServiceExecution    // keyed by service order id
 	trackingTokens    map[uuid.UUID]string                 // keyed by service order id, value is the token hash
+	productStock      map[uuid.UUID]int                    // keyed by product id — specs/service-order-stock-usage/
+	movements         []*StockMovement                     // specs/service-order-stock-usage/
 }
 
 func newFakeRepository() *fakeRepository {
@@ -39,6 +41,7 @@ func newFakeRepository() *fakeRepository {
 		history:           make(map[uuid.UUID][]*ServiceOrderHistory),
 		executions:        make(map[uuid.UUID][]*ServiceExecution),
 		trackingTokens:    make(map[uuid.UUID]string),
+		productStock:      make(map[uuid.UUID]int),
 	}
 }
 
@@ -57,6 +60,13 @@ func (fake *fakeRepository) addCustomer(ref *customerRef, document string) {
 func (fake *fakeRepository) addVehicle(ref *vehicleRef) { fake.vehicles[ref.ID] = ref }
 func (fake *fakeRepository) addService(ref *serviceRef) { fake.services[ref.ID] = ref }
 func (fake *fakeRepository) addProduct(ref *productRef) { fake.products[ref.ID] = ref }
+
+// setProductStock seeds productID's balance for
+// stockusage_service_test.go — separate from addProduct since existing
+// callers (quote_service_test.go) never needed a stock quantity.
+func (fake *fakeRepository) setProductStock(productID uuid.UUID, quantity int) {
+	fake.productStock[productID] = quantity
+}
 
 // addOrder registers an already-built order so quote_service_test.go can
 // exercise StartDiagnosis/ComposeQuote without going through Create.
@@ -399,4 +409,95 @@ func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilt
 		end = total
 	}
 	return matched[start:end], total, nil
+}
+
+// ---- specs/service-order-stock-usage/ ----
+//
+// Replicates the guarded-update disambiguation
+// PostgresServiceOrderRepository.RegisterStockUsage performs atomically in
+// SQL, so the service-layer unit tests can exercise it without a database
+// (design.md §9).
+
+func (fake *fakeRepository) RegisterStockUsage(_ context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error) {
+	movements := make([]*StockMovement, 0, len(items))
+	for _, item := range items {
+		productID, err := uuid.Parse(item.ProductID)
+		if err != nil {
+			return nil, ErrProductNotFound
+		}
+
+		ref, ok := fake.products[productID]
+		if !ok {
+			return nil, ErrProductNotFound
+		}
+		if !ref.Active {
+			return nil, ErrProductInactive
+		}
+		currentStock := fake.productStock[productID]
+		if currentStock < item.Quantity {
+			return nil, ErrInsufficientStock
+		}
+
+		fake.productStock[productID] = currentStock - item.Quantity
+		movement := &StockMovement{
+			ID:             uuid.New(),
+			ProductID:      productID,
+			ServiceOrderID: &orderID,
+			Type:           StockMovementExit,
+			Quantity:       item.Quantity,
+			PreviousStock:  currentStock,
+			NewStock:       currentStock - item.Quantity,
+			OccurredAt:     time.Now().UTC(),
+		}
+		fake.movements = append(fake.movements, movement)
+		movements = append(movements, movement)
+	}
+	return movements, nil
+}
+
+func (fake *fakeRepository) ReverseStockMovement(_ context.Context, orderID, movementID uuid.UUID) (*StockMovement, error) {
+	var original *StockMovement
+	for _, movement := range fake.movements {
+		if movement.ID == movementID && movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			original = movement
+			break
+		}
+	}
+	if original == nil {
+		return nil, ErrStockMovementNotFound
+	}
+	if original.Type != StockMovementExit {
+		return nil, ErrStockMovementNotReversible
+	}
+	for _, movement := range fake.movements {
+		if movement.ReversedMovementID != nil && *movement.ReversedMovementID == movementID {
+			return nil, ErrStockMovementAlreadyReversed
+		}
+	}
+
+	currentStock := fake.productStock[original.ProductID]
+	fake.productStock[original.ProductID] = currentStock + original.Quantity
+	reversal := &StockMovement{
+		ID:                 uuid.New(),
+		ProductID:          original.ProductID,
+		ServiceOrderID:     &orderID,
+		Type:               StockMovementEntry,
+		Quantity:           original.Quantity,
+		PreviousStock:      currentStock,
+		NewStock:           currentStock + original.Quantity,
+		ReversedMovementID: &movementID,
+		OccurredAt:         time.Now().UTC(),
+	}
+	fake.movements = append(fake.movements, reversal)
+	return reversal, nil
+}
+
+func (fake *fakeRepository) ListStockMovements(_ context.Context, orderID uuid.UUID) ([]*StockMovement, error) {
+	var movements []*StockMovement
+	for _, movement := range fake.movements {
+		if movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			movements = append(movements, movement)
+		}
+	}
+	return movements, nil
 }

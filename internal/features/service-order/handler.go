@@ -78,6 +78,12 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	// literal path segment ("metrics"), so it cannot conflict with the
 	// {id}-shaped patterns above (design.md §1.2).
 	mux.Handle("GET /api/v1/service-orders/metrics/average-execution-time", wrap(handler.averageExecutionTime))
+
+	// Added by specs/service-order-stock-usage/ — all three requireAuth-wrapped,
+	// per specs/auth/design.md §7's "every new route requires auth" convention.
+	mux.Handle("POST /api/v1/service-orders/{id}/stock-movements", wrap(handler.registerStockUsage))
+	mux.Handle("GET /api/v1/service-orders/{id}/stock-movements", wrap(handler.listStockMovements))
+	mux.Handle("POST /api/v1/service-orders/{id}/stock-movements/{movementId}/reversal", wrap(handler.reverseStockMovement))
 }
 
 type serviceOrderHandler struct {
@@ -500,4 +506,74 @@ func parseMetricsFilter(r *http.Request) (MetricsFilter, []apierror.Detail) {
 	}
 
 	return filter, details
+}
+
+// registerStockUsage handles POST /api/v1/service-orders/{id}/stock-movements
+// (specs/service-order-stock-usage/).
+func (handler *serviceOrderHandler) registerStockUsage(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	request, apiError := decodeJSON[RegisterStockUsageRequest](r)
+	if apiError != nil {
+		apierror.Write(w, apiError)
+		return
+	}
+	if details := request.Validate(); len(details) > 0 {
+		apierror.Write(w, apierror.Validation("invalid stock usage data", details...))
+		return
+	}
+
+	movements, err := handler.service.RegisterStockUsage(r.Context(), id, request.toItems())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, toStockMovementListResponse(movements))
+}
+
+// listStockMovements handles GET /api/v1/service-orders/{id}/stock-movements
+// (specs/service-order-stock-usage/).
+func (handler *serviceOrderHandler) listStockMovements(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	movements, err := handler.service.ListStockMovements(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toStockMovementListResponse(movements))
+}
+
+// reverseStockMovement handles
+// POST /api/v1/service-orders/{id}/stock-movements/{movementId}/reversal
+// (specs/service-order-stock-usage/).
+func (handler *serviceOrderHandler) reverseStockMovement(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+	movementID, err := uuid.Parse(r.PathValue("movementId"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("stock movement not found"))
+		return
+	}
+
+	reversal, err := handler.service.ReverseStockMovement(r.Context(), id, movementID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, toStockMovementResponse(reversal))
 }

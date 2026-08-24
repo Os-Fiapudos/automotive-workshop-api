@@ -18,7 +18,8 @@ type ProductRepository interface {
 	ExistsByCode(ctx context.Context, code int64, excludeID *uuid.UUID) (bool, error)
 	List(ctx context.Context, page, pageSize int, productType *Type, status *Status) ([]*Product, int, error)
 	Update(ctx context.Context, product *Product) error
-	AdjustStock(ctx context.Context, id uuid.UUID, delta int) (*Product, error)
+	AdjustStock(ctx context.Context, id uuid.UUID, movement *StockMovement) (*Product, error)
+	ListMovements(ctx context.Context, productID uuid.UUID, page, pageSize int) ([]*StockMovement, int, error)
 	IsUsedInQuotesOrOrders(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
@@ -231,31 +232,49 @@ func (repository *PostgresProductRepository) Update(ctx context.Context, product
 	return mapUniqueViolation(err)
 }
 
-// AdjustStock applies a positive (ENTRY) or negative (EXIT) stock adjustment atomically in PostgreSQL.
+// AdjustStock applies a positive (ENTRY) or negative (EXIT) stock adjustment
+// and persists movement to the shared stock_movements ledger
+// (specs/service-order-stock-usage/design.md §6 — the same table
+// internal/features/service-order writes its own usage deductions to,
+// distinguished by a NULL service_order_id here), atomically in one
+// transaction (RNF07).
 //
 // Args:
 //
 //	ctx(context.Context): request context
 //	id(uuid.UUID): product ID
-//	delta(int): change in stock quantity (+N or -N)
+//	movement(*StockMovement): the movement to apply and persist — Type/Quantity/Reason
+//	    already set by the caller (Product.ApplyStockAdjustment); PreviousStock/NewStock/
+//	    CreatedAt are filled in by this call from the actual database values.
 //
 // Returns:
 //
 //	product(*Product): updated product aggregate
 //	err(error): error if product not found, inactive, or stock insufficient
-func (repository *PostgresProductRepository) AdjustStock(ctx context.Context, id uuid.UUID, delta int) (*Product, error) {
+func (repository *PostgresProductRepository) AdjustStock(ctx context.Context, id uuid.UUID, movement *StockMovement) (*Product, error) {
+	delta := movement.Quantity
+	if movement.Type == MovementTypeExit {
+		delta = -movement.Quantity
+	}
+
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
+
 	const query = `
 		UPDATE products
 		SET current_stock = current_stock + $2, updated_at = now()
 		WHERE id = $1 AND status = 'ACTIVE' AND (current_stock + $2) >= 0
 		RETURNING ` + productColumns
 
-	row := repository.pool.QueryRow(ctx, query, id, delta)
+	row := tx.QueryRow(ctx, query, id, delta)
 	product, err := scanProduct(row)
 	if errors.Is(err, ErrNotFound) {
 		var currentStock int
 		var status string
-		checkErr := repository.pool.QueryRow(ctx, `SELECT current_stock, status FROM products WHERE id = $1`, id).Scan(&currentStock, &status)
+		checkErr := tx.QueryRow(ctx, `SELECT current_stock, status FROM products WHERE id = $1`, id).Scan(&currentStock, &status)
 		if errors.Is(checkErr, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -267,7 +286,80 @@ func (repository *PostgresProductRepository) AdjustStock(ctx context.Context, id
 		}
 		return nil, ErrNotFound
 	}
-	return product, err
+	if err != nil {
+		return nil, err
+	}
+
+	movement.PreviousStock = product.CurrentStock - delta
+	movement.NewStock = product.CurrentStock
+
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO stock_movements (id, product_id, type, quantity, previous_stock, new_stock, reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING occurred_at`,
+		movement.ID, id, string(movement.Type), movement.Quantity, movement.PreviousStock, movement.NewStock, movement.Reason,
+	).Scan(&movement.CreatedAt); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return product, nil
+}
+
+// ListMovements loads the movements recorded for a product, most recent
+// first, paginated the same way List does.
+//
+// Args:
+//
+//	ctx(context.Context): request context
+//	productID(uuid.UUID): product ID
+//	page(int): 1-based page number
+//	pageSize(int): items per page
+//
+// Returns:
+//
+//	movements([]*StockMovement): page of movements
+//	total(int): total movement count for this product
+//	err(error): database error if any
+func (repository *PostgresProductRepository) ListMovements(ctx context.Context, productID uuid.UUID, page, pageSize int) ([]*StockMovement, int, error) {
+	offset := (page - 1) * pageSize
+
+	rows, err := repository.pool.Query(ctx,
+		`SELECT id, product_id, type, quantity, previous_stock, new_stock, reason, occurred_at, COUNT(*) OVER() AS total
+		 FROM stock_movements
+		 WHERE product_id = $1
+		 ORDER BY occurred_at DESC
+		 LIMIT $2 OFFSET $3`,
+		productID, pageSize, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var movements []*StockMovement
+	total := 0
+	for rows.Next() {
+		movement := &StockMovement{}
+		var typeStr string
+		var reason *string
+		if err := rows.Scan(&movement.ID, &movement.ProductID, &typeStr, &movement.Quantity,
+			&movement.PreviousStock, &movement.NewStock, &reason, &movement.CreatedAt, &total); err != nil {
+			return nil, 0, err
+		}
+		movement.Type = MovementType(typeStr)
+		if reason != nil {
+			movement.Reason = *reason
+		}
+		movements = append(movements, movement)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return movements, total, nil
 }
 
 // IsUsedInQuotesOrOrders checks if a product is referenced in existing quotes or service orders.

@@ -98,6 +98,16 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.Conflict("EXECUTIONS_NOT_COMPLETED", "service order has pending service executions and cannot be finalized"))
 	case errors.Is(err, ErrTrackingTokenInvalid):
 		apierror.Write(w, apierror.Unauthorized("INVALID_TRACKING_TOKEN", "tracking token is invalid, revoked, or does not match this service order"))
+	case errors.Is(err, ErrEmptyStockUsage):
+		apierror.Write(w, apierror.Validation("stock usage must include at least one item"))
+	case errors.Is(err, ErrInsufficientStock):
+		apierror.Write(w, apierror.Conflict("INSUFFICIENT_STOCK", "insufficient stock balance for this product"))
+	case errors.Is(err, ErrStockMovementNotFound):
+		apierror.Write(w, apierror.NotFound("stock movement not found"))
+	case errors.Is(err, ErrStockMovementAlreadyReversed):
+		apierror.Write(w, apierror.Conflict("STOCK_MOVEMENT_ALREADY_REVERSED", "stock movement has already been reversed"))
+	case errors.Is(err, ErrStockMovementNotReversible):
+		apierror.Write(w, apierror.Conflict("STOCK_MOVEMENT_NOT_REVERSIBLE", "stock movement is not reversible"))
 	default:
 		apierror.Write(w, apierror.Internal("unexpected error"))
 	}

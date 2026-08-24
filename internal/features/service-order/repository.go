@@ -130,6 +130,23 @@ type ServiceOrderRepository interface {
 	// transaction (RNF07): a failure at any step, including the history
 	// insert, rolls back every other write this call made.
 	DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error)
+
+	// Added by specs/service-order-stock-usage/.
+
+	// RegisterStockUsage deducts every item's quantity from its product's
+	// stock and records one EXIT StockMovement per item, transactionally
+	// (RNF07): a failure at any item rolls back every deduction already made
+	// in this call.
+	RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error)
+
+	// ReverseStockMovement restores the quantity of a previously registered
+	// EXIT movement and records a linked, inverse ENTRY movement,
+	// transactionally (RNF07).
+	ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*StockMovement, error)
+
+	// ListStockMovements loads every stock movement recorded against an
+	// order, most recent first.
+	ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*StockMovement, error)
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and

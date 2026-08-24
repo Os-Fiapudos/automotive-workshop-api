@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -348,9 +349,17 @@ func createServiceOrder(t *testing.T, server string, pool *pgxpool.Pool) service
 
 var licensePlateCounter int
 
+// randomLicensePlate returns a plate unique for this test binary run.
+// licensePlateCounter is a plain package-level counter (tests in this
+// package never run with t.Parallel), formatted with enough digits
+// (10000 distinct values) that the growing number of tests calling this
+// helper — this file alone now has 40+ — never wraps around and collides
+// with an earlier, still-cleaned-up-later vehicle within the same run (an
+// earlier 10*26=260-combination format did collide once the call count grew
+// past that, specs/service-order-stock-usage/'s new tests included).
 func randomLicensePlate() string {
 	licensePlateCounter++
-	return "QZX" + string(rune('0'+licensePlateCounter%10)) + "Y" + string(rune('A'+licensePlateCounter%26)) + "9"
+	return fmt.Sprintf("QZX%04dY", licensePlateCounter%10000)
 }
 
 func TestServiceOrderStartDiagnosisSuccess(t *testing.T) {
@@ -981,4 +990,260 @@ func TestServiceOrderFinalizedRejectsNewExecutions(t *testing.T) {
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+// ---- specs/service-order-stock-usage/ ----
+
+func TestRegisterStockUsageSuccess(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 35.90, true) // seeded with current_stock = 10
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 3}}}, authToken)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var body serviceorder.StockMovementListResponse
+	decodeBody(t, resp, &body)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, productID, body.Items[0].ProductID)
+	require.NotNil(t, body.Items[0].ServiceOrderID)
+	assert.Equal(t, order.ID, *body.Items[0].ServiceOrderID)
+	assert.Equal(t, "EXIT", body.Items[0].Type)
+	assert.Equal(t, 10, body.Items[0].PreviousStock)
+	assert.Equal(t, 7, body.Items[0].NewStock)
+	assert.Equal(t, 7, productStock(t, pool, productID))
+}
+
+func TestRegisterStockUsageRejectsBeforeEmExecucao(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool) // still RECEBIDA
+	productID := insertProduct(t, pool, 10, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 1}}}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Equal(t, 10, productStock(t, pool, productID))
+}
+
+// TestRegisterStockUsageRejectsInsufficientStock covers BR4/the acceptance
+// checklist's "saldo insuficiente impede a operação" and "o estoque nunca
+// fica negativo".
+func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true) // current_stock = 10
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 50}}}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	assert.Equal(t, 10, productStock(t, pool, productID), "no deduction on a rejected request")
+}
+
+func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, false)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 1}}}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestRegisterStockUsageRejectsUnknownProduct(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": uuid.NewString(), "quantity": 1}}}, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 0}}}, authToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestRegisterStockUsageRejectsEmptyItems(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{}}, authToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// TestRegisterStockUsageRollsBackPartialFailure covers BR7/the acceptance
+// checklist's "falha parcial desfaz todas as baixas da requisição": a
+// multi-item request where the second item fails must leave the first
+// item's product balance untouched.
+func TestRegisterStockUsageRollsBackPartialFailure(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	okProductID := insertProduct(t, pool, 10, true)    // current_stock = 10, would succeed alone
+	shortProductID := insertProduct(t, pool, 10, true) // current_stock = 10, insufficient for the requested quantity
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{
+			{"productId": okProductID, "quantity": 2},
+			{"productId": shortProductID, "quantity": 50},
+		}}, authToken)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	assert.Equal(t, 10, productStock(t, pool, okProductID), "the first item's deduction must be rolled back")
+	assert.Equal(t, 10, productStock(t, pool, shortProductID))
+
+	var count int
+	err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM stock_movements WHERE service_order_id = $1`, order.ID,
+	).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count, "no movement row must survive a rolled-back request")
+}
+
+func TestRegisterStockUsageRequiresAuth(t *testing.T) {
+	pool, server, _ := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 1}}}, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+// TestRegisterStockUsageConcurrencyNeverOversells covers BR8/the acceptance
+// checklist's "operações concorrentes não consomem o mesmo saldo": several
+// requests racing against a product with limited stock must never let the
+// balance go negative or oversell past what stock actually allows.
+func TestRegisterStockUsageConcurrencyNeverOversells(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true) // current_stock = 10
+
+	const attempts = 5
+	const quantityPerAttempt = 3 // 5 * 3 = 15 requested against a balance of 10: at most 3 can succeed
+
+	var wg sync.WaitGroup
+	statusCodes := make([]int, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+				map[string]any{"items": []map[string]any{{"productId": productID, "quantity": quantityPerAttempt}}}, authToken)
+			statusCodes[index] = resp.StatusCode
+		}(i)
+	}
+	wg.Wait()
+
+	succeeded := 0
+	for _, code := range statusCodes {
+		if code == http.StatusCreated {
+			succeeded++
+		} else {
+			assert.Equal(t, http.StatusConflict, code)
+		}
+	}
+	assert.Equal(t, 3, succeeded, "exactly 3 attempts of 3 units each fit in a balance of 10")
+	assert.Equal(t, 1, productStock(t, pool, productID), "10 - 3*3 = 1, never negative")
+}
+
+func TestListStockMovementsReturnsRegisteredUsage(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true)
+
+	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 2}}}, authToken)
+	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
+
+	listResp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID+"/stock-movements", nil, authToken)
+	require.Equal(t, http.StatusOK, listResp.StatusCode)
+
+	var body serviceorder.StockMovementListResponse
+	decodeBody(t, listResp, &body)
+	require.Len(t, body.Items, 1)
+	assert.Equal(t, 2, body.Items[0].Quantity)
+}
+
+// TestReverseStockMovementSuccess covers BR9/the acceptance checklist's
+// "estorno, se incluído no MVP, preserva a movimentação original".
+func TestReverseStockMovementSuccess(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true) // current_stock = 10
+
+	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 4}}}, authToken)
+	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
+	var registered serviceorder.StockMovementListResponse
+	decodeBody(t, registerResp, &registered)
+	require.Len(t, registered.Items, 1)
+	require.Equal(t, 6, productStock(t, pool, productID))
+
+	reverseResp := doAuthJSON(t, http.MethodPost,
+		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+registered.Items[0].ID+"/reversal", nil, authToken)
+	require.Equal(t, http.StatusCreated, reverseResp.StatusCode)
+
+	var reversal serviceorder.StockMovementResponse
+	decodeBody(t, reverseResp, &reversal)
+	assert.Equal(t, "ENTRY", reversal.Type)
+	require.NotNil(t, reversal.ReversedMovementID)
+	assert.Equal(t, registered.Items[0].ID, *reversal.ReversedMovementID)
+	assert.Equal(t, 10, productStock(t, pool, productID), "reversal must restore the deducted quantity")
+
+	// The original movement itself must be preserved, unmodified.
+	var originalStillExists bool
+	err := pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM stock_movements WHERE id = $1 AND type = 'EXIT')`, registered.Items[0].ID,
+	).Scan(&originalStillExists)
+	require.NoError(t, err)
+	assert.True(t, originalStillExists)
+}
+
+func TestReverseStockMovementRejectsSecondReversal(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	productID := insertProduct(t, pool, 10, true)
+
+	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
+		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 4}}}, authToken)
+	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
+	var registered serviceorder.StockMovementListResponse
+	decodeBody(t, registerResp, &registered)
+
+	firstReversal := doAuthJSON(t, http.MethodPost,
+		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+registered.Items[0].ID+"/reversal", nil, authToken)
+	require.Equal(t, http.StatusCreated, firstReversal.StatusCode)
+
+	secondReversal := doAuthJSON(t, http.MethodPost,
+		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+registered.Items[0].ID+"/reversal", nil, authToken)
+	assert.Equal(t, http.StatusConflict, secondReversal.StatusCode)
+}
+
+func TestReverseStockMovementRejectsUnknownMovement(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	order := createServiceOrder(t, server, pool)
+	moveServiceOrderToEmExecucao(t, pool, order.ID)
+
+	resp := doAuthJSON(t, http.MethodPost,
+		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+uuid.NewString()+"/reversal", nil, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
