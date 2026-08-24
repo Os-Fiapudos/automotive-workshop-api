@@ -24,6 +24,7 @@ type fakeRepository struct {
 	requestedServices map[uuid.UUID][]*serviceRef          // keyed by service order id
 	history           map[uuid.UUID][]*ServiceOrderHistory // keyed by service order id
 	executions        map[uuid.UUID][]*ServiceExecution    // keyed by service order id
+	trackingTokens    map[uuid.UUID]string                 // keyed by service order id, value is the token hash
 }
 
 func newFakeRepository() *fakeRepository {
@@ -37,7 +38,16 @@ func newFakeRepository() *fakeRepository {
 		requestedServices: make(map[uuid.UUID][]*serviceRef),
 		history:           make(map[uuid.UUID][]*ServiceOrderHistory),
 		executions:        make(map[uuid.UUID][]*ServiceExecution),
+		trackingTokens:    make(map[uuid.UUID]string),
 	}
+}
+
+// addTrackingToken registers orderID's tracking token hash, so
+// findServiceOrderByCodeWithTrackingToken can validate it — used by
+// quote_service_test.go's ApproveQuote/RejectQuote tests
+// (specs/service-order-quote-decision/).
+func (fake *fakeRepository) addTrackingToken(orderID uuid.UUID, tokenHash string) {
+	fake.trackingTokens[orderID] = tokenHash
 }
 
 func (fake *fakeRepository) addCustomer(ref *customerRef, document string) {
@@ -105,13 +115,52 @@ func (fake *fakeRepository) StartDiagnosis(_ context.Context, order *ServiceOrde
 func (fake *fakeRepository) SaveQuote(_ context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
 	quote := fake.quotes[order.ID]
 	if quote == nil {
-		quote = &Quote{ID: uuid.New(), ServiceOrderID: order.ID}
+		quote = &Quote{ID: uuid.New(), ServiceOrderID: order.ID, Version: 1}
+	} else {
+		quote.Version++
 	}
 	quote.TotalAmount = total
 	quote.Status = QuoteStatusPending
 	quote.Items = items
 	fake.quotes[order.ID] = quote
 	return quote, nil
+}
+
+// SendQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) SendQuote(_ context.Context, _ *ServiceOrder, quote *Quote) (*Quote, error) {
+	now := time.Now().UTC()
+	quote.SentAt = &now
+	sentVersion := quote.Version
+	quote.SentVersion = &sentVersion
+	return quote, nil
+}
+
+// DecideQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) DecideQuote(_ context.Context, _ *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error) {
+	if quote.Status != QuoteStatusPending {
+		return nil, ErrQuoteAlreadyDecided
+	}
+	now := time.Now().UTC()
+	quote.Status = decision
+	quote.RespondedAt = &now
+	return quote, nil
+}
+
+// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) findServiceOrderByCodeWithTrackingToken(_ context.Context, code int64, tokenHash string) (*ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code != code {
+			continue
+		}
+		if fake.trackingTokens[order.ID] != tokenHash {
+			return nil, ErrTrackingTokenInvalid
+		}
+		return order, nil
+	}
+	return nil, ErrServiceOrderNotFound
 }
 
 func (fake *fakeRepository) FindQuoteByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) (*Quote, error) {

@@ -65,7 +65,7 @@ func main() {
 	vehicleService := vehicle.NewVehicleService(vehicleRepository, customerLookupAdapter{service: customerService})
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, serviceorder.NoOpQuoteNotifier{})
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)

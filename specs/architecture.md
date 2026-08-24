@@ -74,6 +74,26 @@ code but are not yet described in this document; the sections below cover `auth`
 > through the public API alone yet. See `specs/service-order-execution/design.md` for the
 > full design.
 
+> **Addendum (`specs/service-order-quote-decision/`)**: `service-order` gained three more
+> routes: `POST /api/v1/service-orders/{id}/quote/send` (`requireAuth`-wrapped, an attendant
+> action — `EM_DIAGNOSTICO` → `AGUARDANDO_APROVACAO`), and the customer-facing
+> `POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar` /`.../reprovar` (never
+> `requireAuth`-wrapped, authenticated via the same `X-Tracking-Token` mechanism
+> `service-order-tracking` established — reusing `internal/shared/trackingtoken` and reading
+> `service_order_tracking_tokens` directly via SQL, the same no-cross-feature-Go-import
+> pattern that table's owning feature already set). This is the feature that finally fills
+> the `AGUARDANDO_APROVACAO → EM_EXECUCAO` gap `specs/service-order-execution/` flagged as an
+> external precondition (approval), and adds a matching `AGUARDANDO_APROVACAO → CANCELADA`
+> branch for rejection — a seventh `ServiceOrder.status` value beyond the six
+> `docs/entities.md` originally documented, added by explicit decision (not the source
+> ticket's own, which only recommended it) since a rejected quote can never be altered and
+> the order would otherwise have no way to leave `AGUARDANDO_APROVACAO`. It also changes
+> already-shipped behavior: composing a quote (`PUT /api/v1/service-orders/{id}/quote`) no
+> longer transitions the order by itself — only the new send step does — see
+> `specs/service-order-quote-decision/design.md` §1.2 for the erratum this introduces into
+> `specs/service-order-diagnosis-quote/design.md` §1.6. See
+> `specs/service-order-quote-decision/design.md` for the full design.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under

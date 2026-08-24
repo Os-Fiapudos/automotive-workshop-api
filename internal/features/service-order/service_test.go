@@ -12,7 +12,7 @@ import (
 const normalizedDocument = "11144477735"
 
 func newTestService(repo *fakeRepository) *ServiceOrderService {
-	return NewServiceOrderService(repo, repo)
+	return NewServiceOrderService(repo, repo, nil)
 }
 
 func seedActiveCustomerAndVehicle(repo *fakeRepository) (customerID, vehicleID uuid.UUID) {

@@ -52,9 +52,15 @@ DO $$ BEGIN
         'AGUARDANDO_APROVACAO',
         'EM_EXECUCAO',
         'FINALIZADA',
-        'ENTREGUE'
+        'ENTREGUE',
+        'CANCELADA'
     );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- 'CANCELADA' was added by specs/service-order-quote-decision/: a branch from
+-- AGUARDANDO_APROVACAO taken when the customer rejects the quote, since a
+-- REJECTED quote can never be altered (specs/service-order-diagnosis-quote/
+-- requirements.md §3.9) and the order otherwise had no way to leave
+-- AGUARDANDO_APROVACAO.
 
 DO $$ BEGIN
     CREATE TYPE quote_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
@@ -64,12 +70,18 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
 -- 'delivery' was added by the Service Order Execution/Finalization/Delivery feature
 -- (specs/service-order-execution/) for the FINALIZADA -> ENTREGUE transition; that same
--- feature reuses 'completion' for EM_EXECUCAO -> FINALIZADA.
+-- feature reuses 'completion' for EM_EXECUCAO -> FINALIZADA. 'approval' and
+-- 'cancellation' existed unused until specs/service-order-quote-decision/ became their
+-- first producer: 'approval' for AGUARDANDO_APROVACAO -> EM_EXECUCAO (quote approved),
+-- 'cancellation' for AGUARDANDO_APROVACAO -> CANCELADA (quote rejected). That same
+-- feature adds 'quote_sent' for EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO (quote sent to
+-- the customer).
 DO $$ BEGIN
     CREATE TYPE history_event AS ENUM (
         'creation',
         'diagnosis_started',
         'quote_composed',
+        'quote_sent',
         'approval',
         'completion',
         'cancellation',
@@ -241,10 +253,15 @@ CREATE TABLE IF NOT EXISTS quotes (
     service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
     total_amount      NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
     status            quote_status NOT NULL DEFAULT 'PENDING',
+    version           INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     generated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at           TIMESTAMPTZ,
+    sent_version      INTEGER,
     responded_at      TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (sent_at IS NULL OR sent_at >= generated_at),
+    CHECK (responded_at IS NULL OR sent_at IS NULL OR responded_at >= sent_at),
     CHECK (responded_at IS NULL OR responded_at >= generated_at)
 );
 
@@ -254,7 +271,10 @@ COMMENT ON COLUMN quotes.code IS 'Human-readable/sequential identifier of the qu
 COMMENT ON COLUMN quotes.service_order_id IS 'Reference to the ServiceOrder this quote belongs to.';
 COMMENT ON COLUMN quotes.total_amount IS 'Total quote amount (sum of products and services).';
 COMMENT ON COLUMN quotes.status IS 'Quote status: PENDING (awaiting customer response), APPROVED (customer accepted) or REJECTED (customer declined).';
-COMMENT ON COLUMN quotes.generated_at IS 'Date/time the quote was generated and sent to the customer.';
+COMMENT ON COLUMN quotes.version IS 'Incremented every time the quote is (re)composed (specs/service-order-diagnosis-quote/); sent_version records which version was actually sent to the customer.';
+COMMENT ON COLUMN quotes.generated_at IS 'Date/time the quote was first generated (composed).';
+COMMENT ON COLUMN quotes.sent_at IS 'Date/time the quote was sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
+COMMENT ON COLUMN quotes.sent_version IS 'The value of version that was actually sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
 COMMENT ON COLUMN quotes.responded_at IS 'Date/time the customer responded (approved/rejected). Optional, filled only after a response.';
 COMMENT ON COLUMN quotes.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN quotes.updated_at IS 'Record last update date/time, generated automatically.';

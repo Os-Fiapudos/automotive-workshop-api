@@ -87,4 +87,12 @@ var (
 	// whose required executions (one per approved-quote service line item)
 	// are not all complete (BR5).
 	ErrExecutionsNotCompleted = errors.New("service order has pending service executions and cannot be finalized")
+
+	// ErrTrackingTokenInvalid is returned by the customer-facing quote
+	// approve/reject endpoints (specs/service-order-quote-decision/) when the
+	// supplied tracking token is missing, malformed, doesn't match, belongs
+	// to a different order, or has been revoked — mirroring
+	// service-order-tracking's ErrTokenInvalid (all of these are
+	// deliberately indistinguishable from the caller's perspective, 401).
+	ErrTrackingTokenInvalid = errors.New("tracking token is invalid, revoked, or does not match this service order")
 )

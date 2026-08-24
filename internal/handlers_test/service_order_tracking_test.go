@@ -59,7 +59,7 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	customerService := customer.NewCustomerService(customerRepository)
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil)
 
 	trackingRepository := servicetracking.NewPostgresTrackingRepository(pool)
 	trackingService := servicetracking.NewTrackingService(trackingRepository)

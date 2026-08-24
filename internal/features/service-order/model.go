@@ -11,13 +11,15 @@ import (
 type Status string
 
 // Status values. StatusRecebida is the only one Service Order Opening
-// produces; StatusEmDiagnostico/StatusAguardandoAprovacao are introduced by
-// the Diagnosis and Quote Composition feature (see startDiagnosis/
-// markAwaitingApproval below). StatusEmExecucao/StatusFinalizada/
-// StatusEntregue are consumed (not produced) by
-// specs/service-order-execution/ — see finalize/deliver below and that
-// spec's requirements.md §2.1 for why reaching EM_EXECUCAO itself is still
-// an external precondition, not a transition this codebase implements yet.
+// produces; StatusEmDiagnostico is introduced by the Diagnosis and Quote
+// Composition feature (see startDiagnosis below).
+// StatusAguardandoAprovacao/StatusEmExecucao/StatusCancelada are produced by
+// specs/service-order-quote-decision/ (see sendQuote/approveQuote/
+// rejectQuote below) — until that feature, EM_EXECUCAO itself was only an
+// external precondition specs/service-order-execution/ depended on but did
+// not create (that spec's requirements.md §2.1). StatusFinalizada/
+// StatusEntregue are produced by specs/service-order-execution/ — see
+// finalize/deliver below.
 const (
 	StatusRecebida            Status = "RECEBIDA"
 	StatusEmDiagnostico       Status = "EM_DIAGNOSTICO"
@@ -25,6 +27,7 @@ const (
 	StatusEmExecucao          Status = "EM_EXECUCAO"
 	StatusFinalizada          Status = "FINALIZADA"
 	StatusEntregue            Status = "ENTREGUE"
+	StatusCancelada           Status = "CANCELADA"
 )
 
 // knownStatusValues lists every value docs/entities.md's ServiceOrderStatus
@@ -37,6 +40,7 @@ var knownStatusValues = []string{
 	string(StatusEmExecucao),
 	string(StatusFinalizada),
 	string(StatusEntregue),
+	string(StatusCancelada),
 }
 
 // isKnownStatus reports whether value is one of knownStatusValues.
@@ -100,16 +104,45 @@ func (order *ServiceOrder) startDiagnosis() error {
 	return nil
 }
 
-// markAwaitingApproval transitions the order to AGUARDANDO_APROVACAO once a
-// quote has been composed (requirements.md §3.2, §3.9). Diagnosis must have
-// already started (Status != RECEBIDA); re-entering AGUARDANDO_APROVACAO
-// from itself is allowed and a no-op, since composing a quote is idempotent
-// while it is still PENDING.
-func (order *ServiceOrder) markAwaitingApproval() error {
-	if order.Status == StatusRecebida {
-		return ErrDiagnosisNotStarted
+// sendQuote transitions the order from EM_DIAGNOSTICO to
+// AGUARDANDO_APROVACAO once its composed quote has been sent to the customer
+// (specs/service-order-quote-decision/requirements.md — "o envio altera a OS
+// de EM_DIAGNOSTICO para AGUARDANDO_APROVACAO"). Composing/recomposing the
+// quote itself (ComposeQuote) no longer performs this transition — only
+// sending it does.
+func (order *ServiceOrder) sendQuote() error {
+	if order.Status != StatusEmDiagnostico {
+		return ErrInvalidStatusTransition
 	}
 	order.Status = StatusAguardandoAprovacao
+	return nil
+}
+
+// approveQuote transitions the order from AGUARDANDO_APROVACAO to
+// EM_EXECUCAO once the customer approves its quote
+// (specs/service-order-quote-decision/requirements.md — "a aprovação altera
+// automaticamente a OS para EM_EXECUCAO"). This is the transition
+// specs/service-order-execution/requirements.md §2.1 flagged as depended on
+// but not produced by any code until this feature.
+func (order *ServiceOrder) approveQuote() error {
+	if order.Status != StatusAguardandoAprovacao {
+		return ErrInvalidStatusTransition
+	}
+	order.Status = StatusEmExecucao
+	return nil
+}
+
+// rejectQuote transitions the order from AGUARDANDO_APROVACAO to CANCELADA
+// once the customer rejects its quote — the closing status decided for a
+// rejected quote (specs/service-order-quote-decision/requirements.md), since
+// a REJECTED quote can never be altered
+// (specs/service-order-diagnosis-quote/requirements.md §3.9) and the order
+// would otherwise have no way to leave AGUARDANDO_APROVACAO.
+func (order *ServiceOrder) rejectQuote() error {
+	if order.Status != StatusAguardandoAprovacao {
+		return ErrInvalidStatusTransition
+	}
+	order.Status = StatusCancelada
 	return nil
 }
 
@@ -179,15 +212,23 @@ type QuoteItem struct {
 }
 
 // Quote is the priced budget for a ServiceOrder, composed from diagnosed
-// items (requirements.md, RF05/RF06).
+// items (requirements.md, RF05/RF06). Version/SentAt/SentVersion are added by
+// specs/service-order-quote-decision/: Version increments on every
+// compose/recompose (specs/service-order-diagnosis-quote/); SentAt/
+// SentVersion record when the quote was sent to the customer and which
+// Version was actually presented, satisfying that feature's requirement to
+// register "a data de envio e a versão efetivamente apresentada".
 type Quote struct {
 	ID             uuid.UUID
 	Code           int64
 	ServiceOrderID uuid.UUID
 	TotalAmount    float64
 	Status         QuoteStatus
+	Version        int
 	Items          []QuoteItem
 	GeneratedAt    time.Time
+	SentAt         *time.Time
+	SentVersion    *int
 	RespondedAt    *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

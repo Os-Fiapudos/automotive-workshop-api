@@ -96,12 +96,16 @@ ON CONFLICT DO NOTHING;
 
 -- ==== Quotes ====
 -- 1:1 with service_orders. status/responded_at consistent with the service order status.
+-- sent_at/sent_version (specs/service-order-quote-decision/) are populated for every quote
+-- whose order already reached AGUARDANDO_APROVACAO or beyond, since that transition is only
+-- ever produced by sending the quote; quote 5 stays unsent, consistent with its order still
+-- being RECEBIDA.
 
-INSERT INTO quotes (id, service_order_id, total_amount, status, generated_at, responded_at) VALUES
-    ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 84.40,  'APPROVED', now() - interval '10 days', now() - interval '10 days' + interval '2 hours'),
-    ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000002', 279.90, 'APPROVED', now() - interval '5 days',  now() - interval '5 days' + interval '1 hour'),
-    ('f0000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000003', 339.90, 'PENDING',  now() - interval '2 days',  NULL),
-    ('f0000000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000005', 120.00, 'PENDING',  now(),                       NULL)
+INSERT INTO quotes (id, service_order_id, total_amount, status, version, generated_at, sent_at, sent_version, responded_at) VALUES
+    ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 84.40,  'APPROVED', 1, now() - interval '10 days', now() - interval '10 days' + interval '1 hour', 1, now() - interval '10 days' + interval '2 hours'),
+    ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000002', 279.90, 'APPROVED', 1, now() - interval '5 days',  now() - interval '5 days' + interval '30 minutes', 1, now() - interval '5 days' + interval '1 hour'),
+    ('f0000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000003', 339.90, 'PENDING',  1, now() - interval '2 days',  now() - interval '2 days' + interval '1 hour', 1, NULL),
+    ('f0000000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000005', 120.00, 'PENDING',  1, now(),                       NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- Service order 4 (EM_DIAGNOSTICO) has no quote generated yet — a realistic scenario.

@@ -18,6 +18,14 @@ const (
 	maxPageSize     = 100
 )
 
+// trackingTokenHeader is the header the customer-facing quote decision
+// endpoints read the tracking token from — same header/constant name
+// service-order-tracking already established for its own endpoint
+// (requirements.md §0 item 2), duplicated here rather than imported since
+// importing that feature's package would introduce the cross-feature
+// coupling CLAUDE.md §9.2 forbids.
+const trackingTokenHeader = "X-Tracking-Token"
+
 // RegisterRoutes registers every Service Order Opening/Diagnosis/Quote
 // endpoint on mux, using the same Go 1.22 method-aware ServeMux pattern as
 // every other feature (see specs/service-order-opening/design.md §1.5).
@@ -40,6 +48,16 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	mux.Handle("POST /api/v1/service-orders/{id}/diagnosis", wrap(handler.startDiagnosis))
 	mux.Handle("PUT /api/v1/service-orders/{id}/quote", wrap(handler.composeQuote))
 	mux.Handle("GET /api/v1/service-orders/{id}/quote", wrap(handler.getQuote))
+
+	// Added by specs/service-order-quote-decision/. Sending is a mechanic
+	// action (requireAuth-wrapped, same as diagnosis/compose above); approve/
+	// reject are customer-facing under the same unauthenticated
+	// /acompanhamento namespace specs/service-order-tracking/ already
+	// established, validating their own tracking token instead of the
+	// administrative JWT (RF12).
+	mux.Handle("POST /api/v1/service-orders/{id}/quote/send", wrap(handler.sendQuote))
+	mux.HandleFunc("POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar", handler.approveQuote)
+	mux.HandleFunc("POST /api/v1/acompanhamento/{codigo}/orcamento/reprovar", handler.rejectQuote)
 
 	// Added by specs/service-order-query/ (RNF02: every route here requires
 	// a valid JWT, unlike the create route above). {id} accepts either a
@@ -140,6 +158,67 @@ func (handler *serviceOrderHandler) getQuote(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, http.StatusOK, toQuoteResponse(quote))
+}
+
+// sendQuote handles POST /api/v1/service-orders/{id}/quote/send
+// (specs/service-order-quote-decision/).
+func (handler *serviceOrderHandler) sendQuote(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	quote, err := handler.service.SendQuote(r.Context(), id)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toQuoteResponse(quote))
+}
+
+// approveQuote handles
+// POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar
+// (specs/service-order-quote-decision/). Never wrapped in requireAuth — it
+// validates its own tracking token instead (RF12), same convention as
+// service-order-tracking's GET /api/v1/acompanhamento/{codigo}.
+func (handler *serviceOrderHandler) approveQuote(w http.ResponseWriter, r *http.Request) {
+	code, err := strconv.ParseInt(r.PathValue("codigo"), 10, 64)
+	if err != nil {
+		// A non-numeric {codigo} can never match a real service_orders.code,
+		// same reasoning service-order-tracking's handler already applies.
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	order, quote, err := handler.service.ApproveQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toQuoteDecisionResponse(order, quote))
+}
+
+// rejectQuote handles
+// POST /api/v1/acompanhamento/{codigo}/orcamento/reprovar
+// (specs/service-order-quote-decision/). See approveQuote for the
+// authentication rationale.
+func (handler *serviceOrderHandler) rejectQuote(w http.ResponseWriter, r *http.Request) {
+	code, err := strconv.ParseInt(r.PathValue("codigo"), 10, 64)
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	order, quote, err := handler.service.RejectQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toQuoteDecisionResponse(order, quote))
 }
 
 // list handles GET /api/v1/service-orders (specs/service-order-query/,

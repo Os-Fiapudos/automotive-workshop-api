@@ -79,7 +79,7 @@
 | customerId  | uuid      | Reference to the requesting `Customer`.                                                                     |
 | vehicleId   | uuid      | Reference to the `Vehicle` being serviced.                                                                  |
 | openedAt    | string    | Date/time the service order was opened.                                                                     |
-| status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). |
+| status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). `AGUARDANDO_APROVACAO` branches to `CANCELADA` instead of `EM_EXECUCAO` if the customer rejects the quote (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
 | requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
@@ -89,8 +89,8 @@
 > **Note on `status` values**: every other Portuguese identifier in this project was
 > translated to English. The `ServiceOrder.status` values are the single deliberate
 > exception — kept in Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`,
-> `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) by explicit product decision. Do not translate
-> these values without an explicit new decision.
+> `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`, `CANCELADA`) by explicit product decision. Do not
+> translate these values without an explicit new decision.
 
 ## Quote
 
@@ -101,7 +101,10 @@
 | serviceOrderId | uuid       | Reference to the `ServiceOrder` this quote belongs to.                               |
 | totalAmount    | number     | Total quote amount (sum of products and services).                                   |
 | status         | string     | Quote status: `PENDING` (awaiting customer response), `APPROVED` (customer accepted) or `REJECTED` (customer declined). |
-| generatedAt    | string     | Date/time the quote was generated and sent to the customer.                          |
+| version        | number     | Incremented every time the quote is (re)composed (see [specs/service-order-diagnosis-quote](../specs/service-order-diagnosis-quote/)). |
+| generatedAt    | string     | Date/time the quote was first generated (composed).                                  |
+| sentAt         | string?    | Date/time the quote was sent to the customer (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). Optional, filled only once sent. |
+| sentVersion    | number?    | The `version` that was actually sent to the customer. Optional, filled only once sent. |
 | respondedAt    | string?    | Date/time the customer responded (approved/rejected). Optional, filled only after a response. |
 | products       | QuoteItem[] | List of products/parts included in the quote, each with its own snapshot (see `QuoteItem` below). |
 | services       | QuoteItem[] | List of services included in the quote, each with its own snapshot (see `QuoteItem` below).       |
@@ -140,7 +143,7 @@ traceability purposes.
 | id             | uuid   | Technical identifier of the history record.                                        |
 | serviceOrderId | uuid   | Reference to the `ServiceOrder` this event belongs to.                             |
 | occurredAt     | string | Date/time the event occurred.                                                      |
-| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `approval`, `completion`, `cancellation` or `delivery` (the last added by [specs/service-order-execution/](../specs/service-order-execution/), for `FINALIZADA` → `ENTREGUE`; `completion` is reused for `EM_EXECUCAO` → `FINALIZADA`). |
+| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `quote_sent`, `approval`, `completion`, `cancellation` or `delivery`. `quote_sent`, `approval` (for `AGUARDANDO_APROVACAO` → `EM_EXECUCAO`) and `cancellation` (for `AGUARDANDO_APROVACAO` → `CANCELADA`) are produced by [specs/service-order-quote-decision/](../specs/service-order-quote-decision/); `delivery` and `completion` (`EM_EXECUCAO` → `FINALIZADA`) by [specs/service-order-execution/](../specs/service-order-execution/). |
 | description    | string | Details of what happened in the event.                                             |
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |
@@ -204,7 +207,7 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 
 | Field              | Type   | Description                                                        |
 | ------------------ | ------ | ---------------------------------------------------------------------- |
-| serviceOrderStatus | string | `RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`. |
+| serviceOrderStatus | string | `RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`, `CANCELADA`. |
 
 ### QuoteStatus
 
