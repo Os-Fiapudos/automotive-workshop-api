@@ -3,7 +3,7 @@
 **Goal:** service catalog CRUD for the workshop manager: `POST/GET/PATCH/DELETE
 /api/v1/services`, all JWT-protected, with logical deletion and an active/inactive flag.
 
-**Architecture:** vertical slice `internal/features/servicecatalog/` (handler → service →
+**Architecture:** vertical slice `internal/features/service-catalog/` (handler → service →
 repository → model), reusing `internal/shared/{database,httpx,middleware}`; `cmd/api/main.go`
 only wires and registers routes. See [design.md](design.md).
 
@@ -41,9 +41,9 @@ only wires and registers routes. See [design.md](design.md).
 
 ### Task 2: Package skeleton and model (design §1, §2)
 
-- [x] `internal/features/servicecatalog/doc.go` — package comment referencing
+- [x] `internal/features/service-catalog/doc.go` — package comment referencing
       `specs/service-catalog/`.
-- [x] `internal/features/servicecatalog/model.go` — `Service` struct mirroring the table.
+- [x] `internal/features/service-catalog/model.go` — `Service` struct mirroring the table.
 
 ### Task 3: Repository (design §4)
 
@@ -73,7 +73,7 @@ only wires and registers routes. See [design.md](design.md).
 
 - [x] `service_test.go` — business rules against a fake `Store`.
 - [x] `handler_test.go` — status codes, payload shape, and the non-leaking 500 path.
-- [x] `internal/handlers_test/servicecatalog_test.go` — AC1–AC8 over real HTTP with a real
+- [x] `internal/handlers_test/service_catalog_test.go` — AC1–AC8 over real HTTP with a real
       login token; skipped without `DATABASE_URL`; cleans up rows it creates.
 
 ### Task 8: Documentation sync and verification

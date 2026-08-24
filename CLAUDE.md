@@ -33,7 +33,8 @@ framework) exposes `/health` plus the implemented vertical slices:
   full CRUD + logical deactivation for workshop customers (`/api/v1/customers*`, 6
   endpoints), CPF/CNPJ normalization and check-digit validation (including the
   alphanumeric CNPJ format in effect since July 2026).
-- **servicecatalog** (`internal/features/servicecatalog/`, [specs/service-catalog/](specs/service-catalog/)):
+- **service-catalog** (`internal/features/service-catalog/`, Go package `servicecatalog`,
+  [specs/service-catalog/](specs/service-catalog/)):
   protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
   prices, with an `active` flag and logical deletion.
 
@@ -95,31 +96,31 @@ decision**, not yet made — do not wrap them without confirming first (see sect
 ## 3. Project structure
 
 ```
-cmd/api/main.go            → HTTP entrypoint, wires up the server and registers feature routes
-internal/features/         → one folder per business feature (vertical slice)
-  features/auth/           → implemented slice: handler + service + repository + model
-                              (login, /me; unit-tested)
-  features/customer/       → implemented slice: handler + service + repository + model
-                              (CRUD + deactivation; unit- and integration-tested)
-  features/servicecatalog/ → implemented slice: handler + service + repository + model
-                              (service catalog CRUD over /api/v1/services; unit- and
-                              integration-tested)
-  features/user/           → placeholder slice: only has doc.go, no implementation yet.
-                              NOTE: unrelated to auth's `users` database table — this is a
-                              distinct, not-yet-specified future feature; don't conflate them.
+cmd/api/main.go             → HTTP entrypoint, wires up the server and registers feature routes
+internal/features/          → one folder per business feature (vertical slice)
+  features/auth/            → implemented slice: handler + service + repository + model
+                               (login, /me; unit-tested)
+  features/customer/        → implemented slice: handler + service + repository + model
+                               (CRUD + deactivation; unit- and integration-tested)
+  features/service-catalog/ → implemented slice: handler + service + repository + model
+                               (service catalog CRUD over /api/v1/services; unit- and
+                               integration-tested)
+  features/user/            → placeholder slice: only has doc.go, no implementation yet.
+                               NOTE: unrelated to auth's `users` database table — this is a
+                               distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                              database (pgx pool), token (JWT), middleware (auth),
-                              httpx (JSON writer + error envelope, used by auth),
-                              apierror (JSON error envelope, used by customer and
-                              servicecatalog — see section 8 for why there are currently two
-                              and what that means for new code)
-                              document (CPF/CNPJ), config (env var loading)
-internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
-                              customer_test.go, servicecatalog_test.go), each skipped
-                              independently when DATABASE_URL is unset
-docs/                      → domain model (entities.md) and PostgreSQL schema
-                              (schema.sql, seed.sql)
-.github/workflows/ci.yml   → CI pipeline
+                               database (pgx pool), token (JWT), middleware (auth),
+                               httpx (JSON writer + error envelope, used by auth),
+                               apierror (JSON error envelope, used by customer and
+                               servicecatalog — see section 8 for why there are currently two
+                               and what that means for new code)
+                               document (CPF/CNPJ), config (env var loading)
+internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
+                               customer_test.go, service_catalog_test.go), each skipped
+                               independently when DATABASE_URL is unset
+docs/                       → domain model (entities.md) and PostgreSQL schema
+                               (schema.sql, seed.sql)
+.github/workflows/ci.yml    → CI pipeline
 Dockerfile, docker-compose.yml, .env.example → containerized local environment
 ```
 
@@ -135,7 +136,7 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
 by `internal/features/auth/`, `internal/features/customer/`, and
-`internal/features/servicecatalog/`; `internal/features/user/` remains an unimplemented
+`internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
@@ -187,9 +188,9 @@ go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
 tests alongside each feature/shared package
-(`internal/features/{auth,customer,servicecatalog}/*_test.go`, `internal/shared/*/*_test.go`)
+(`internal/features/{auth,customer,service-catalog}/*_test.go`, `internal/shared/*/*_test.go`)
 plus the integration tests in `internal/handlers_test/` (`auth_test.go`, `customer_test.go`,
-`servicecatalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
+`service_catalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
 `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
 To also run the integration tests against the local compose Postgres:
