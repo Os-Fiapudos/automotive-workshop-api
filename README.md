@@ -1,5 +1,13 @@
 # automotive-workshop-api
 
+REST API for managing an automotive workshop's full service flow: registering customers and
+their vehicles, maintaining a catalog of products (parts/supplies) and services, opening
+service orders, running diagnosis and quote approval, tracking execution, and delivering the
+vehicle. A service order moves through
+`RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE`
+(status values are kept in Portuguese by product decision), with a full audit trail of status
+changes and per-service execution timestamps kept alongside it.
+
 ```bash
 export DATABASE_URL=postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable
 go run ./cmd/api
@@ -25,8 +33,12 @@ for the second.
 
 ## API
 
-The Customer Management and Vehicle Management features are implemented and documented in
-[docs/openapi.yaml](docs/openapi.yaml):
+Every implemented endpoint is documented in [docs/openapi.yaml](docs/openapi.yaml):
+
+```
+POST   /api/v1/auth/login
+GET    /api/v1/auth/me
+```
 
 ```
 POST   /api/v1/customers
@@ -47,9 +59,59 @@ PATCH  /api/v1/vehicles/{id}    (brand, model, year, color only)
 DELETE /api/v1/vehicles/{id}    (logical deactivation, not a physical delete)
 ```
 
-Unlike Customer Management, every Vehicle Management route requires a JWT
-(`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
-[specs/vehicle-management/](specs/vehicle-management/).
+```
+POST   /api/v1/services
+GET    /api/v1/services
+GET    /api/v1/services/{id}
+PATCH  /api/v1/services/{id}
+DELETE /api/v1/services/{id}    (logical deactivation, not a physical delete)
+```
+
+```
+POST   /api/v1/produtos
+GET    /api/v1/produtos
+GET    /api/v1/produtos/{id}
+PATCH  /api/v1/produtos/{id}
+DELETE /api/v1/produtos/{id}    (logical deactivation, not a physical delete)
+POST   /api/v1/produtos/{id}/estoque/ajustes
+GET    /api/v1/produtos/{id}/estoque
+GET    /api/v1/produtos/{id}/movimentacoes
+```
+
+```
+POST   /api/v1/service-orders                                     (unauthenticated)
+GET    /api/v1/service-orders
+GET    /api/v1/service-orders/{id}                                 (id or sequential code)
+POST   /api/v1/service-orders/{id}/diagnosis
+PUT    /api/v1/service-orders/{id}/quote
+GET    /api/v1/service-orders/{id}/quote
+POST   /api/v1/service-orders/{id}/quote/send
+POST   /api/v1/service-orders/{id}/executions
+POST   /api/v1/service-orders/{id}/executions/{executionId}/finish
+POST   /api/v1/service-orders/{id}/finalize
+POST   /api/v1/service-orders/{id}/deliver
+```
+
+```
+GET    /api/v1/acompanhamento/{codigo}                             (unauthenticated, tracking token)
+POST   /api/v1/acompanhamento/{codigo}/orcamento/aprovar            (unauthenticated, tracking token)
+POST   /api/v1/acompanhamento/{codigo}/orcamento/reprovar           (unauthenticated, tracking token)
+```
+
+Except for the routes marked otherwise above (login itself, Customer Management, service order
+creation, and the customer-facing `/acompanhamento` tracking routes), every route requires a
+JWT (`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
+[specs/auth/](specs/auth/) and [specs/vehicle-management/](specs/vehicle-management/) for the
+authentication contract, and `docs/openapi.yaml`'s `bearerAuth`/`trackingToken` security
+schemes for the exact per-endpoint requirement.
+
+### API documentation (Swagger)
+
+[docs/openapi.yaml](docs/openapi.yaml) is the OpenAPI 3.0 contract for every implemented
+endpoint. Browse it as Swagger UI locally via the `swagger-ui` service started by Docker
+Compose below:
+
+- **Swagger UI**: http://localhost:8082
 
 ## Database
 
@@ -65,13 +127,23 @@ docker compose up -d
 - **Postgres**: `localhost:5432` (credentials in `.env`), with `docs/schema.sql` applied automatically on first startup.
 - **Adminer**: http://localhost:8081 — system `PostgreSQL`, server `db`, user/password/database as in `.env`.
 - **API**: http://localhost:8080/health
+- **Swagger UI**: http://localhost:8082
 
-To recreate the database from scratch (e.g. after changing `schema.sql`), since the script only runs on initial volume creation:
+### Migrations
+
+There is no separate migration tool (e.g. `golang-migrate`, `goose`) in this project today.
+[docs/schema.sql](docs/schema.sql) is the single source of truth for the database schema, and
+Postgres applies it automatically — via `docker-entrypoint-initdb.d` — only on the **initial
+creation** of the `db_data` volume. To apply a schema change (a new/edited table, column, or
+enum in `schema.sql`), recreate the volume so it re-runs the init script from scratch:
 
 ```bash
 docker compose down -v
 docker compose up -d
 ```
+
+This discards any data in the local Postgres volume; reload sample data afterwards with the
+seed command below if needed.
 
 ### Sample data (seed)
 
