@@ -84,6 +84,9 @@ type serviceOrderLookups interface {
 	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error)
 	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error)
 
+	// Added by specs/service-order-metrics/.
+	findAverageExecutionTimeByService(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error)
+
 	// Added by specs/service-order-quote-decision/: resolves the order
 	// identified by its public code first (so an unknown code always maps to
 	// ErrServiceOrderNotFound regardless of the token), then checks
