@@ -1,5 +1,17 @@
 name: CI
 on: [push, pull_request]
+
+env:
+  # Pinned scanner versions (specs/quality-and-security/design.md §3.2). Both are run with
+  # `go run <module>@<version>`, which ignores the project's go.mod: the module keeps its
+  # Go 1.22 ceiling and gains no tool dependency. Keep these in sync with
+  # scripts/security-scan.sh and with the versions recorded in docs/security-report.md.
+  GOVULNCHECK_VERSION: v1.7.0
+  GOSEC_VERSION: v2.28.0
+  # Both scanners require Go >= 1.25 to build. This applies only to the scanner job; the
+  # project itself is built and tested with the pinned 1.22 below.
+  SCANNER_GO_VERSION: "1.25"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -7,8 +19,79 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache: false
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+
+  # Enforces RNF06: >= 80% statement coverage on the critical domains. Needs a real
+  # database — without one the integration tests in internal/handlers_test/ skip and the
+  # measurement is meaningless (specs/quality-and-security/design.md §3.1).
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable
+      JWT_SECRET: ci-test-secret
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: workshop
+          POSTGRES_PASSWORD: workshop
+          POSTGRES_DB: automotive_workshop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workshop -d automotive_workshop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: false
+      # The seed is a prerequisite, not a convenience: it inserts the administrative user
+      # the auth integration tests log in as. Schema without seed produced 74 failures.
+      - name: Apply schema and seed
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/schema.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/seed.sql
+      - name: Measure and enforce coverage
+        run: scripts/coverage.sh
+        env:
+          COVERAGE_HTML: "1"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+
+  # Satisfies RNF09: dependency analysis (govulncheck) and SAST (gosec).
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.SCANNER_GO_VERSION }}
+          cache: false
+      - name: Dependency and vulnerability analysis (govulncheck)
+        run: |
+          mkdir -p security
+          go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} -format json ./... \
+            | tee security/govulncheck.json > /dev/null
+          go run golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION} ./...
+      # -no-fail keeps this a reporting baseline: turning gosec into a build-breaking gate
+      # is a follow-up decision once the finding list is triaged (design.md §3.2).
+      - name: Static analysis (gosec)
+        run: |
+          go run github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION} \
+            -no-fail -fmt json -out security/gosec.json -stdout -verbose=text ./...
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan
+          path: security/

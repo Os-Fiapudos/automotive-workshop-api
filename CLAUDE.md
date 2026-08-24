@@ -33,7 +33,8 @@ framework) exposes `/health` plus the implemented vertical slices:
   full CRUD + logical deactivation for workshop customers (`/api/v1/customers*`, 6
   endpoints), CPF/CNPJ normalization and check-digit validation (including the
   alphanumeric CNPJ format in effect since July 2026).
-- **servicecatalog** (`internal/features/servicecatalog/`, [specs/service-catalog/](specs/service-catalog/)):
+- **service-catalog** (`internal/features/service-catalog/`, Go package `servicecatalog`,
+  [specs/service-catalog/](specs/service-catalog/)):
   protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
   prices, with an `active` flag and logical deletion.
 
@@ -58,19 +59,22 @@ decision**, not yet made — do not wrap them without confirming first (see sect
 
 ## 2. Technology stack
 
-- **Language**: Go 1.22 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  pins `go-version: "1.22"`, so `go.mod` and [Dockerfile](Dockerfile)'s build image
-  (`golang:1.22-alpine`) must stay compatible with that exact version. When adding or
-  upgrading a dependency, check that its own `go` directive (and its transitive
-  dependencies') doesn't exceed 1.22 — `go get`/`go mod tidy` will otherwise silently raise
-  `go.mod`'s `go` line past what CI can build. This has already happened twice (once for
-  `pgx`, once merging in a `rogpeppe/go-internal` transitive bump pulled in by `testify`);
-  both times the fix was pinning the offending module at the newest release that still
-  requires ≤ Go 1.22, not bumping CI/the Dockerfile — see
-  `specs/customer-management/design.md` §0.
+- **Language**: Go 1.25 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.25"`, and [Dockerfile](Dockerfile) builds on `golang:1.25-alpine`.
+  These three must stay in sync; when adding or upgrading a dependency, check that its own
+  `go` directive (and its transitive dependencies') doesn't exceed 1.25.
+  **Changed on 2026-08-24, from 1.22.** The project was pinned to Go 1.22 and several
+  dependencies were deliberately held back to stay under that ceiling. The security analysis
+  in [docs/security-report.md](docs/security-report.md) showed the pin had become the
+  project's largest vulnerability source: 28 reachable vulnerabilities under Go 1.22.12, and
+  it blocked the fix for a High-severity SQL-injection advisory in `pgx`. Raising the line to
+  1.25 took the reachable count to zero. Historical notes about the 1.22 ceiling in
+  `specs/auth/`, `specs/customer-management/`, and `specs/service-catalog/` are records of
+  decisions made at the time — they are no longer the rule.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
-  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, pinned at `v5.7.4` for Go 1.22
-  compatibility), `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
+  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
+  by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
+  `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
   `specs/auth/design.md` §2), `golang.org/x/crypto` (bcrypt, same feature),
   `github.com/google/uuid` (from the Customer Management feature), and
   `github.com/stretchr/testify` (test-only, adopted by Customer Management; the auth
@@ -95,31 +99,31 @@ decision**, not yet made — do not wrap them without confirming first (see sect
 ## 3. Project structure
 
 ```
-cmd/api/main.go            → HTTP entrypoint, wires up the server and registers feature routes
-internal/features/         → one folder per business feature (vertical slice)
-  features/auth/           → implemented slice: handler + service + repository + model
-                              (login, /me; unit-tested)
-  features/customer/       → implemented slice: handler + service + repository + model
-                              (CRUD + deactivation; unit- and integration-tested)
-  features/servicecatalog/ → implemented slice: handler + service + repository + model
-                              (service catalog CRUD over /api/v1/services; unit- and
-                              integration-tested)
-  features/user/           → placeholder slice: only has doc.go, no implementation yet.
-                              NOTE: unrelated to auth's `users` database table — this is a
-                              distinct, not-yet-specified future feature; don't conflate them.
+cmd/api/main.go             → HTTP entrypoint, wires up the server and registers feature routes
+internal/features/          → one folder per business feature (vertical slice)
+  features/auth/            → implemented slice: handler + service + repository + model
+                               (login, /me; unit-tested)
+  features/customer/        → implemented slice: handler + service + repository + model
+                               (CRUD + deactivation; unit- and integration-tested)
+  features/service-catalog/ → implemented slice: handler + service + repository + model
+                               (service catalog CRUD over /api/v1/services; unit- and
+                               integration-tested)
+  features/user/            → placeholder slice: only has doc.go, no implementation yet.
+                               NOTE: unrelated to auth's `users` database table — this is a
+                               distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                              database (pgx pool), token (JWT), middleware (auth),
-                              httpx (JSON writer + error envelope, used by auth),
-                              apierror (JSON error envelope, used by customer and
-                              servicecatalog — see section 8 for why there are currently two
-                              and what that means for new code)
-                              document (CPF/CNPJ), config (env var loading)
-internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
-                              customer_test.go, servicecatalog_test.go), each skipped
-                              independently when DATABASE_URL is unset
-docs/                      → domain model (entities.md) and PostgreSQL schema
-                              (schema.sql, seed.sql)
-.github/workflows/ci.yml   → CI pipeline
+                               database (pgx pool), token (JWT), middleware (auth),
+                               httpx (JSON writer + error envelope, used by auth),
+                               apierror (JSON error envelope, used by customer and
+                               servicecatalog — see section 8 for why there are currently two
+                               and what that means for new code)
+                               document (CPF/CNPJ), config (env var loading)
+internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
+                               customer_test.go, service_catalog_test.go), each skipped
+                               independently when DATABASE_URL is unset
+docs/                       → domain model (entities.md) and PostgreSQL schema
+                               (schema.sql, seed.sql)
+.github/workflows/ci.yml    → CI pipeline
 Dockerfile, docker-compose.yml, .env.example → containerized local environment
 ```
 
@@ -135,7 +139,7 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
 by `internal/features/auth/`, `internal/features/customer/`, and
-`internal/features/servicecatalog/`; `internal/features/user/` remains an unimplemented
+`internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
@@ -187,9 +191,9 @@ go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
 tests alongside each feature/shared package
-(`internal/features/{auth,customer,servicecatalog}/*_test.go`, `internal/shared/*/*_test.go`)
+(`internal/features/{auth,customer,service-catalog}/*_test.go`, `internal/shared/*/*_test.go`)
 plus the integration tests in `internal/handlers_test/` (`auth_test.go`, `customer_test.go`,
-`servicecatalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
+`service_catalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
 `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
 To also run the integration tests against the local compose Postgres:
@@ -201,8 +205,16 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
-- No additional linter is configured (no `.golangci.yml`, no `golangci-lint`, no
-  `.editorconfig`). **To be defined**: whether a more complete linter (e.g.
+- `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
+  CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
+  versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
+  [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
+  are recorded in [docs/security-report.md](docs/security-report.md).
+- `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
+  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
+  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+- No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
+  `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
   baseline.
 - Do not run `go build`, `go vet`, and `go test` with flags that suppress errors; CI runs
@@ -385,10 +397,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 15. Rules specific to working with Go
 
-- Go 1.22, per `go.mod` and CI's pinned `go-version: "1.22"` — do not use syntax/features
-  from newer versions, and check every dependency's own `go` directive stays ≤ 1.22 before
+- Go 1.25, per `go.mod` and CI's pinned `go-version: "1.25"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.25 before
   `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
-  (`golang:1.22-alpine`) in sync with whatever `go.mod` requires.
+  (`golang:1.25-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported

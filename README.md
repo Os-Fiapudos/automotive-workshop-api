@@ -173,12 +173,55 @@ go test ./...
 Unit tests run alongside each feature/shared package (`internal/features/*/*_test.go`,
 `internal/shared/*/*_test.go`) with no external dependency. Integration tests in
 `internal/handlers_test/` (one file per feature: `auth_test.go`, `customer_test.go`,
-`vehicle_test.go`, `product_test.go`, `servicecatalog_test.go`, `service_order_test.go`,
+`vehicle_test.go`, `product_test.go`, `service_catalog_test.go`, `service_order_test.go`,
 `service_order_quote_decision_test.go`, `service_order_metrics_test.go`,
-`service_order_tracking_test.go`) connect to a real Postgres via `DATABASE_URL` (defaulting
-to the local docker-compose credentials) and **skip themselves** — they don't fail — when
-that database isn't reachable, so `go test ./...` passes either way. Start
-`docker compose up -d db` first to actually exercise them.
+`service_order_tracking_test.go`, `sensitive_data_test.go`) connect to a real Postgres via
+`DATABASE_URL` (defaulting to the local docker-compose credentials) and **skip
+themselves** — they don't fail — when that database isn't reachable, so `go test ./...`
+passes either way.
+
+To actually exercise them, the database needs **both** `docs/schema.sql` and
+`docs/seed.sql` applied — the seed is not optional here, because it creates the
+administrative user the authentication tests log in as (schema alone produces 74
+failures):
+
+```bash
+docker compose up -d db
+docker compose cp docs/schema.sql db:/tmp/schema.sql
+docker compose cp docs/seed.sql   db:/tmp/seed.sql
+docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/schema.sql
+docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
+
+export DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable'
+export JWT_SECRET=dev-secret
+go test ./...
+```
+
+### Coverage
+
+```bash
+scripts/coverage.sh                    # measure, print the table, fail below 80%
+COVERAGE_HTML=1 scripts/coverage.sh    # also write coverage/coverage.html
+```
+
+Enforces RNF06: at least 80% statement coverage on the critical domains
+(`service-order`, `product`, `service-order-tracking`), and prints every other package for
+information. Requires the same `DATABASE_URL` and `JWT_SECRET` as the integration tests and
+**refuses to run without them** — coverage measured over skipped tests would report roughly
+a third of the real figure. CI runs it on every push
+([.github/workflows/ci.yml](.github/workflows/ci.yml), job `coverage`).
+
+### Security scan
+
+```bash
+scripts/security-scan.sh
+```
+
+Runs `govulncheck` (dependency and standard-library vulnerabilities) and `gosec` (SAST),
+both pinned to exact versions and executed via `go run <module>@<version>`, so nothing is
+added to `go.mod`. Output lands in `security/` (git-ignored) and is published as a CI
+artifact by the `security` job. The findings, their severity, and what was fixed are in
+[docs/security-report.md](docs/security-report.md).
 
 ## Project structure
 

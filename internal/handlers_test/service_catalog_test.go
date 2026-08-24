@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"automotive-workshop-api/internal/features/auth"
-	"automotive-workshop-api/internal/features/servicecatalog"
+	servicecatalog "automotive-workshop-api/internal/features/service-catalog"
 	"automotive-workshop-api/internal/shared/database"
 	"automotive-workshop-api/internal/shared/middleware"
 	"automotive-workshop-api/internal/shared/token"

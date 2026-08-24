@@ -6,15 +6,16 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
 	"automotive-workshop-api/internal/features/product"
+	servicecatalog "automotive-workshop-api/internal/features/service-catalog"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
 	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
-	"automotive-workshop-api/internal/features/servicecatalog"
 	"automotive-workshop-api/internal/features/vehicle"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
@@ -78,7 +79,9 @@ func main() {
 	// Public routes (auth FR6).
 	router.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			log.Printf("health: encoding response failed: %v", err)
+		}
 	})
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 
@@ -127,6 +130,18 @@ func main() {
 	// Order Opening's own creation route above.
 	servicetracking.RegisterRoutes(router, trackingService)
 
+	// Explicit timeouts instead of http.ListenAndServe: a server with no read timeout
+	// keeps slow or idle connections open indefinitely, which is a denial-of-service
+	// vector (gosec G114, CWE-676 — docs/security-report.md, finding SAST-02).
+	server := &http.Server{
+		Addr:              ":" + configuration.Port,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	log.Printf("listening on :%s", configuration.Port)
-	log.Fatal(http.ListenAndServe(":"+configuration.Port, router))
+	log.Fatal(server.ListenAndServe())
 }
