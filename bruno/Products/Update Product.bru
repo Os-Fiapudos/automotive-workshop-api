@@ -1,0 +1,17 @@
+meta {
+  name: Update Product
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/produtos/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "unitPrice": 27.5
+  }
+}

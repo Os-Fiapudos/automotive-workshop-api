@@ -1,0 +1,11 @@
+meta {
+  name: Average Execution Time Metrics
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/v1/service-orders/metrics/average-execution-time
+  body: none
+  auth: inherit
+}

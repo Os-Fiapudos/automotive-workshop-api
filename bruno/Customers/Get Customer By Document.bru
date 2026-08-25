@@ -1,0 +1,11 @@
+meta {
+  name: Get Customer By Document
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/customers/document/{{document}}
+  body: none
+  auth: none
+}

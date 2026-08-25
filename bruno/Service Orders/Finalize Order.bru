@@ -1,0 +1,11 @@
+meta {
+  name: Finalize Order
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/finalize
+  body: none
+  auth: inherit
+}

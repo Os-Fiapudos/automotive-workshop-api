@@ -1,0 +1,11 @@
+meta {
+  name: List Stock Movements
+  type: http
+  seq: 16
+}
+
+get {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements
+  body: none
+  auth: inherit
+}

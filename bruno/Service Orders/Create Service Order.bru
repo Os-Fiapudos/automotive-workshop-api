@@ -1,0 +1,32 @@
+meta {
+  name: Create Service Order
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "customerId": "{{customerId}}",
+    "vehicleId": "{{vehicleId}}",
+    "requestedServiceIds": ["{{serviceId}}"],
+    "notes": "Customer reports a noise when braking"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("serviceOrderId", res.body.id);
+  }
+  if (res.body && res.body.trackingToken) {
+    bru.setEnvVar("trackingToken", res.body.trackingToken);
+  }
+  if (res.body && res.body.code) {
+    bru.setEnvVar("trackingCode", String(res.body.code));
+  }
+}

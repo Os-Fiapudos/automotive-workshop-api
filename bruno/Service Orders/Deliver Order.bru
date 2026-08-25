@@ -1,0 +1,11 @@
+meta {
+  name: Deliver Order
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/deliver
+  body: none
+  auth: inherit
+}

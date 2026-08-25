@@ -1,0 +1,27 @@
+meta {
+  name: Create Product
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/produtos
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Oil Filter",
+    "description": "Standard oil filter, compatible with most engines",
+    "unitPrice": 25.9,
+    "currentStock": 50,
+    "type": "PART"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("productId", res.body.id);
+  }
+}

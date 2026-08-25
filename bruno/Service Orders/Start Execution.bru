@@ -1,0 +1,23 @@
+meta {
+  name: Start Execution
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "serviceId": "{{serviceId}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("executionId", res.body.id);
+  }
+}
