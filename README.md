@@ -119,6 +119,22 @@ Compose below:
 
 - **Swagger UI**: http://localhost:8082
 
+### Postman / Insomnia collection
+
+[docs/postman-collection.json](docs/postman-collection.json) (Postman v2.1) and
+[docs/insomnia-collection.json](docs/insomnia-collection.json) (Insomnia v4) cover all 47
+registered routes, grouped by feature. Postman: *Import* the JSON file. Insomnia: *Import
+from File* (Insomnia also imports the Postman file directly).
+
+Run `Auth -> Login` first: its test script stores the JWT in the `token` variable used by
+every protected request. The create requests likewise store the returned `id` into
+`customerId`, `vehicleId`, `serviceId`, `productId`, `serviceOrderId`, `orderCode`, and
+`trackingToken`, so running a folder top to bottom chains without manual copying. Point
+`baseUrl` at the environment under test (defaults to `http://localhost:8080`).
+
+The payloads are fictitious samples - do not commit real customer data or production
+credentials into these files.
+
 ## Database
 
 The data model is documented in [docs/entities.md](docs/entities.md) and the corresponding PostgreSQL schema (tables, enums, indexes, and comments) in [docs/schema.sql](docs/schema.sql).
