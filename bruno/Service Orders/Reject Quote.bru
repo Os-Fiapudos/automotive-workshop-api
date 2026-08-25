@@ -1,0 +1,15 @@
+meta {
+  name: Reject Quote
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/v1/acompanhamento/{{trackingCode}}/orcamento/reprovar
+  body: none
+  auth: none
+}
+
+headers {
+  X-Tracking-Token: {{trackingToken}}
+}

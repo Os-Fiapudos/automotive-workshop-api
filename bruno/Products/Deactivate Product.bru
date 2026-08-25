@@ -1,0 +1,11 @@
+meta {
+  name: Deactivate Product
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/produtos/{{productId}}
+  body: none
+  auth: inherit
+}

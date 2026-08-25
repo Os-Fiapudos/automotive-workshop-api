@@ -1,0 +1,11 @@
+meta {
+  name: Finish Execution
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions/{{executionId}}/finish
+  body: none
+  auth: inherit
+}

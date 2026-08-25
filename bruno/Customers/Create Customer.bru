@@ -1,0 +1,26 @@
+meta {
+  name: Create Customer
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/customers
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "John Doe",
+    "document": "52998224725",
+    "phone": "+5511999999999",
+    "email": "john.doe@example.com"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("customerId", res.body.id);
+  }
+}

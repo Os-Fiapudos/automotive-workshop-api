@@ -1,0 +1,11 @@
+meta {
+  name: Reverse Stock Movement
+  type: http
+  seq: 17
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements/{{movementId}}/reversal
+  body: none
+  auth: inherit
+}

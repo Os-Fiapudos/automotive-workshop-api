@@ -1,0 +1,11 @@
+meta {
+  name: Get Service Order
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}
+  body: none
+  auth: inherit
+}

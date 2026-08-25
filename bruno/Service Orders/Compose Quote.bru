@@ -1,0 +1,26 @@
+meta {
+  name: Compose Quote
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "serviceId": "{{serviceId}}",
+        "quantity": 1
+      },
+      {
+        "productId": "{{productId}}",
+        "quantity": 2
+      }
+    ]
+  }
+}

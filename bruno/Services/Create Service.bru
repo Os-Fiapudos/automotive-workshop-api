@@ -1,0 +1,26 @@
+meta {
+  name: Create Service
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/services
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Oil Change",
+    "description": "Standard engine oil and filter replacement",
+    "price": 150.0,
+    "estimated_time": 60
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("serviceId", res.body.id);
+  }
+}
