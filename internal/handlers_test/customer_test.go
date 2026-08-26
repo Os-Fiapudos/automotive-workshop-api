@@ -6,7 +6,6 @@
 package handlers_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,7 +20,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
+	"automotive-workshop-api/internal/shared/middleware"
+	"automotive-workshop-api/internal/shared/token"
 )
 
 func testDatabaseURL() string {
@@ -34,8 +36,12 @@ func testDatabaseURL() string {
 
 // testServer builds the real customer HTTP handlers wired to a real
 // pgxpool.Pool, and registers cleanup for both. It skips the calling test
-// when the database is unreachable.
-func testServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
+// when the database is unreachable. Every customer route requires a JWT
+// (RNF02/specs/auth/design.md §7 — see cmd/api/main.go), so this also wires
+// a real auth handler/token manager and returns a valid bearer token, same
+// pattern as testProductServer (product_test.go) and testServiceOrderServer
+// (service_order_test.go).
+func testServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, string) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -51,16 +57,32 @@ func testServer(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 
+	tokens := token.NewManager("integration-test-secret", time.Hour)
+	requireAuth := middleware.RequireAuth(tokens)
+	authHandler := auth.NewHandler(auth.NewService(auth.NewRepository(pool), tokens))
+
 	repository := customer.NewPostgresCustomerRepository(pool)
 	service := customer.NewCustomerService(repository)
 
 	router := http.NewServeMux()
-	customer.RegisterRoutes(router, service)
+	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	customer.RegisterRoutes(router, service, requireAuth)
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 
-	return server, pool
+	loginResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/auth/login", map[string]string{
+		"email":    "admin@workshop.local",
+		"password": "admin123",
+	}, "")
+	require.Equal(t, http.StatusOK, loginResp.StatusCode)
+	var authBody struct {
+		AccessToken string `json:"access_token"`
+	}
+	decodeBody(t, loginResp, &authBody)
+	require.NotEmpty(t, authBody.AccessToken)
+
+	return server, pool, authBody.AccessToken
 }
 
 // cleanupCustomer physically removes a row created by a test, bypassing the
@@ -124,26 +146,17 @@ func joinDigits(digits []int) string {
 }
 
 // --- HTTP helpers ---------------------------------------------------------
-
+//
+// doAuthJSON (defined in product_test.go) is used directly here — every
+// customer route now requires a bearer token. doJSON stays as a thin
+// no-token wrapper for the other test files in this package that still
+// build their own deliberately unauthenticated router (e.g.
+// testTrackingServer in service_order_tracking_test.go, which passes a nil
+// requireAuth to customer.RegisterRoutes/serviceorder.RegisterRoutes to
+// focus purely on the tracking route it tests).
 func doJSON(t *testing.T, method, url string, body any) *http.Response {
 	t.Helper()
-
-	var reader *bytes.Reader
-	if body != nil {
-		encoded, err := json.Marshal(body)
-		require.NoError(t, err)
-		reader = bytes.NewReader(encoded)
-	} else {
-		reader = bytes.NewReader(nil)
-	}
-
-	request, err := http.NewRequest(method, url, reader)
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-
-	response, err := http.DefaultClient.Do(request)
-	require.NoError(t, err)
-	return response
+	return doAuthJSON(t, method, url, body, "")
 }
 
 func decodeBody(t *testing.T, response *http.Response, out any) {
@@ -154,15 +167,35 @@ func decodeBody(t *testing.T, response *http.Response, out any) {
 
 // --- tests -----------------------------------------------------------
 
+// TestCustomerRoutesRequireAuth guards against VULN-01
+// (docs/owasp-vulnerability-and-coverage-report.md): GET
+// /api/v1/customers/document/{document} used to return a customer's name,
+// phone and e-mail to anyone who could produce a valid-looking CPF/CNPJ,
+// with no credential at all. Every customer route must now reject a request
+// with no bearer token.
+func TestCustomerRoutesRequireAuth(t *testing.T) {
+	server, _, _ := testServer(t)
+
+	response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/document/00000000000", nil, "")
+	assert.Equal(t, http.StatusUnauthorized, response.StatusCode)
+
+	createResponse := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+		Name:     "Should Not Be Created",
+		Document: randomValidCPF(),
+		Phone:    "+55 11 90000-0000",
+	}, "")
+	assert.Equal(t, http.StatusUnauthorized, createResponse.StatusCode)
+}
+
 func TestCustomerFullCRUDFlow(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 
 	// Create an individual with a valid CPF.
-	createResp := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Maria Silva",
 		Document: randomValidCPF(),
 		Phone:    "+55 11 91234-5678",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, createResp.StatusCode)
 	var created customer.Response
 	decodeBody(t, createResp, &created)
@@ -174,11 +207,11 @@ func TestCustomerFullCRUDFlow(t *testing.T) {
 	assert.NotZero(t, created.Code)
 
 	// Create a company with a valid CNPJ.
-	cnpjResp := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	cnpjResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Oficina Rota Sul Ltda",
 		Document: randomValidCNPJ(),
 		Phone:    "+55 11 3333-4444",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, cnpjResp.StatusCode)
 	var company customer.Response
 	decodeBody(t, cnpjResp, &company)
@@ -186,14 +219,14 @@ func TestCustomerFullCRUDFlow(t *testing.T) {
 	assert.Equal(t, "CNPJ", company.DocumentType)
 
 	// Get by id.
-	getResp := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers/"+created.ID, nil)
+	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/"+created.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
 	var fetched customer.Response
 	decodeBody(t, getResp, &fetched)
 	assert.Equal(t, created.ID, fetched.ID)
 
 	// Get by document.
-	byDocumentResp := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers/document/"+created.Document, nil)
+	byDocumentResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/document/"+created.Document, nil, authToken)
 	require.Equal(t, http.StatusOK, byDocumentResp.StatusCode)
 	var byDocument customer.Response
 	decodeBody(t, byDocumentResp, &byDocument)
@@ -201,9 +234,9 @@ func TestCustomerFullCRUDFlow(t *testing.T) {
 
 	// Partial update: only name changes.
 	newName := "Maria Silva Santos"
-	patchResp := doJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+created.ID, customer.UpdateRequest{
+	patchResp := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+created.ID, customer.UpdateRequest{
 		Name: &newName,
-	})
+	}, authToken)
 	require.Equal(t, http.StatusOK, patchResp.StatusCode)
 	var updated customer.Response
 	decodeBody(t, patchResp, &updated)
@@ -212,14 +245,14 @@ func TestCustomerFullCRUDFlow(t *testing.T) {
 	assert.Equal(t, created.Document, updated.Document)
 
 	// List includes it.
-	listResp := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers?page=1&pageSize=100", nil)
+	listResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers?page=1&pageSize=100", nil, authToken)
 	require.Equal(t, http.StatusOK, listResp.StatusCode)
 	var list customer.ListResponse
 	decodeBody(t, listResp, &list)
 	assert.Contains(t, ids(list.Data), created.ID)
 
 	// Deactivate (logical delete).
-	deactivateResp := doJSON(t, http.MethodDelete, server.URL+"/api/v1/customers/"+created.ID, nil)
+	deactivateResp := doAuthJSON(t, http.MethodDelete, server.URL+"/api/v1/customers/"+created.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, deactivateResp.StatusCode)
 	var deactivated customer.Response
 	decodeBody(t, deactivateResp, &deactivated)
@@ -233,14 +266,14 @@ func TestCustomerFullCRUDFlow(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, stillExists)
 
-	stillGetResp := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers/"+created.ID, nil)
+	stillGetResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/"+created.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, stillGetResp.StatusCode)
 	var stillFetched customer.Response
 	decodeBody(t, stillGetResp, &stillFetched)
 	assert.Equal(t, "INACTIVE", stillFetched.Status)
 
 	// Deactivating twice is idempotent, not an error.
-	againResp := doJSON(t, http.MethodDelete, server.URL+"/api/v1/customers/"+created.ID, nil)
+	againResp := doAuthJSON(t, http.MethodDelete, server.URL+"/api/v1/customers/"+created.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, againResp.StatusCode)
 }
 
@@ -253,13 +286,13 @@ func ids(customers []customer.Response) []string {
 }
 
 func TestCreateRejectsInvalidCPF(t *testing.T) {
-	server, _ := testServer(t)
+	server, _, authToken := testServer(t)
 
-	response := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Invalid CPF Customer",
 		Document: "111.111.111-11",
 		Phone:    "+55 11 90000-0000",
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusBadRequest, response.StatusCode)
 
 	var body map[string]any
@@ -275,13 +308,13 @@ func TestCreateRejectsInvalidCPF(t *testing.T) {
 // against this project's independent CNPJ algorithm in
 // internal/shared/document (see cnpj_test.go).
 func TestCreateAcceptsAlphanumericCNPJ(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 
-	response := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Empresa Alfanumérica Ltda",
 		Document: "12.ABC.345/0001-88",
 		Phone:    "+55 11 90000-0000",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, response.StatusCode)
 
 	var created customer.Response
@@ -291,7 +324,7 @@ func TestCreateAcceptsAlphanumericCNPJ(t *testing.T) {
 	assert.Equal(t, "12ABC345000188", created.Document)
 	assert.Equal(t, "CNPJ", created.DocumentType)
 
-	getResp := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers/document/"+created.Document, nil)
+	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/document/"+created.Document, nil, authToken)
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
 	var fetched customer.Response
 	decodeBody(t, getResp, &fetched)
@@ -299,31 +332,31 @@ func TestCreateAcceptsAlphanumericCNPJ(t *testing.T) {
 }
 
 func TestCreateRejectsInvalidCNPJ(t *testing.T) {
-	server, _ := testServer(t)
+	server, _, authToken := testServer(t)
 
-	response := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Invalid CNPJ Customer",
 		Document: "11.111.111/1111-11",
 		Phone:    "+55 11 90000-0000",
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusBadRequest, response.StatusCode)
 }
 
 func TestCreateRejectsDuplicateDocument(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 	document := randomValidCPF()
 
-	first := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	first := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "First Customer", Document: document, Phone: "+55 11 90000-0001",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, first.StatusCode)
 	var firstCustomer customer.Response
 	decodeBody(t, first, &firstCustomer)
 	cleanupCustomer(t, pool, firstCustomer.ID)
 
-	second := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	second := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Second Customer", Document: document, Phone: "+55 11 90000-0002",
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, second.StatusCode)
 
 	var body map[string]any
@@ -333,27 +366,27 @@ func TestCreateRejectsDuplicateDocument(t *testing.T) {
 }
 
 func TestUpdateRejectsDuplicateDocument(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 
-	first := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	first := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Customer One", Document: randomValidCPF(), Phone: "+55 11 90000-0001",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, first.StatusCode)
 	var firstCustomer customer.Response
 	decodeBody(t, first, &firstCustomer)
 	cleanupCustomer(t, pool, firstCustomer.ID)
 
-	second := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	second := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Customer Two", Document: randomValidCPF(), Phone: "+55 11 90000-0002",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, second.StatusCode)
 	var secondCustomer customer.Response
 	decodeBody(t, second, &secondCustomer)
 	cleanupCustomer(t, pool, secondCustomer.ID)
 
-	patch := doJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+secondCustomer.ID, customer.UpdateRequest{
+	patch := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+secondCustomer.ID, customer.UpdateRequest{
 		Document: &firstCustomer.Document,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, patch.StatusCode)
 }
 
@@ -364,20 +397,20 @@ func TestUpdateRejectsDuplicateDocument(t *testing.T) {
 // treated every unique-violation as a document conflict. The response here
 // must be a distinct DUPLICATE_EMAIL, not DUPLICATE_DOCUMENT.
 func TestCreateRejectsDuplicateEmail(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 	email := fmt.Sprintf("duplicate-%s@example.com", randomValidCPF())
 
-	first := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	first := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "First Customer", Document: randomValidCPF(), Phone: "+55 11 90000-0001", Email: &email,
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, first.StatusCode)
 	var firstCustomer customer.Response
 	decodeBody(t, first, &firstCustomer)
 	cleanupCustomer(t, pool, firstCustomer.ID)
 
-	second := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	second := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Second Customer", Document: randomValidCPF(), Phone: "+55 11 90000-0002", Email: &email,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, second.StatusCode)
 
 	var body map[string]any
@@ -387,28 +420,28 @@ func TestCreateRejectsDuplicateEmail(t *testing.T) {
 }
 
 func TestUpdateRejectsDuplicateEmail(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 	email := fmt.Sprintf("duplicate-%s@example.com", randomValidCPF())
 
-	first := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	first := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Customer One", Document: randomValidCPF(), Phone: "+55 11 90000-0001", Email: &email,
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, first.StatusCode)
 	var firstCustomer customer.Response
 	decodeBody(t, first, &firstCustomer)
 	cleanupCustomer(t, pool, firstCustomer.ID)
 
-	second := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+	second := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 		Name: "Customer Two", Document: randomValidCPF(), Phone: "+55 11 90000-0002",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, second.StatusCode)
 	var secondCustomer customer.Response
 	decodeBody(t, second, &secondCustomer)
 	cleanupCustomer(t, pool, secondCustomer.ID)
 
-	patch := doJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+secondCustomer.ID, customer.UpdateRequest{
+	patch := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/customers/"+secondCustomer.ID, customer.UpdateRequest{
 		Email: &email,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, patch.StatusCode)
 
 	var body map[string]any
@@ -418,27 +451,27 @@ func TestUpdateRejectsDuplicateEmail(t *testing.T) {
 }
 
 func TestGetByIDNotFound(t *testing.T) {
-	server, _ := testServer(t)
+	server, _, authToken := testServer(t)
 
-	response := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers/00000000-0000-0000-0000-000000000000", nil)
+	response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers/00000000-0000-0000-0000-000000000000", nil, authToken)
 	assert.Equal(t, http.StatusNotFound, response.StatusCode)
 }
 
 func TestPagination(t *testing.T) {
-	server, pool := testServer(t)
+	server, pool, authToken := testServer(t)
 
 	const total = 5
 	for index := 0; index < total; index++ {
-		response := doJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
+		response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/customers", customer.CreateRequest{
 			Name: fmt.Sprintf("Pagination Customer %d", index), Document: randomValidCPF(), Phone: "+55 11 90000-0000",
-		})
+		}, authToken)
 		require.Equal(t, http.StatusCreated, response.StatusCode)
 		var createdCustomer customer.Response
 		decodeBody(t, response, &createdCustomer)
 		cleanupCustomer(t, pool, createdCustomer.ID)
 	}
 
-	response := doJSON(t, http.MethodGet, server.URL+"/api/v1/customers?page=1&pageSize=2", nil)
+	response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/customers?page=1&pageSize=2", nil, authToken)
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	var list customer.ListResponse
 	decodeBody(t, response, &list)
@@ -457,8 +490,7 @@ func TestPagination(t *testing.T) {
 // Create to fail via the Postgres unique index, mapped to
 // ErrDuplicateDocument.
 func TestDatabaseUniqueConstraintCatchesRaceCondition(t *testing.T) {
-	server, pool := testServer(t)
-	_ = server
+	_, pool, _ := testServer(t)
 
 	document := randomValidCPF()
 	concurrentCustomerID := "11111111-1111-1111-1111-111111111111"

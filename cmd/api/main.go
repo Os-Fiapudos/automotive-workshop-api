@@ -98,29 +98,28 @@ func main() {
 	// Product management routes (protected via requireAuth per RNF02).
 	product.RegisterRoutes(router, productService, requireAuth)
 
-	// Customer Management routes remain unauthenticated for now, matching
-	// specs/customer-management/requirements.md §7.2 ("implemented
-	// unauthenticated... a dedicated Security feature... will add JWT
-	// authentication/authorization as a cross-cutting concern applied on
-	// top of the existing routes"). Wrapping them in requireAuth is a
-	// one-line follow-up (router.Handle(pattern, requireAuth(handler)) per
-	// route, or a small helper) once that's explicitly decided — not done
-	// silently as part of this merge.
-	customer.RegisterRoutes(router, customerService)
+	// Customer Management routes now require JWT on every route (RNF02 —
+	// specs/auth/design.md §7's "every non-public route requires auth"
+	// convention). Resolves the open decision recorded in CLAUDE.md §1/§17.2:
+	// these routes were unauthenticated, and one of them
+	// (GET /api/v1/customers/document/{document}) let anyone retrieve a
+	// customer's name/phone/e-mail from a guessed/generated CPF/CNPJ with no
+	// credential at all — see docs/owasp-vulnerability-and-coverage-report.md
+	// VULN-01.
+	customer.RegisterRoutes(router, customerService, requireAuth)
 
 	// Vehicle Management routes require JWT on every route (RNF02 —
-	// specs/vehicle-management/requirements.md §6), unlike Customer
-	// Management's still-unauthenticated routes above — reuses the same
+	// specs/vehicle-management/requirements.md §6) — reuses the same
 	// requireAuth middleware built for the auth feature.
 	vehicle.RegisterRoutes(router, vehicleService, requireAuth)
 
-	// Service Order Opening's own POST /api/v1/service-orders route remains
-	// unauthenticated for now, same rationale as Customer Management above.
-	// The diagnosis/quote routes added by
-	// specs/service-order-diagnosis-quote/ are protected with requireAuth
-	// (requirements.md §7.4) — a deliberate, explicit decision for those
-	// routes specifically, not a silent resolution of the open decision
-	// above.
+	// Service Order Opening's POST /api/v1/service-orders route now requires
+	// JWT like every other route in this feature. Resolves the open decision
+	// recorded in CLAUDE.md §1: the route accepted a customer document/plate
+	// as an alternate identifier, so combined with the customer lookup above
+	// it let an unauthenticated caller confirm a CPF/CNPJ was a registered
+	// customer and open orders in their name — see
+	// docs/owasp-vulnerability-and-coverage-report.md VULN-02.
 	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
 
 	// Service Order Tracking (specs/service-order-tracking, RF12): a

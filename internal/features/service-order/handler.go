@@ -29,11 +29,12 @@ const trackingTokenHeader = "X-Tracking-Token"
 // RegisterRoutes registers every Service Order Opening/Diagnosis/Quote
 // endpoint on mux, using the same Go 1.22 method-aware ServeMux pattern as
 // every other feature (see specs/service-order-opening/design.md §1.5).
-// requireAuth wraps the diagnosis/quote routes added by
-// specs/service-order-diagnosis-quote/ (requirements.md §7.4); the original
-// order-creation route is left unwrapped, matching its own still-open
-// authentication decision (CLAUDE.md §1). requireAuth may be nil, same
-// nil-safe convention as internal/features/product.RegisterRoutes.
+// requireAuth wraps every route, including order creation (RNF02 /
+// specs/auth/design.md §7's "every non-public route requires auth"
+// convention — see CLAUDE.md §17, the open decision this closes).
+// requireAuth may be nil, same nil-safe convention as
+// internal/features/product.RegisterRoutes, for callers that deliberately
+// need an unauthenticated router (e.g. isolated fixture setup in tests).
 func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAuth func(http.Handler) http.Handler) {
 	handler := &serviceOrderHandler{service: service}
 
@@ -44,7 +45,7 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 		return h
 	}
 
-	mux.HandleFunc("POST /api/v1/service-orders", handler.create)
+	mux.Handle("POST /api/v1/service-orders", wrap(handler.create))
 	mux.Handle("POST /api/v1/service-orders/{id}/diagnosis", wrap(handler.startDiagnosis))
 	mux.Handle("PUT /api/v1/service-orders/{id}/quote", wrap(handler.composeQuote))
 	mux.Handle("GET /api/v1/service-orders/{id}/quote", wrap(handler.getQuote))

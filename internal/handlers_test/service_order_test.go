@@ -59,7 +59,7 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
-	customer.RegisterRoutes(router, customerService)
+	customer.RegisterRoutes(router, customerService, requireAuth)
 	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
 
 	server := httptest.NewServer(router)
@@ -79,16 +79,38 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	return pool, server.URL, authBody.AccessToken
 }
 
+// loginAsAdmin logs in as the seeded administrative user and returns a
+// bearer token. Used internally by fixture helpers (insertActiveCustomer,
+// createServiceOrder) so their signatures — and their dozens of call sites
+// across this package — don't need to change now that customer creation and
+// service-order creation both require auth
+// (docs/owasp-vulnerability-and-coverage-report.md VULN-01/VULN-02).
+func loginAsAdmin(t *testing.T, server string) string {
+	t.Helper()
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/auth/login", map[string]string{
+		"email":    "admin@workshop.local",
+		"password": "admin123",
+	}, "")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body struct {
+		AccessToken string `json:"access_token"`
+	}
+	decodeBody(t, resp, &body)
+	require.NotEmpty(t, body.AccessToken)
+	return body.AccessToken
+}
+
 // insertActiveCustomer creates a customer through the real API (exercising
 // the same path production traffic uses) and registers its cleanup.
 func insertActiveCustomer(t *testing.T, server string, pool *pgxpool.Pool) customer.Response {
 	t.Helper()
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/customers", customer.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/customers", customer.CreateRequest{
 		Name:     "Maria Silva",
 		Document: randomValidCPF(),
 		Phone:    "+55 11 91234-5678",
-	})
+	}, loginAsAdmin(t, server))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	var created customer.Response
 	decodeBody(t, resp, &created)
@@ -187,18 +209,18 @@ func countServiceOrdersForVehicle(t *testing.T, pool *pgxpool.Pool, vehicleID st
 }
 
 func TestServiceOrderCreateSuccess(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	serviceID := insertService(t, pool)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID},
 		Notes:               "Customer reported a light engine noise.",
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	var created serviceorder.Response
@@ -224,17 +246,37 @@ func TestServiceOrderCreateSuccess(t *testing.T) {
 	assert.Equal(t, "RECEBIDA", newStatus)
 }
 
-func TestServiceOrderCreateByDocumentAndPlate(t *testing.T) {
+// TestServiceOrderCreateRequiresAuth guards against VULN-02
+// (docs/owasp-vulnerability-and-coverage-report.md): POST
+// /api/v1/service-orders used to accept a customer document/plate as an
+// identifier with no credential at all, letting an unauthenticated caller
+// confirm a CPF/CNPJ belonged to a registered customer and open orders in
+// their name. It must now reject a request with no bearer token, same as
+// every other route in this feature.
+func TestServiceOrderCreateRequiresAuth(t *testing.T) {
 	pool, server, _ := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID: createdCustomer.ID,
+		VehicleID:  vehicleID,
+	}, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServiceOrderCreateByDocumentAndPlate(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
 
 	plate := randomLicensePlate()
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, plate, true)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerDocument: createdCustomer.Document,
 		LicensePlate:     plate,
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	var created serviceorder.Response
@@ -244,59 +286,59 @@ func TestServiceOrderCreateByDocumentAndPlate(t *testing.T) {
 }
 
 func TestServiceOrderCreateRejectsInactiveCustomer(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	deactivateResp := doJSON(t, http.MethodDelete, server+"/api/v1/customers/"+createdCustomer.ID, nil)
+	deactivateResp := doAuthJSON(t, http.MethodDelete, server+"/api/v1/customers/"+createdCustomer.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, deactivateResp.StatusCode)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
 func TestServiceOrderCreateRejectsInactiveVehicle(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), false)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
 func TestServiceOrderCreateRejectsVehicleFromAnotherCustomer(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	firstCustomer := insertActiveCustomer(t, server, pool)
 	secondCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, secondCustomer.ID, randomLicensePlate(), true)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: firstCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
 }
 
 func TestServiceOrderCreateRejectsUnknownRequestedService(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, "PQR1S23", true)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{"00000000-0000-0000-0000-000000000000"},
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
@@ -307,7 +349,7 @@ func TestServiceOrderCreateRejectsUnknownRequestedService(t *testing.T) {
 // would otherwise already have been inserted — see design.md §3.4. The
 // whole creation must roll back, leaving no orphan service_orders row.
 func TestServiceOrderCreateRollsBackOnPartialFailure(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, "TUV4W56", true)
@@ -315,11 +357,11 @@ func TestServiceOrderCreateRollsBackOnPartialFailure(t *testing.T) {
 
 	before := countServiceOrdersForVehicle(t, pool, vehicleID)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID, serviceID},
-	})
+	}, authToken)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
 	after := countServiceOrdersForVehicle(t, pool, vehicleID)
@@ -335,10 +377,10 @@ func createServiceOrder(t *testing.T, server string, pool *pgxpool.Pool) service
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, loginAsAdmin(t, server))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	var created serviceorder.Response
@@ -608,10 +650,10 @@ func TestServiceOrderListFiltersByCustomerDocument(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	var target serviceorder.Response
 	decodeBody(t, resp, &target)

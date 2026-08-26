@@ -8,6 +8,14 @@ import (
 
 const defaultJWTTTL = time.Hour
 
+// minJWTSecretLength is the minimum byte length accepted for JWT_SECRET. A
+// short/trivial secret undermines HS256 signing regardless of everything
+// else being correct — the signature's strength is entirely a function of
+// this value's entropy (docs/owasp-vulnerability-and-coverage-report.md
+// VULN-05). 32 bytes (256 bits) matches the entropy already used for
+// tracking tokens (internal/shared/trackingtoken).
+const minJWTSecretLength = 32
+
 // Config holds the process-wide configuration read from the environment.
 type Config struct {
 	DatabaseURL string
@@ -28,6 +36,9 @@ func Load() (Config, error) {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		return Config{}, fmt.Errorf("JWT_SECRET environment variable is not set")
+	}
+	if len(jwtSecret) < minJWTSecretLength {
+		return Config{}, fmt.Errorf("JWT_SECRET must be at least %d bytes long (got %d)", minJWTSecretLength, len(jwtSecret))
 	}
 
 	jwtTTL := defaultJWTTTL

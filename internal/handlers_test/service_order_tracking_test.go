@@ -14,9 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
 	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
+	"automotive-workshop-api/internal/shared/token"
 )
 
 // readBodyString reads and returns response's full body, then closes it.
@@ -64,8 +66,20 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	trackingRepository := servicetracking.NewPostgresTrackingRepository(pool)
 	trackingService := servicetracking.NewTrackingService(trackingRepository)
 
+	// Customer/service-order creation are deliberately left unauthenticated
+	// (nil requireAuth) in this router — this file only tests the tracking
+	// route itself (which never requires the administrative JWT, RF12), not
+	// the auth enforcement on those other two routes (covered by
+	// customer_test.go/service_order_test.go instead). A login route is
+	// still registered because createTrackingOrder/insertActiveCustomer
+	// authenticate anyway via loginAsAdmin, matching the shape every other
+	// router in this package uses.
+	tokens := token.NewManager("integration-test-secret", time.Hour)
+	authHandler := auth.NewHandler(auth.NewService(auth.NewRepository(pool), tokens))
+
 	router := http.NewServeMux()
-	customer.RegisterRoutes(router, customerService)
+	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
+	customer.RegisterRoutes(router, customerService, nil)
 	serviceorder.RegisterRoutes(router, serviceOrderService, nil)
 	servicetracking.RegisterRoutes(router, trackingService)
 
@@ -84,10 +98,10 @@ func createTrackingOrder(t *testing.T, server string, pool *pgxpool.Pool) servic
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-	})
+	}, loginAsAdmin(t, server))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	var created serviceorder.Response
