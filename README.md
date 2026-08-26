@@ -171,7 +171,16 @@ seed command below if needed.
 
 [docs/seed.sql](docs/seed.sql) populates the database with customers, vehicles, products, services, and service orders covering the main statuses of the flow. It uses fixed IDs with `ON CONFLICT DO NOTHING`, so it can be re-run without duplicating data.
 
-Apply it by copying the file into the container before running (avoids UTF-8 encoding issues that occur when using pipe/redirection from stdin on PowerShell):
+It is mounted as `/docker-entrypoint-initdb.d/02-seed.sql` and therefore **runs automatically right after `schema.sql`** on the initial creation of the Postgres volume — a fresh `docker compose up -d` already has the sample data and the administrative users below, with no extra step:
+
+| Email | Password |
+| --- | --- |
+| `admin@workshop.local` | `admin123` |
+| `soat-architecture@workshop.local` | `soat-architecture` |
+
+Both are dev/evaluation-only credentials — never use them outside a local environment.
+
+To re-apply it to a volume that already exists, copy the file into the container before running (avoids UTF-8 encoding issues that occur when using pipe/redirection from stdin on PowerShell):
 
 ```bash
 docker compose cp docs/seed.sql db:/tmp/seed.sql

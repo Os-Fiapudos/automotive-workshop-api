@@ -157,14 +157,18 @@ INSERT INTO audit_services (id, service_order_id, service_id, started_at, ended_
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Users (administrative) ====
--- Dev-only credentials: admin@workshop.local / admin123.
+-- Dev-only credentials: admin@workshop.local / admin123, and
+-- soat-architecture@workshop.local / soat-architecture (evaluation account,
+-- so a reviewer can log in without creating a user first).
 -- The password is bcrypt-hashed at insert time via pgcrypto's crypt() —
 -- only the hash is stored (BR1/AC5). Never use these credentials outside
 -- local development.
 
 INSERT INTO users (id, name, email, password_hash) VALUES
     ('f0000000-0000-0000-0000-000000000001', 'Workshop Admin', 'admin@workshop.local',
-     crypt('admin123', gen_salt('bf', 10)))
+     crypt('admin123', gen_salt('bf', 10))),
+    ('f0000000-0000-0000-0000-000000000002', 'soat-architecture', 'soat-architecture@workshop.local',
+     crypt('soat-architecture', gen_salt('bf', 10)))
 ON CONFLICT (id) DO NOTHING;
 
 COMMIT;

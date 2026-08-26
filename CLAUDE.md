@@ -176,9 +176,12 @@ docker compose down -v
 docker compose up -d
 ```
 
-Populate the database with sample data ([docs/seed.sql](docs/seed.sql), idempotent via
-`ON CONFLICT DO NOTHING`) — includes one administrative user
-(`admin@workshop.local` / `admin123`, dev-only, bcrypt-hashed at insert time):
+`docs/seed.sql` is mounted as `/docker-entrypoint-initdb.d/02-seed.sql`, so it runs
+automatically after `schema.sql` on the initial creation of the volume. To re-apply it to an
+existing volume (it is idempotent via `ON CONFLICT DO NOTHING`) — it includes two
+administrative users (`admin@workshop.local` / `admin123` and
+`soat-architecture@workshop.local` / `soat-architecture`, both dev/evaluation-only,
+bcrypt-hashed at insert time):
 ```bash
 docker compose cp docs/seed.sql db:/tmp/seed.sql
 docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
@@ -377,7 +380,8 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 - The schema is defined in [docs/schema.sql](docs/schema.sql) and applied automatically by
   Postgres only on the **initial creation of the Docker volume**
-  (`docker-entrypoint-initdb.d`). There is no migration tool (e.g. `golang-migrate`,
+  (`docker-entrypoint-initdb.d`, as `01-schema.sql`; [docs/seed.sql](docs/seed.sql) is
+  mounted next to it as `02-seed.sql` and runs right after). There is no migration tool (e.g. `golang-migrate`,
   `goose`) configured in the project today. **To be defined**: incremental migration
   strategy for when the schema needs to evolve after the volume already exists in
   shared/production environments.
