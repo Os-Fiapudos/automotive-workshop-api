@@ -123,17 +123,17 @@ func TestImproperTrackingAccessHidesTokens(t *testing.T) {
 // deterministic way to reach the `default` branch of writeServiceError over real HTTP.
 // The client must get the generic envelope, never the driver's error.
 func TestInternalErrorResponseHidesInfrastructure(t *testing.T) {
-	pool, server, _ := testServiceOrderServer(t)
+	pool, server, authToken := testServiceOrderServer(t)
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	serviceID := insertService(t, pool)
 
-	response := doJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID, serviceID},
-	})
+	}, authToken)
 
 	require.Equal(t, http.StatusInternalServerError, response.StatusCode)
 	body := assertNoSensitiveData(t, response)

@@ -51,11 +51,20 @@ with no corresponding Go feature yet — `internal/features/user/` (singular, un
 `auth`'s `users` table — an unfortunately similar name, see the note in section 3) remains
 an empty placeholder.
 
-**The customer endpoints are currently unauthenticated** — `cmd/api/main.go` does not wrap
-`customer.RegisterRoutes` in `middleware.RequireAuth`. `specs/auth/design.md` §7 states the
-convention going forward is that every route *not* explicitly listed as public should
-require authentication; whether/when to wrap the customer routes accordingly is an **open
-decision**, not yet made — do not wrap them without confirming first (see section 17).
+**Changed on 2026-08-26**: the customer endpoints, and Service Order Opening's
+`POST /api/v1/service-orders`, are now wrapped in `middleware.RequireAuth` like every other
+protected route, closing the two open decisions this section and section 17 used to record.
+The trigger was a concrete exploit path found during a security review
+([docs/owasp-vulnerability-and-coverage-report.md](docs/owasp-vulnerability-and-coverage-report.md),
+VULN-01/VULN-02): `GET /api/v1/customers/document/{document}` returned a customer's name,
+phone and e-mail to anyone able to produce a valid-looking CPF/CNPJ, with no credential at
+all, and the unauthenticated order-creation route accepted that same CPF/CNPJ (or a license
+plate) as an identifier, so the two combined let an unauthenticated caller confirm a document
+belonged to a registered customer and open orders in their name. Historical notes elsewhere
+in this repo describing these routes as unauthenticated (e.g.
+`specs/customer-management/requirements.md` §7.2, `specs/service-order-opening/requirements.md`)
+are records of the decision as it stood when those specs were written — they are no longer
+the rule, same convention already used for the Go 1.22→1.25 note in section 2.
 
 ## 2. Technology stack
 
@@ -268,10 +277,13 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   `internal/shared/token` issues/verifies tokens, `internal/shared/middleware.RequireAuth`
   protects routes not explicitly listed as public in `cmd/api/main.go`. See
   [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
-  authorization (403) is still **to be defined** — not implemented in the MVP. **The
-  Customer Management routes are not currently wrapped in `RequireAuth`** — see section 1's
-  note; this is an open decision, not an oversight to silently fix. The service catalog
-  routes are all wrapped in `RequireAuth`.
+  authorization (403) is still **to be defined** — not implemented in the MVP: a valid token
+  from any user can still reach every protected route regardless of who they are. Every
+  feature's routes are wrapped in `RequireAuth` as of 2026-08-26 (Customer Management and
+  Service Order Opening's creation route were the last two — see section 1's note); the only
+  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login)
+  and Service Order Tracking's own route, which validates its own possession-based tracking
+  token instead of a JWT (RF12).
 - **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
   defined by the service catalog listing), leaving room for pagination metadata later.
   Reuse this shape for new list endpoints instead of returning a bare JSON array.
@@ -472,6 +484,8 @@ silently — see section 8 for detail):
    `customer` and `servicecatalog` use `apierror`; `auth` (and
    `middleware.RequireAuth`'s 401) still uses `httpx`, so migrating it would change the
    401/500 bodies of the auth routes — a behavioral change that needs its own decision.
-2. Whether/when the Customer Management routes should be wrapped in
-   `middleware.RequireAuth`, per the "every non-public route requires auth" convention
-   `specs/auth/design.md` §7 sets going forward.
+2. ~~Whether/when the Customer Management routes should be wrapped in
+   `middleware.RequireAuth`~~ — **resolved 2026-08-26**: they are now wrapped, along with
+   Service Order Opening's creation route, per section 1's note. What remains open is
+   role/permission-based authorization (section 13): a valid token still grants access to
+   every protected route regardless of who holds it.

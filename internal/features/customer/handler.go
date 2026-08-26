@@ -15,15 +15,27 @@ const (
 // RegisterRoutes registers every Customer Management endpoint on mux, using
 // Go 1.22's method-aware ServeMux patterns (see
 // specs/customer-management/design.md §1.5) — no third-party router.
-func RegisterRoutes(mux *http.ServeMux, service *CustomerService) {
+// requireAuth wraps every route (RNF02 / specs/auth/design.md §7's "every
+// non-public route requires auth" convention — see CLAUDE.md §17.2, the open
+// decision this closes); it may be nil, same nil-safe convention as
+// internal/features/product.RegisterRoutes, for callers that deliberately
+// need an unauthenticated router (e.g. isolated fixture setup in tests).
+func RegisterRoutes(mux *http.ServeMux, service *CustomerService, requireAuth func(http.Handler) http.Handler) {
 	handler := &customerHandler{service: service}
 
-	mux.HandleFunc("POST /api/v1/customers", handler.create)
-	mux.HandleFunc("GET /api/v1/customers", handler.list)
-	mux.HandleFunc("GET /api/v1/customers/document/{document}", handler.getByDocument)
-	mux.HandleFunc("GET /api/v1/customers/{id}", handler.getByID)
-	mux.HandleFunc("PATCH /api/v1/customers/{id}", handler.update)
-	mux.HandleFunc("DELETE /api/v1/customers/{id}", handler.deactivate)
+	wrap := func(h http.HandlerFunc) http.Handler {
+		if requireAuth != nil {
+			return requireAuth(h)
+		}
+		return h
+	}
+
+	mux.Handle("POST /api/v1/customers", wrap(handler.create))
+	mux.Handle("GET /api/v1/customers", wrap(handler.list))
+	mux.Handle("GET /api/v1/customers/document/{document}", wrap(handler.getByDocument))
+	mux.Handle("GET /api/v1/customers/{id}", wrap(handler.getByID))
+	mux.Handle("PATCH /api/v1/customers/{id}", wrap(handler.update))
+	mux.Handle("DELETE /api/v1/customers/{id}", wrap(handler.deactivate))
 }
 
 // customerHandler holds only what every endpoint needs (the service).
