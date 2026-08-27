@@ -22,6 +22,14 @@ Manage replacement parts (`PART`) and consumable supplies (`SUPPLY`) catalog, st
   - Quantity must be > 0.
   - Reason is required.
   - `EXIT` adjustment cannot generate negative stock (`currentStock - quantity >= 0`). If stock is insufficient, returns 409 Conflict (`INSUFFICIENT_STOCK`).
+  - **Accepted `type` spellings** (documented on 2026-08-26; the behaviour itself predates
+    this note — `product.ParseMovementType`): the request value is upper-cased and trimmed,
+    then `ENTRY`, `ENTRADA` and `IN` all resolve to `ENTRY`, and `EXIT`, `SAIDA`, `SAÍDA`
+    and `OUT` all resolve to `EXIT`. This is **input tolerance only** — the canonical
+    `ENTRY`/`EXIT` values are the only ones ever persisted or returned, so it is not an
+    exception to the English domain-language convention (`CLAUDE.md` §8). Kept deliberately
+    rather than removed: dropping the aliases would break clients that already send them,
+    and both collections in `docs/` document them as part of the contract.
 
 ## 4. Endpoints
 - `POST /api/v1/produtos`
