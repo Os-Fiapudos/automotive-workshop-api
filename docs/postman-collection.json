@@ -1014,7 +1014,7 @@
                 "diagnosis"
               ]
             },
-            "description": "RECEBIDA -> EM_DIAGNOSTICO. No request body."
+            "description": "RECEIVED -> IN_DIAGNOSIS. No request body."
           },
           "response": []
         },
@@ -1094,7 +1094,7 @@
                 "send"
               ]
             },
-            "description": "Mechanic action. Moves the order to AGUARDANDO_APROVACAO. No request body."
+            "description": "Mechanic action. Moves the order to AWAITING_APPROVAL. No request body."
           },
           "response": []
         },
@@ -1131,7 +1131,7 @@
                 },
                 {
                   "key": "status",
-                  "value": "EM_EXECUCAO",
+                  "value": "IN_PROGRESS",
                   "disabled": true
                 },
                 {
@@ -1156,7 +1156,7 @@
                 }
               ]
             },
-            "description": "status is one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE. createdFrom/createdTo are RFC3339."
+            "description": "status is one of RECEIVED, IN_DIAGNOSIS, AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED. createdFrom/createdTo are RFC3339."
           },
           "response": []
         },
@@ -1285,7 +1285,7 @@
                 "finalize"
               ]
             },
-            "description": "EM_EXECUCAO -> FINALIZADA. No request body."
+            "description": "IN_PROGRESS -> COMPLETED. No request body."
           },
           "response": []
         },
@@ -1307,7 +1307,7 @@
                 "deliver"
               ]
             },
-            "description": "FINALIZADA -> ENTREGUE. No request body."
+            "description": "COMPLETED -> DELIVERED. No request body."
           },
           "response": []
         },
