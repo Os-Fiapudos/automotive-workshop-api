@@ -12,10 +12,11 @@ orders, generating and approving quotes, and tracking the service order status u
 vehicle is delivered:
 
 ```
-RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE
+RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED
 ```
 
-> The status values above are intentionally kept in Portuguese — see the note in section 8.
+> The status values above were renamed from Portuguese to English on 2026-08-26 — see the
+> note in section 8.
 
 It also keeps audit trails: history of service order status changes
 (`ServiceOrderHistory`) and start/end records of the execution of each service
@@ -239,11 +240,22 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   (`Customer`, `Vehicle`, `ServiceOrder`, `PART`, etc.), mirroring
   [docs/entities.md](docs/entities.md). Keep this naming consistent across Go, the
   database, and documentation — do not translate part of the code back to Portuguese.
-  - **Deliberate exception**: `ServiceOrder.status` values (`RECEBIDA`,
-    `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) are
-    kept in Portuguese by explicit product decision. Every other identifier in the domain
-    was translated to English; this single enum's values were not, and must not be silently
-    translated in a future change.
+  - **No exception since 2026-08-26**: `ServiceOrder.status` values used to be the one
+    deliberate carve-out, kept in Portuguese by product decision. They were renamed to
+    English (`RECEBIDA` → `RECEIVED`, `EM_DIAGNOSTICO` → `IN_DIAGNOSIS`,
+    `AGUARDANDO_APROVACAO` → `AWAITING_APPROVAL`, `EM_EXECUCAO` → `IN_PROGRESS`,
+    `FINALIZADA` → `COMPLETED`, `ENTREGUE` → `DELIVERED`, `CANCELADA` → `CANCELED`), so
+    the English convention now holds with no carve-out. This was a breaking API change and
+    a Postgres enum rename — see the migration note in `docs/schema.sql`. Historical notes
+    in `specs/service-order-*/` still quoting the Portuguese values are records of the
+    decision as it stood when they were written, same convention as section 2's Go
+    1.22→1.25 note.
+  - **Still an exception, unrelated to status**: route segments of the product feature
+    (`/api/v1/produtos/...`) and of service-order tracking/quote decision
+    (`/api/v1/acompanhamento/{codigo}`, `orcamento/aprovar|reprovar`) are in Portuguese;
+    every other feature uses English paths. `product.ParseMovementType` also accepts
+    `ENTRADA`/`SAIDA`/`SAÍDA` as input aliases for the canonical `ENTRY`/`EXIT` — input
+    tolerance only, nothing Portuguese is ever stored.
 - **Database** (conventions already in effect in `docs/schema.sql`):
   - `snake_case` for tables and columns.
   - `id UUID` (technical key, `gen_random_uuid()`) as PRIMARY KEY.

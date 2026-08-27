@@ -21,7 +21,7 @@ tasks depend on earlier ones.
 
 ## 3. Domain layer (`design.md` §1.2, §1.3)
 
-- [ ] `model.go`: add `StatusEmDiagnostico`/`StatusAguardandoAprovacao`,
+- [ ] `model.go`: add `StatusInDiagnosis`/`StatusAwaitingApproval`,
       `startDiagnosis()`/`markAwaitingApproval()` methods, `QuoteItemKind`, `QuoteItem`,
       `Quote`, `QuoteItemInput`, `validateQuoteItems`, `calculateTotal`.
 - [ ] `quote_model_test.go`: transition rules, item validation, total calculation
@@ -77,8 +77,8 @@ tasks depend on earlier ones.
 - [ ] `go build ./...`, `go vet ./...`, `go test ./...` pass locally.
 - [ ] `docker compose down -v && docker compose up -d`, reseed, manual `curl` against the
       three new endpoints for a success case and each rejection case using
-      `docs/seed.sql` fixtures (order 4, `EM_DIAGNOSTICO`, has no quote yet — good manual
-      target for `PUT .../quote`; order 5, `RECEBIDA`, good target for
+      `docs/seed.sql` fixtures (order 4, `IN_DIAGNOSIS`, has no quote yet — good manual
+      target for `PUT .../quote`; order 5, `RECEIVED`, good target for
       `POST .../diagnosis` and for the "diagnosis not started" rejection on
       `PUT .../quote`).
 - [ ] `DATABASE_URL=... go test ./...` (integration tests actually exercised, not

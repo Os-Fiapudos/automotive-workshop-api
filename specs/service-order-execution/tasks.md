@@ -6,8 +6,8 @@ Each task references the `design.md` section it implements.
    `audit_services` (drop `event`/`occurred_at`, add `started_at`/`ended_at`), drop the
    `audit_event` enum, add `'delivery'` to `history_event`. Update `docs/entities.md`'s
    `AuditServices` section to match. Recreate the local Docker volume to apply it.
-2. **Domain — `ServiceOrder`** (design.md §2.1) — add `StatusEmExecucao`/`StatusFinalizada`/
-   `StatusEntregue` consts and `finalize()`/`deliver()` methods to `model.go`.
+2. **Domain — `ServiceOrder`** (design.md §2.1) — add `StatusInProgress`/`StatusCompleted`/
+   `StatusDelivered` consts and `finalize()`/`deliver()` methods to `model.go`.
 3. **Domain — `ServiceExecution`** (design.md §2.2) — new `execution_model.go`:
    `ServiceExecution` type, `NewServiceExecution`, `finish()`.
 4. **Errors** (design.md §3) — add `ErrServiceExecutionNotFound`,
@@ -33,7 +33,7 @@ Each task references the `design.md` section it implements.
     storage backing the five new repository methods.
 12. **Unit tests** — `execution_model_test.go` (finish() guards), `model_test.go` additions
     (finalize()/deliver() guards), `execution_service_test.go` (BR2/BR5/BR6/BR7).
-13. **Integration tests** (design.md §5) — add a `moveServiceOrderToEmExecucao` helper and
+13. **Integration tests** (design.md §5) — add a `moveServiceOrderToInProgress` helper and
     HTTP-level tests to `internal/handlers_test/service_order_test.go` covering the full
     acceptance checklist in `requirements.md` §7.
 14. **Architecture doc** (design.md §4) — append the new addendum block to

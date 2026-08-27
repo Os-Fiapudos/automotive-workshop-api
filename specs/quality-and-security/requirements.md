@@ -104,8 +104,8 @@ traceability evidence, and the last row is the only genuine gap.
 | 1 | CPF/CNPJ and license plate validation | covered | `internal/shared/document/{cpf,cnpj,document}_test.go`; `internal/features/vehicle/plate_test.go`; `TestCreateRejectsInvalidCPF`, `TestCreateAcceptsAlphanumericCNPJ`, `TestVehicleCreateRejectsInvalidPlate` |
 | 2 | Quote calculation | covered | `TestCalculateTotalSumsItems`, `TestCalculateTotalManyItemsNoDrift`, `TestCalculateTotalEmpty` |
 | 3 | Price snapshot | covered | `TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem`, `TestServiceOrderComposeQuoteSnapshotSurvivesCatalogChange` |
-| 4 | Service order transitions | covered | `TestStartDiagnosisRejectsNonRecebida`, `TestFinalizeRejectsNonEmExecucao`, `TestDeliverRejectsNonFinalizada`, `TestServiceOrderDetailByIDFullLifecycle` |
-| 5 | Approval and rejection | covered | `TestApproveQuoteFromAguardandoAprovacao`, `TestRejectQuoteFromAguardandoAprovacao`, `TestQuoteDecisionApproveFullFlow`, `TestQuoteDecisionRejectFullFlow`, `TestApproveThenRejectSameQuoteFails` |
+| 4 | Service order transitions | covered | `TestStartDiagnosisRejectsNonReceived`, `TestFinalizeRejectsNonInProgress`, `TestDeliverRejectsNonCompleted`, `TestServiceOrderDetailByIDFullLifecycle` |
+| 5 | Approval and rejection | covered | `TestApproveQuoteFromAwaitingApproval`, `TestRejectQuoteFromAwaitingApproval`, `TestQuoteDecisionApproveFullFlow`, `TestQuoteDecisionRejectFullFlow`, `TestApproveThenRejectSameQuoteFails` |
 | 6 | Negative balance blocking | covered | `TestProductApplyStockAdjustment`, `TestStockAdjustmentFlow` (409 `INSUFFICIENT_STOCK`) |
 | 7 | Transactional stock write-off | covered | `TestStockAdjustmentConcurrency`, `TestServiceOrderCreateRollsBackOnPartialFailure` |
 | 8 | Improper access to tracking | covered | `TestTrackingMissingToken`, `TestTrackingWrongToken`, `TestTrackingCrossOrderToken`, `TestTrackingRevokedToken` |
