@@ -113,7 +113,7 @@ func TestProductUnauthenticatedReturns401(t *testing.T) {
 	server, _, _ := testProductServer(t)
 
 	// Attempt POST without token
-	resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:      "Filtro Sem Auth",
 		UnitPrice: ptr(10.0),
 		Type:      "PART",
@@ -121,7 +121,7 @@ func TestProductUnauthenticatedReturns401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 
 	// Attempt GET list without token
-	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos", nil, "")
+	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products", nil, "")
 	assert.Equal(t, http.StatusUnauthorized, getResp.StatusCode)
 }
 
@@ -129,7 +129,7 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	server, pool, token := testProductServer(t)
 
 	// 1. Create PART product
-	partResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	partResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Amortecedor Dianteiro",
 		Description:  "Amortecedor pressurizado",
 		UnitPrice:    ptr(250.00),
@@ -149,8 +149,8 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	assert.NotZero(t, createdPart.Code)
 
 	// 2. Create SUPPLY product
-	supplyResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
-		Name:         "Graxa de Lítio",
+	supplyResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
+		Name:         "Graxa de LÃ­tio",
 		Description:  "Pote 1kg",
 		UnitPrice:    ptr(35.50),
 		CurrentStock: ptr(8),
@@ -164,19 +164,19 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	assert.Equal(t, "SUPPLY", createdSupply.Type)
 
 	// 3. Get product by ID
-	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos/"+createdPart.ID, nil, token)
+	getResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products/"+createdPart.ID, nil, token)
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
 	var fetched product.Response
 	decodeBody(t, getResp, &fetched)
 	assert.Equal(t, createdPart.ID, fetched.ID)
 
 	// 4. Update details (name, price) and attempt direct stock update rejection (RNF07)
-	rejectStockPatch := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/produtos/"+createdPart.ID, product.UpdateRequest{
+	rejectStockPatch := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/products/"+createdPart.ID, product.UpdateRequest{
 		CurrentStock: ptr(99),
 	}, token)
 	assert.Equal(t, http.StatusBadRequest, rejectStockPatch.StatusCode)
 
-	patchResp := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/produtos/"+createdPart.ID, product.UpdateRequest{
+	patchResp := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/products/"+createdPart.ID, product.UpdateRequest{
 		Name:      ptr("Amortecedor Dianteiro Turbo"),
 		UnitPrice: ptr(275.00),
 	}, token)
@@ -188,14 +188,14 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	assert.Equal(t, 12, updated.CurrentStock) // stock unchanged
 
 	// 5. List products
-	listResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos?page=1&pageSize=100", nil, token)
+	listResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products?page=1&pageSize=100", nil, token)
 	require.Equal(t, http.StatusOK, listResp.StatusCode)
 	var list product.ListResponse
 	decodeBody(t, listResp, &list)
 	assert.GreaterOrEqual(t, list.Total, 2)
 
 	// 6. Deactivate (logical delete)
-	deactivateResp := doAuthJSON(t, http.MethodDelete, server.URL+"/api/v1/produtos/"+createdPart.ID, nil, token)
+	deactivateResp := doAuthJSON(t, http.MethodDelete, server.URL+"/api/v1/products/"+createdPart.ID, nil, token)
 	require.Equal(t, http.StatusOK, deactivateResp.StatusCode)
 	var deactivated product.Response
 	decodeBody(t, deactivateResp, &deactivated)
@@ -212,9 +212,9 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	server, pool, token := testProductServer(t)
 
 	// 1. Create product with stock = 10
-	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
-		Name:         "Óleo de Câmbio",
-		Description:  "Fluido sintético",
+	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
+		Name:         "Ã“leo de CÃ¢mbio",
+		Description:  "Fluido sintÃ©tico",
 		UnitPrice:    ptr(55.00),
 		CurrentStock: ptr(10),
 		Type:         "SUPPLY",
@@ -225,7 +225,7 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	cleanupProduct(t, pool, created.ID)
 
 	// 2. Adjust entry (+5)
-	entryResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos/"+created.ID+"/estoque/ajustes", product.StockAdjustmentRequest{
+	entryResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products/"+created.ID+"/stock/adjustments", product.StockAdjustmentRequest{
 		Type:     "ENTRY",
 		Quantity: 5,
 		Reason:   "Ajuste de estoque inicial",
@@ -237,10 +237,10 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	assert.Equal(t, 15, entryMove.NewStock)
 
 	// 3. Adjust exit (-4)
-	exitResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos/"+created.ID+"/estoque/ajustes", product.StockAdjustmentRequest{
+	exitResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products/"+created.ID+"/stock/adjustments", product.StockAdjustmentRequest{
 		Type:     "EXIT",
 		Quantity: 4,
-		Reason:   "Uso em serviço",
+		Reason:   "Uso em serviÃ§o",
 	}, token)
 	require.Equal(t, http.StatusCreated, exitResp.StatusCode)
 	var exitMove product.StockMovementResponse
@@ -249,21 +249,21 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	assert.Equal(t, 11, exitMove.NewStock)
 
 	// 4. Query current stock balance
-	balanceResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos/"+created.ID+"/estoque", nil, token)
+	balanceResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products/"+created.ID+"/stock", nil, token)
 	require.Equal(t, http.StatusOK, balanceResp.StatusCode)
 	var balance product.StockBalanceResponse
 	decodeBody(t, balanceResp, &balance)
 	assert.Equal(t, 11, balance.CurrentStock)
 
 	// 5. Query movements list
-	movementsResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos/"+created.ID+"/movimentacoes", nil, token)
+	movementsResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products/"+created.ID+"/movements", nil, token)
 	require.Equal(t, http.StatusOK, movementsResp.StatusCode)
 
 	// 6. Reject excessive exit (insufficient stock) -> 409 Conflict
-	excessResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos/"+created.ID+"/estoque/ajustes", product.StockAdjustmentRequest{
+	excessResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products/"+created.ID+"/stock/adjustments", product.StockAdjustmentRequest{
 		Type:     "EXIT",
 		Quantity: 100,
-		Reason:   "Saída excessiva",
+		Reason:   "SaÃ­da excessiva",
 	}, token)
 	assert.Equal(t, http.StatusConflict, excessResp.StatusCode)
 	var errBody map[string]any
@@ -272,7 +272,7 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	assert.Equal(t, "INSUFFICIENT_STOCK", errObj["code"])
 
 	// 7. Reject zero quantity -> 400 Bad Request
-	zeroResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos/"+created.ID+"/estoque/ajustes", product.StockAdjustmentRequest{
+	zeroResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products/"+created.ID+"/stock/adjustments", product.StockAdjustmentRequest{
 		Type:     "ENTRY",
 		Quantity: 0,
 		Reason:   "Zero quantidade",
@@ -284,9 +284,9 @@ func TestStockAdjustmentConcurrency(t *testing.T) {
 	server, pool, token := testProductServer(t)
 
 	// Create product with stock = 10
-	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Produto Concorrente",
-		Description:  "Teste de concorrência de estoque",
+		Description:  "Teste de concorrÃªncia de estoque",
 		UnitPrice:    ptr(100.00),
 		CurrentStock: ptr(10),
 		Type:         "PART",
@@ -306,10 +306,10 @@ func TestStockAdjustmentConcurrency(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos/"+created.ID+"/estoque/ajustes", product.StockAdjustmentRequest{
+			resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products/"+created.ID+"/stock/adjustments", product.StockAdjustmentRequest{
 				Type:     "EXIT",
 				Quantity: 2,
-				Reason:   "Saída concorrente",
+				Reason:   "SaÃ­da concorrente",
 			}, token)
 			statusChan <- resp.StatusCode
 		}()
@@ -332,7 +332,7 @@ func TestStockAdjustmentConcurrency(t *testing.T) {
 	assert.Equal(t, 5, conflictCount, "Exactly 5 exit operations should fail with 409 Conflict")
 
 	// Verify final balance is exactly 0
-	balanceResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos/"+created.ID+"/estoque", nil, token)
+	balanceResp := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products/"+created.ID+"/stock", nil, token)
 	require.Equal(t, http.StatusOK, balanceResp.StatusCode)
 	var balance product.StockBalanceResponse
 	decodeBody(t, balanceResp, &balance)
@@ -344,9 +344,9 @@ func TestProductDuplicateCodeReturns409(t *testing.T) {
 
 	customCode := int64(800000 + rand.Intn(100000))
 
-	firstResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	firstResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Code:         &customCode,
-		Name:         "Produto Código Fixo 1",
+		Name:         "Produto CÃ³digo Fixo 1",
 		Description:  "Desc 1",
 		UnitPrice:    ptr(10.0),
 		CurrentStock: ptr(5),
@@ -357,9 +357,9 @@ func TestProductDuplicateCodeReturns409(t *testing.T) {
 	decodeBody(t, firstResp, &p1)
 	cleanupProduct(t, pool, p1.ID)
 
-	secondResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	secondResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Code:         &customCode,
-		Name:         "Produto Código Fixo 2",
+		Name:         "Produto CÃ³digo Fixo 2",
 		Description:  "Desc 2",
 		UnitPrice:    ptr(20.0),
 		CurrentStock: ptr(10),
@@ -377,8 +377,8 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	server, _, token := testProductServer(t)
 
 	t.Run("negative unit price", func(t *testing.T) {
-		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
-			Name:         "Preço Negativo",
+		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
+			Name:         "PreÃ§o Negativo",
 			UnitPrice:    ptr(-10.0),
 			CurrentStock: ptr(5),
 			Type:         "PART",
@@ -387,7 +387,7 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	})
 
 	t.Run("negative stock", func(t *testing.T) {
-		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 			Name:         "Estoque Negativo",
 			UnitPrice:    ptr(10.0),
 			CurrentStock: ptr(-5),
@@ -397,8 +397,8 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	})
 
 	t.Run("invalid type", func(t *testing.T) {
-		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
-			Name:         "Tipo Inválido",
+		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
+			Name:         "Tipo InvÃ¡lido",
 			UnitPrice:    ptr(10.0),
 			CurrentStock: ptr(5),
 			Type:         "SERVICO",
@@ -417,7 +417,7 @@ func stringValue(i int) string {
 
 // TestProductNotFoundAndMalformedIdentifiers covers the 404 and 400 branches of every
 // product route, which the happy-path flows above never reach
-// (specs/quality-and-security/design.md §5).
+// (specs/quality-and-security/design.md Â§5).
 func TestProductNotFoundAndMalformedIdentifiers(t *testing.T) {
 	server, _, token := testProductServer(t)
 
@@ -430,13 +430,13 @@ func TestProductNotFoundAndMalformedIdentifiers(t *testing.T) {
 			path   string
 			body   any
 		}{
-			{"get", http.MethodGet, "/api/v1/produtos/" + unknownID, nil},
-			{"update", http.MethodPatch, "/api/v1/produtos/" + unknownID, product.UpdateRequest{Name: ptr("Novo nome")}},
-			{"deactivate", http.MethodDelete, "/api/v1/produtos/" + unknownID, nil},
-			{"stock balance", http.MethodGet, "/api/v1/produtos/" + unknownID + "/estoque", nil},
-			{"stock adjustment", http.MethodPost, "/api/v1/produtos/" + unknownID + "/estoque/ajustes",
-				product.StockAdjustmentRequest{Type: "ENTRY", Quantity: 1, Reason: "Reposição"}},
-			{"movements", http.MethodGet, "/api/v1/produtos/" + unknownID + "/movimentacoes", nil},
+			{"get", http.MethodGet, "/api/v1/products/" + unknownID, nil},
+			{"update", http.MethodPatch, "/api/v1/products/" + unknownID, product.UpdateRequest{Name: ptr("Novo nome")}},
+			{"deactivate", http.MethodDelete, "/api/v1/products/" + unknownID, nil},
+			{"stock balance", http.MethodGet, "/api/v1/products/" + unknownID + "/stock", nil},
+			{"stock adjustment", http.MethodPost, "/api/v1/products/" + unknownID + "/stock/adjustments",
+				product.StockAdjustmentRequest{Type: "ENTRY", Quantity: 1, Reason: "ReposiÃ§Ã£o"}},
+			{"movements", http.MethodGet, "/api/v1/products/" + unknownID + "/movements", nil},
 		}
 
 		for _, testCase := range cases {
@@ -449,9 +449,9 @@ func TestProductNotFoundAndMalformedIdentifiers(t *testing.T) {
 
 	t.Run("malformed uuid returns 400", func(t *testing.T) {
 		for _, path := range []string{
-			"/api/v1/produtos/not-a-uuid",
-			"/api/v1/produtos/not-a-uuid/estoque",
-			"/api/v1/produtos/not-a-uuid/movimentacoes",
+			"/api/v1/products/not-a-uuid",
+			"/api/v1/products/not-a-uuid/stock",
+			"/api/v1/products/not-a-uuid/movements",
 		} {
 			response := doAuthJSON(t, http.MethodGet, server.URL+path, nil, token)
 			assert.Equal(t, http.StatusBadRequest, response.StatusCode, "path %s", path)
@@ -459,7 +459,7 @@ func TestProductNotFoundAndMalformedIdentifiers(t *testing.T) {
 	})
 
 	t.Run("malformed json body returns 400", func(t *testing.T) {
-		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/produtos", bytes.NewReader([]byte("{not json")))
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/products", bytes.NewReader([]byte("{not json")))
 		require.NoError(t, err)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer "+token)
@@ -479,7 +479,7 @@ func TestProductListFilters(t *testing.T) {
 
 	t.Run("filters by type and status", func(t *testing.T) {
 		response := doAuthJSON(t, http.MethodGet,
-			server.URL+"/api/v1/produtos?type=SUPPLY&status=ACTIVE&page=1&pageSize=100", nil, token)
+			server.URL+"/api/v1/products?type=SUPPLY&status=ACTIVE&page=1&pageSize=100", nil, token)
 		require.Equal(t, http.StatusOK, response.StatusCode)
 
 		var list product.ListResponse
@@ -488,7 +488,7 @@ func TestProductListFilters(t *testing.T) {
 	})
 
 	t.Run("page size above the maximum is clamped", func(t *testing.T) {
-		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos?page=1&pageSize=5000", nil, token)
+		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products?page=1&pageSize=5000", nil, token)
 		require.Equal(t, http.StatusOK, response.StatusCode)
 
 		var list product.ListResponse
@@ -497,7 +497,7 @@ func TestProductListFilters(t *testing.T) {
 	})
 
 	t.Run("non-numeric pagination falls back to defaults", func(t *testing.T) {
-		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/produtos?page=abc&pageSize=xyz", nil, token)
+		response := doAuthJSON(t, http.MethodGet, server.URL+"/api/v1/products?page=abc&pageSize=xyz", nil, token)
 		assert.Equal(t, http.StatusOK, response.StatusCode)
 	})
 
@@ -538,7 +538,7 @@ func TestProductRepositoryPersistence(t *testing.T) {
 func createProductFixture(t *testing.T, server *httptest.Server, pool *pgxpool.Pool, token, productType string, stock int) product.Response {
 	t.Helper()
 
-	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/produtos", product.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Fixture " + strconv.Itoa(rand.Intn(1000000)),
 		Description:  "Created by the integration suite",
 		UnitPrice:    ptr(99.90),

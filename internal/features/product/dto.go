@@ -7,7 +7,7 @@ import (
 	"automotive-workshop-api/internal/shared/apierror"
 )
 
-// CreateRequest represents the payload for POST /api/v1/produtos.
+// CreateRequest represents the payload for POST /api/v1/products.
 type CreateRequest struct {
 	Code         *int64   `json:"code,omitempty"`
 	Name         string   `json:"name"`
@@ -56,7 +56,7 @@ func (request CreateRequest) Validate() []apierror.Detail {
 	return details
 }
 
-// UpdateRequest represents the payload for PATCH /api/v1/produtos/{id}.
+// UpdateRequest represents the payload for PATCH /api/v1/products/{id}.
 type UpdateRequest struct {
 	Name         *string  `json:"name,omitempty"`
 	Description  *string  `json:"description,omitempty"`
@@ -99,7 +99,7 @@ func (request UpdateRequest) Validate() []apierror.Detail {
 	return details
 }
 
-// StockAdjustmentRequest represents the payload for POST /api/v1/produtos/{id}/estoque/ajustes.
+// StockAdjustmentRequest represents the payload for POST /api/v1/products/{id}/stock/adjustments.
 type StockAdjustmentRequest struct {
 	Type     string `json:"type"`
 	Quantity int    `json:"quantity"`
@@ -147,7 +147,7 @@ type Response struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-// StockBalanceResponse represents response for GET /api/v1/produtos/{id}/estoque.
+// StockBalanceResponse represents response for GET /api/v1/products/{id}/stock.
 type StockBalanceResponse struct {
 	ID           string    `json:"id"`
 	Code         int64     `json:"code"`
@@ -157,7 +157,7 @@ type StockBalanceResponse struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-// StockMovementResponse represents response item for GET /api/v1/produtos/{id}/movimentacoes and POST adjustment.
+// StockMovementResponse represents response item for GET /api/v1/products/{id}/movements and POST adjustment.
 type StockMovementResponse struct {
 	ID            string    `json:"id"`
 	ProductID     string    `json:"productId"`
