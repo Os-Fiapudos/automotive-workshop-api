@@ -62,33 +62,33 @@ code but are not yet described in this document; the sections below cover `auth`
 > **Addendum (`specs/service-order-execution/`)**: `service-order` gained four more
 > `requireAuth`-wrapped routes: `POST /api/v1/service-orders/{id}/executions` (start a
 > service execution), `POST /api/v1/service-orders/{id}/executions/{executionId}/finish`
-> (finish one), `POST /api/v1/service-orders/{id}/finalize` (`EM_EXECUCAO` →
-> `FINALIZADA`), and `POST /api/v1/service-orders/{id}/deliver` (`FINALIZADA` →
-> `ENTREGUE`). It also implements `ServiceExecution` — the Go name for the
+> (finish one), `POST /api/v1/service-orders/{id}/finalize` (`IN_PROGRESS` →
+> `COMPLETED`), and `POST /api/v1/service-orders/{id}/deliver` (`COMPLETED` →
+> `DELIVERED`). It also implements `ServiceExecution` — the Go name for the
 > `AuditServices` entity `docs/entities.md` already documented but no feature had built
 > yet — restructuring its table from a start/end event log to one row per execution with
 > its own `started_at`/`ended_at` columns (`docs/schema.sql`), needed to give the finish
 > endpoint a stable execution id to act on. One caveat carried over from planning: no code
-> anywhere implements the `AGUARDANDO_APROVACAO` → `EM_EXECUCAO` transition (quote
-> approval) — this feature treats an order already being `EM_EXECUCAO` as an external
+> anywhere implements the `AWAITING_APPROVAL` → `IN_PROGRESS` transition (quote
+> approval) — this feature treats an order already being `IN_PROGRESS` as an external
 > precondition, so its endpoints cannot be exercised end-to-end from a freshly opened order
 > through the public API alone yet. See `specs/service-order-execution/design.md` for the
 > full design.
 
 > **Addendum (`specs/service-order-quote-decision/`)**: `service-order` gained three more
 > routes: `POST /api/v1/service-orders/{id}/quote/send` (`requireAuth`-wrapped, an attendant
-> action — `EM_DIAGNOSTICO` → `AGUARDANDO_APROVACAO`), and the customer-facing
+> action — `IN_DIAGNOSIS` → `AWAITING_APPROVAL`), and the customer-facing
 > `POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar` /`.../reprovar` (never
 > `requireAuth`-wrapped, authenticated via the same `X-Tracking-Token` mechanism
 > `service-order-tracking` established — reusing `internal/shared/trackingtoken` and reading
 > `service_order_tracking_tokens` directly via SQL, the same no-cross-feature-Go-import
 > pattern that table's owning feature already set). This is the feature that finally fills
-> the `AGUARDANDO_APROVACAO → EM_EXECUCAO` gap `specs/service-order-execution/` flagged as an
-> external precondition (approval), and adds a matching `AGUARDANDO_APROVACAO → CANCELADA`
+> the `AWAITING_APPROVAL → IN_PROGRESS` gap `specs/service-order-execution/` flagged as an
+> external precondition (approval), and adds a matching `AWAITING_APPROVAL → CANCELED`
 > branch for rejection — a seventh `ServiceOrder.status` value beyond the six
 > `docs/entities.md` originally documented, added by explicit decision (not the source
 > ticket's own, which only recommended it) since a rejected quote can never be altered and
-> the order would otherwise have no way to leave `AGUARDANDO_APROVACAO`. It also changes
+> the order would otherwise have no way to leave `AWAITING_APPROVAL`. It also changes
 > already-shipped behavior: composing a quote (`PUT /api/v1/service-orders/{id}/quote`) no
 > longer transitions the order by itself — only the new send step does — see
 > `specs/service-order-quote-decision/design.md` §1.2 for the erratum this introduces into
@@ -106,7 +106,7 @@ code but are not yet described in this document; the sections below cover `auth`
 
 > **Addendum (`specs/service-order-stock-usage/`)**: `service-order` gained three more
 > `requireAuth`-wrapped routes: `POST /api/v1/service-orders/{id}/stock-movements` (deduct
-> one or more parts/supplies from stock against an `EM_EXECUCAO` order, all-or-nothing per
+> one or more parts/supplies from stock against an `IN_PROGRESS` order, all-or-nothing per
 > request), `GET /api/v1/service-orders/{id}/stock-movements` (list the movements recorded
 > against an order), and `POST .../stock-movements/{movementId}/reversal` (undo a previously
 > registered deduction, restoring the quantity and linking back to the original movement).
@@ -331,7 +331,7 @@ removes the row, so history stays intact.
 No other feature's operation flow is implemented here (product, service orders, quotes,
 etc.). `docs/entities.md` describes the **data model** of these entities and a service order
 status flow
-(`RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE`),
+(`RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED`),
 but that remains domain documentation only — no Go logic implements it yet. **To be
 defined** once those features are specified and implemented. Note the documented **future**
 invariants (not yet implemented, since Service Order does not exist): opening a service
@@ -579,10 +579,12 @@ their source:
 7. **Minimum CI gate**: every change goes through `go build ./...`, `go vet ./...`, and
    `go test ./...` on GitHub Actions on every push/PR.
 8. **Domain identifiers in English**, consistently between `docs/entities.md` and
-   `docs/schema.sql` — with a single deliberate exception: `ServiceOrder.status` enum
-   values are kept in Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`,
-   `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) by explicit product decision. Customer
-   Management's own new fields (`documentType`, `status`) and its routes (`/customers`, not
+   `docs/schema.sql` — with no exception since 2026-08-26, when `ServiceOrder.status`'s
+   enum values were renamed from Portuguese to English (`RECEBIDA` -> `RECEIVED`,
+   `EM_DIAGNOSTICO` -> `IN_DIAGNOSIS`, `AGUARDANDO_APROVACAO` -> `AWAITING_APPROVAL`,
+   `EM_EXECUCAO` -> `IN_PROGRESS`, `FINALIZADA` -> `COMPLETED`, `ENTREGUE` ->
+   `DELIVERED`, `CANCELADA` -> `CANCELED`); until then they were the one deliberate
+   carve-out. Customer Management's own new fields (`documentType`, `status`) and its routes (`/customers`, not
    `/clientes`) deliberately follow this English convention even though the task that
    originated the feature was written in Portuguese — see
    `specs/customer-management/requirements.md` §5.

@@ -9,7 +9,7 @@ import (
 )
 
 // StartExecution registers the start of a service's execution within a
-// service order. The order must already be EM_EXECUCAO (BR2 — see
+// service order. The order must already be IN_PROGRESS (BR2 — see
 // requirements.md §2.1 for why reaching that status is itself an external
 // precondition this feature does not produce) and the service must exist in
 // the catalog.
@@ -18,7 +18,7 @@ func (service *ServiceOrderService) StartExecution(ctx context.Context, serviceO
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusEmExecucao {
+	if order.Status != StatusInProgress {
 		return nil, ErrInvalidStatusTransition
 	}
 
@@ -39,14 +39,14 @@ func (service *ServiceOrderService) StartExecution(ctx context.Context, serviceO
 
 // FinishExecution records the end date/time of a previously started
 // execution (BR3/BR4). endedAt is optional — nil means "now" (design.md
-// §2.2). The order must still be EM_EXECUCAO (BR6: a finalized order accepts
+// §2.2). The order must still be IN_PROGRESS (BR6: a finalized order accepts
 // no more finishes).
 func (service *ServiceOrderService) FinishExecution(ctx context.Context, serviceOrderID, executionID uuid.UUID, endedAt *time.Time) (*ServiceExecution, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusEmExecucao {
+	if order.Status != StatusInProgress {
 		return nil, ErrInvalidStatusTransition
 	}
 
@@ -65,7 +65,7 @@ func (service *ServiceOrderService) FinishExecution(ctx context.Context, service
 	return execution, nil
 }
 
-// FinalizeOrder transitions the order to FINALIZADA once every required
+// FinalizeOrder transitions the order to COMPLETED once every required
 // execution — one per distinct service line item of its approved quote — is
 // complete (BR5, design.md §2.3).
 func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
@@ -73,7 +73,7 @@ func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOr
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusEmExecucao {
+	if order.Status != StatusInProgress {
 		return nil, ErrInvalidStatusTransition
 	}
 
@@ -130,7 +130,7 @@ func (service *ServiceOrderService) ensureRequiredExecutionsComplete(ctx context
 	return nil
 }
 
-// DeliverOrder transitions a FINALIZADA order to ENTREGUE (BR7).
+// DeliverOrder transitions a COMPLETED order to DELIVERED (BR7).
 func (service *ServiceOrderService) DeliverOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {

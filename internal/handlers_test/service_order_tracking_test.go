@@ -159,7 +159,7 @@ func TestTrackingValidAccess(t *testing.T) {
 	decodeJSONString(t, body, &tracked)
 
 	assert.Equal(t, order.Code, tracked.Code)
-	assert.Equal(t, "RECEBIDA", tracked.Status)
+	assert.Equal(t, "RECEIVED", tracked.Status)
 	assert.Equal(t, order.Vehicle.LicensePlate, tracked.Vehicle.LicensePlate)
 	assert.Equal(t, "Fiat", tracked.Vehicle.Brand)
 	require.Len(t, tracked.Milestones, 1)

@@ -227,7 +227,7 @@ func TestServiceOrderCreateSuccess(t *testing.T) {
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 
-	assert.Equal(t, "RECEBIDA", created.Status)
+	assert.Equal(t, "RECEIVED", created.Status)
 	assert.NotZero(t, created.Code)
 	assert.Equal(t, createdCustomer.ID, created.Customer.ID)
 	assert.Equal(t, vehicleID, created.Vehicle.ID)
@@ -242,8 +242,8 @@ func TestServiceOrderCreateSuccess(t *testing.T) {
 	).Scan(&event, &previousStatus, &newStatus)
 	require.NoError(t, err)
 	assert.Equal(t, "creation", event)
-	assert.Equal(t, "RECEBIDA", previousStatus)
-	assert.Equal(t, "RECEBIDA", newStatus)
+	assert.Equal(t, "RECEIVED", previousStatus)
+	assert.Equal(t, "RECEIVED", newStatus)
 }
 
 // TestServiceOrderCreateRequiresAuth guards against VULN-02
@@ -414,7 +414,7 @@ func TestServiceOrderStartDiagnosisSuccess(t *testing.T) {
 	var status string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "EM_DIAGNOSTICO", status)
+	assert.Equal(t, "IN_DIAGNOSIS", status)
 
 	var event, previousStatus, newStatus string
 	err = pool.QueryRow(context.Background(),
@@ -422,11 +422,11 @@ func TestServiceOrderStartDiagnosisSuccess(t *testing.T) {
 		order.ID,
 	).Scan(&event, &previousStatus, &newStatus)
 	require.NoError(t, err)
-	assert.Equal(t, "RECEBIDA", previousStatus)
-	assert.Equal(t, "EM_DIAGNOSTICO", newStatus)
+	assert.Equal(t, "RECEIVED", previousStatus)
+	assert.Equal(t, "IN_DIAGNOSIS", newStatus)
 }
 
-func TestServiceOrderStartDiagnosisRejectsNonRecebida(t *testing.T) {
+func TestServiceOrderStartDiagnosisRejectsNonReceived(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
 
@@ -475,7 +475,7 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 	var status string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "EM_DIAGNOSTICO", status)
+	assert.Equal(t, "IN_DIAGNOSIS", status)
 
 	// Stock must be untouched by composing a quote (requirements.md §3.8).
 	assert.Equal(t, stockBefore, productStock(t, pool, productID))
@@ -633,7 +633,7 @@ func TestServiceOrderListFiltersByStatus(t *testing.T) {
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+diagnosing.ID+"/diagnosis", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=EM_DIAGNOSTICO&pageSize=100", nil, authToken)
+	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=IN_DIAGNOSIS&pageSize=100", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var list serviceorder.ListResponse
 	decodeBody(t, resp, &list)
@@ -754,7 +754,7 @@ func TestServiceOrderDetailByIDFullLifecycle(t *testing.T) {
 	decodeBody(t, resp, &detail)
 
 	assert.Equal(t, order.ID, detail.ID)
-	assert.Equal(t, "EM_DIAGNOSTICO", detail.Status, "composing a quote no longer transitions the order — only sending it does (specs/service-order-quote-decision/)")
+	assert.Equal(t, "IN_DIAGNOSIS", detail.Status, "composing a quote no longer transitions the order — only sending it does (specs/service-order-quote-decision/)")
 	require.NotNil(t, detail.Quote)
 	assert.InDelta(t, 2*35.90, detail.Quote.TotalAmount, 0.0001)
 	require.Len(t, detail.Quote.Items, 1)
@@ -770,7 +770,7 @@ func TestServiceOrderDetailByIDBeforeDiagnosis(t *testing.T) {
 	var detail serviceorder.DetailResponse
 	decodeBody(t, resp, &detail)
 
-	assert.Equal(t, "RECEBIDA", detail.Status)
+	assert.Equal(t, "RECEIVED", detail.Status)
 	assert.Nil(t, detail.Quote)
 	require.Len(t, detail.History, 1)
 	assert.Equal(t, "creation", detail.History[0].Event)
@@ -813,15 +813,15 @@ func TestServiceOrderDetailMalformedIdentifierReturns404(t *testing.T) {
 
 // ---- specs/service-order-execution/ ----
 //
-// No endpoint implements AGUARDANDO_APROVACAO -> EM_EXECUCAO yet
-// (requirements.md §2.1) — moveServiceOrderToEmExecucao and approveQuote
+// No endpoint implements AWAITING_APPROVAL -> IN_PROGRESS yet
+// (requirements.md §2.1) — moveServiceOrderToInProgress and approveQuote
 // below reach that precondition directly via SQL, the same "insert the
 // missing precondition directly" pattern insertVehicle/insertProduct/
 // insertService already use for gaps the public API can't fill.
 
-func moveServiceOrderToEmExecucao(t *testing.T, pool *pgxpool.Pool, orderID string) {
+func moveServiceOrderToInProgress(t *testing.T, pool *pgxpool.Pool, orderID string) {
 	t.Helper()
-	_, err := pool.Exec(context.Background(), `UPDATE service_orders SET status = 'EM_EXECUCAO' WHERE id = $1`, orderID)
+	_, err := pool.Exec(context.Background(), `UPDATE service_orders SET status = 'IN_PROGRESS' WHERE id = $1`, orderID)
 	require.NoError(t, err)
 }
 
@@ -833,7 +833,7 @@ func approveQuote(t *testing.T, pool *pgxpool.Pool, orderID string) {
 
 // createOrderInExecutionWithRequiredService builds a full order through
 // diagnosis + quote composition (one service line item), then jumps it to
-// EM_EXECUCAO with its quote APPROVED, returning the order and the service
+// IN_PROGRESS with its quote APPROVED, returning the order and the service
 // id its quote requires an execution for (BR5).
 func createOrderInExecutionWithRequiredService(t *testing.T, server string, pool *pgxpool.Pool, authToken string) (serviceorder.Response, string) {
 	t.Helper()
@@ -849,7 +849,7 @@ func createOrderInExecutionWithRequiredService(t *testing.T, server string, pool
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	approveQuote(t, pool, order.ID)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	return order, serviceID
 }
@@ -872,10 +872,10 @@ func TestServiceExecutionStartSuccess(t *testing.T) {
 
 // TestServiceExecutionStartRejectsBeforeApproval covers the acceptance
 // checklist's "Execução não pode ser iniciada sem orçamento aprovado" (BR2),
-// via the EM_EXECUCAO precondition (requirements.md §2.1).
+// via the IN_PROGRESS precondition (requirements.md §2.1).
 func TestServiceExecutionStartRejectsBeforeApproval(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
-	order := createServiceOrder(t, server, pool) // still RECEBIDA
+	order := createServiceOrder(t, server, pool) // still RECEIVED
 	serviceID := insertService(t, pool)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
@@ -963,7 +963,7 @@ func TestServiceOrderFinalizeRequiresCompletedExecutions(t *testing.T) {
 
 	var finalized serviceorder.Response
 	decodeBody(t, finalizeResp, &finalized)
-	assert.Equal(t, "FINALIZADA", finalized.Status)
+	assert.Equal(t, "COMPLETED", finalized.Status)
 
 	var event, previousStatus, newStatus string
 	err := pool.QueryRow(context.Background(),
@@ -971,13 +971,13 @@ func TestServiceOrderFinalizeRequiresCompletedExecutions(t *testing.T) {
 		order.ID,
 	).Scan(&event, &previousStatus, &newStatus)
 	require.NoError(t, err, "finalizing must generate a history entry (BR8)")
-	assert.Equal(t, "EM_EXECUCAO", previousStatus)
-	assert.Equal(t, "FINALIZADA", newStatus)
+	assert.Equal(t, "IN_PROGRESS", previousStatus)
+	assert.Equal(t, "COMPLETED", newStatus)
 }
 
-func TestServiceOrderFinalizeRejectsNonEmExecucao(t *testing.T) {
+func TestServiceOrderFinalizeRejectsNonInProgress(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
-	order := createServiceOrder(t, server, pool) // still RECEBIDA
+	order := createServiceOrder(t, server, pool) // still RECEIVED
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -986,7 +986,7 @@ func TestServiceOrderFinalizeRejectsNonEmExecucao(t *testing.T) {
 func TestServiceOrderDeliverSuccess(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	finalizeResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
 	require.Equal(t, http.StatusOK, finalizeResp.StatusCode)
@@ -996,7 +996,7 @@ func TestServiceOrderDeliverSuccess(t *testing.T) {
 
 	var delivered serviceorder.Response
 	decodeBody(t, deliverResp, &delivered)
-	assert.Equal(t, "ENTREGUE", delivered.Status)
+	assert.Equal(t, "DELIVERED", delivered.Status)
 
 	var event, previousStatus, newStatus string
 	err := pool.QueryRow(context.Background(),
@@ -1004,14 +1004,14 @@ func TestServiceOrderDeliverSuccess(t *testing.T) {
 		order.ID,
 	).Scan(&event, &previousStatus, &newStatus)
 	require.NoError(t, err, "delivering must generate a history entry (BR8)")
-	assert.Equal(t, "FINALIZADA", previousStatus)
-	assert.Equal(t, "ENTREGUE", newStatus)
+	assert.Equal(t, "COMPLETED", previousStatus)
+	assert.Equal(t, "DELIVERED", newStatus)
 }
 
-func TestServiceOrderDeliverRejectsNonFinalizada(t *testing.T) {
+func TestServiceOrderDeliverRejectsNonCompleted(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/deliver", nil, authToken)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode)
@@ -1023,7 +1023,7 @@ func TestServiceOrderDeliverRejectsNonFinalizada(t *testing.T) {
 func TestServiceOrderFinalizedRejectsNewExecutions(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	serviceID := insertService(t, pool)
 
 	finalizeResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
@@ -1039,7 +1039,7 @@ func TestServiceOrderFinalizedRejectsNewExecutions(t *testing.T) {
 func TestRegisterStockUsageSuccess(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 35.90, true) // seeded with current_stock = 10
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1058,9 +1058,9 @@ func TestRegisterStockUsageSuccess(t *testing.T) {
 	assert.Equal(t, 7, productStock(t, pool, productID))
 }
 
-func TestRegisterStockUsageRejectsBeforeEmExecucao(t *testing.T) {
+func TestRegisterStockUsageRejectsBeforeInProgress(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
-	order := createServiceOrder(t, server, pool) // still RECEBIDA
+	order := createServiceOrder(t, server, pool) // still RECEIVED
 	productID := insertProduct(t, pool, 10, true)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1075,7 +1075,7 @@ func TestRegisterStockUsageRejectsBeforeEmExecucao(t *testing.T) {
 func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true) // current_stock = 10
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1087,7 +1087,7 @@ func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
 func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, false)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1098,7 +1098,7 @@ func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
 func TestRegisterStockUsageRejectsUnknownProduct(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
 		map[string]any{"items": []map[string]any{{"productId": uuid.NewString(), "quantity": 1}}}, authToken)
@@ -1108,7 +1108,7 @@ func TestRegisterStockUsageRejectsUnknownProduct(t *testing.T) {
 func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1119,7 +1119,7 @@ func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
 func TestRegisterStockUsageRejectsEmptyItems(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
 		map[string]any{"items": []map[string]any{}}, authToken)
@@ -1133,7 +1133,7 @@ func TestRegisterStockUsageRejectsEmptyItems(t *testing.T) {
 func TestRegisterStockUsageRollsBackPartialFailure(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	okProductID := insertProduct(t, pool, 10, true)    // current_stock = 10, would succeed alone
 	shortProductID := insertProduct(t, pool, 10, true) // current_stock = 10, insufficient for the requested quantity
 
@@ -1158,7 +1158,7 @@ func TestRegisterStockUsageRollsBackPartialFailure(t *testing.T) {
 func TestRegisterStockUsageRequiresAuth(t *testing.T) {
 	pool, server, _ := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true)
 
 	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1173,7 +1173,7 @@ func TestRegisterStockUsageRequiresAuth(t *testing.T) {
 func TestRegisterStockUsageConcurrencyNeverOversells(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true) // current_stock = 10
 
 	const attempts = 5
@@ -1207,7 +1207,7 @@ func TestRegisterStockUsageConcurrencyNeverOversells(t *testing.T) {
 func TestListStockMovementsReturnsRegisteredUsage(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true)
 
 	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1228,7 +1228,7 @@ func TestListStockMovementsReturnsRegisteredUsage(t *testing.T) {
 func TestReverseStockMovementSuccess(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true) // current_stock = 10
 
 	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1262,7 +1262,7 @@ func TestReverseStockMovementSuccess(t *testing.T) {
 func TestReverseStockMovementRejectsSecondReversal(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 	productID := insertProduct(t, pool, 10, true)
 
 	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
@@ -1283,7 +1283,7 @@ func TestReverseStockMovementRejectsSecondReversal(t *testing.T) {
 func TestReverseStockMovementRejectsUnknownMovement(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	order := createServiceOrder(t, server, pool)
-	moveServiceOrderToEmExecucao(t, pool, order.ID)
+	moveServiceOrderToInProgress(t, pool, order.ID)
 
 	resp := doAuthJSON(t, http.MethodPost,
 		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+uuid.NewString()+"/reversal", nil, authToken)

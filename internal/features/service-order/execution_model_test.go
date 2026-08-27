@@ -69,14 +69,14 @@ func TestServiceExecutionFinishRejectsAlreadyFinished(t *testing.T) {
 	assert.ErrorIs(t, err, ErrServiceExecutionAlreadyFinished)
 }
 
-func TestFinalizeFromEmExecucao(t *testing.T) {
-	order := newTestOrder(t, StatusEmExecucao)
+func TestFinalizeFromInProgress(t *testing.T) {
+	order := newTestOrder(t, StatusInProgress)
 	require.NoError(t, order.finalize())
-	assert.Equal(t, StatusFinalizada, order.Status)
+	assert.Equal(t, StatusCompleted, order.Status)
 }
 
-func TestFinalizeRejectsNonEmExecucao(t *testing.T) {
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusAguardandoAprovacao, StatusFinalizada, StatusEntregue} {
+func TestFinalizeRejectsNonInProgress(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusCompleted, StatusDelivered} {
 		order := newTestOrder(t, status)
 		err := order.finalize()
 		require.Error(t, err)
@@ -85,14 +85,14 @@ func TestFinalizeRejectsNonEmExecucao(t *testing.T) {
 	}
 }
 
-func TestDeliverFromFinalizada(t *testing.T) {
-	order := newTestOrder(t, StatusFinalizada)
+func TestDeliverFromCompleted(t *testing.T) {
+	order := newTestOrder(t, StatusCompleted)
 	require.NoError(t, order.deliver())
-	assert.Equal(t, StatusEntregue, order.Status)
+	assert.Equal(t, StatusDelivered, order.Status)
 }
 
-func TestDeliverRejectsNonFinalizada(t *testing.T) {
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusAguardandoAprovacao, StatusEmExecucao, StatusEntregue} {
+func TestDeliverRejectsNonCompleted(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusInProgress, StatusDelivered} {
 		order := newTestOrder(t, status)
 		err := order.deliver()
 		require.Error(t, err)

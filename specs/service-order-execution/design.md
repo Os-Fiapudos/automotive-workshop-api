@@ -16,7 +16,7 @@ files, mirroring the existing `quote_*.go`/`query_*.go` split:
 
 ```
 internal/features/service-order/
-├── model.go                → + Status consts (EM_EXECUCAO/FINALIZADA/ENTREGUE), finalize()/
+├── model.go                → + Status consts (IN_PROGRESS/COMPLETED/DELIVERED), finalize()/
 │                                deliver() transition methods
 ├── execution_model.go       → ServiceExecution type + constructor + finish()
 ├── execution_dto.go         → start/finish execution request+response DTOs
@@ -78,9 +78,9 @@ type is named `ServiceExecution` (English; the ticket's `ExecucaoServico`), per
 
 ### 1.4 `service_order_history` — one new event value
 
-`FINALIZADA` reuses the existing `completion` event value (already documented as "OS
+`COMPLETED` reuses the existing `completion` event value (already documented as "OS
 completion" in `docs/schema.sql`'s `history_event` comment, unused by any feature so far).
-`ENTREGUE` has no existing value, so `history_event` gains one more: `'delivery'`.
+`DELIVERED` has no existing value, so `history_event` gains one more: `'delivery'`.
 Starting/finishing an execution does **not** write a `service_order_history` row —
 `requirements.md` BR8 explains why (the order's status does not change).
 
@@ -90,9 +90,9 @@ Starting/finishing an execution does **not** write a `service_order_history` row
 
 ```go
 const (
-    StatusEmExecucao Status = "EM_EXECUCAO"
-    StatusFinalizada Status = "FINALIZADA"
-    StatusEntregue   Status = "ENTREGUE"
+    StatusInProgress Status = "IN_PROGRESS"
+    StatusCompleted Status = "COMPLETED"
+    StatusDelivered   Status = "DELIVERED"
 )
 ```
 
@@ -100,23 +100,23 @@ Two new transition methods, same shape as `startDiagnosis`/`markAwaitingApproval
 
 ```go
 func (order *ServiceOrder) finalize() error {
-    if order.Status != StatusEmExecucao {
+    if order.Status != StatusInProgress {
         return ErrInvalidStatusTransition
     }
-    order.Status = StatusFinalizada
+    order.Status = StatusCompleted
     return nil
 }
 
 func (order *ServiceOrder) deliver() error {
-    if order.Status != StatusFinalizada {
+    if order.Status != StatusCompleted {
         return ErrInvalidStatusTransition
     }
-    order.Status = StatusEntregue
+    order.Status = StatusDelivered
     return nil
 }
 ```
 
-Starting/finishing an execution requires `order.Status == StatusEmExecucao` too (BR2, BR6)
+Starting/finishing an execution requires `order.Status == StatusInProgress` too (BR2, BR6)
 but does not itself change `Status` — that guard lives in the service layer
 (`execution_service.go`), checked with a plain equality, not a new aggregate method, since
 there is no state to transition.
@@ -183,7 +183,7 @@ when the server is the one choosing the end time.
 quote, collects that set, loads every `ServiceExecution` for the order, and requires each
 required service id to have at least one execution with `EndedAt != nil`. An order with no
 service line items in its quote (products only) has no required executions and can be
-finalized as soon as it is `EM_EXECUCAO`.
+finalized as soon as it is `IN_PROGRESS`.
 
 ### 2.4 Service-layer flow
 
@@ -195,7 +195,7 @@ func (service *ServiceOrderService) DeliverOrder(ctx, serviceOrderID uuid.UUID) 
 ```
 
 `StartExecution`/`FinishExecution` both re-load the order and check
-`order.Status == StatusEmExecucao` before touching the execution (BR2/BR6).
+`order.Status == StatusInProgress` before touching the execution (BR2/BR6).
 `StartExecution` also validates the given service id exists in the catalog, reusing
 `findServiceByID` (no new lookup) — same existence-only check
 `service-order-diagnosis-quote` already applies to quote service items; this feature does
@@ -216,10 +216,10 @@ any acceptance criterion — see `requirements.md` §2.1's "don't invent" note).
 { "id": "...", "serviceOrderId": "...", "serviceId": "...", "startedAt": "...", "endedAt": "..." }
 
 // POST /api/v1/service-orders/{id}/finalize
-// (no body) → 200 { "id": "...", "status": "FINALIZADA" }
+// (no body) → 200 { "id": "...", "status": "COMPLETED" }
 
 // POST /api/v1/service-orders/{id}/deliver
-// (no body) → 200 { "id": "...", "status": "ENTREGUE" }
+// (no body) → 200 { "id": "...", "status": "DELIVERED" }
 ```
 
 `finalize`/`deliver` reuse the existing `serviceOrderStatusResponse` shape
@@ -274,10 +274,10 @@ finishing the same execution twice concurrently, mapped to
 - Unit: `execution_model_test.go` — `finish()`'s already-finished/end-before-start guards;
   `model_test.go` additions — `finalize()`/`deliver()`'s status guards.
 - Unit (service layer, fake repository): `execution_service_test.go` — BR2 (must be
-  `EM_EXECUCAO`), BR5 (required executions), BR6 (finalized order rejects new/finishing
-  executions), BR7 (must be `FINALIZADA` to deliver).
+  `IN_PROGRESS`), BR5 (required executions), BR6 (finalized order rejects new/finishing
+  executions), BR7 (must be `COMPLETED` to deliver).
 - Integration (`internal/handlers_test/service_order_test.go`): full HTTP round trip
-  against a real Postgres, using a new `moveServiceOrderToEmExecucao` SQL test helper (same
+  against a real Postgres, using a new `moveServiceOrderToInProgress` SQL test helper (same
   "insert the missing precondition directly via SQL" pattern `insertVehicle`/`insertProduct`
-  already use for gaps the API can't fill) to reach `EM_EXECUCAO`, since — per
+  already use for gaps the API can't fill) to reach `IN_PROGRESS`, since — per
   `requirements.md` §2.1 — no endpoint can produce that state yet.

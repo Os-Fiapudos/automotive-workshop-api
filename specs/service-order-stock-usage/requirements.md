@@ -14,7 +14,7 @@ stays up to date and each visit's consumption is traceable.
 ## 2. Scope of this feature
 
 1. Registering one or more parts/supplies deducted from stock against a service order that
-   is currently `EM_EXECUCAO`, all-or-nothing per request.
+   is currently `IN_PROGRESS`, all-or-nothing per request.
 2. Listing the stock movements recorded against a service order.
 3. Reversing (estorno) a previously registered usage movement, restoring the deducted
    quantity and leaving a traceable link back to the original movement.
@@ -33,7 +33,7 @@ stays up to date and each visit's consumption is traceable.
 
 ## 3. Business rules
 
-- BR1 — A usage deduction can only be registered while the service order is `EM_EXECUCAO`.
+- BR1 — A usage deduction can only be registered while the service order is `IN_PROGRESS`.
 - BR2 — The referenced product must exist and be `ACTIVE`.
 - BR3 — Quantity must be greater than zero.
 - BR4 — A deduction can never take a product's balance negative.
@@ -75,7 +75,7 @@ movement), reversed-movement id (reversals only), occurred-at.
 
 ## 6. Acceptance criteria (from the ticket's checklist)
 
-- [ ] A product used on an `EM_EXECUCAO` order can be registered.
+- [ ] A product used on an `IN_PROGRESS` order can be registered.
 - [ ] An invalid quantity (≤ 0) is rejected.
 - [ ] A nonexistent or inactive product is rejected.
 - [ ] Insufficient balance prevents the operation.

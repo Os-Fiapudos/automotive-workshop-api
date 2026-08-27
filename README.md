@@ -4,9 +4,9 @@ REST API for managing an automotive workshop's full service flow: registering cu
 their vehicles, maintaining a catalog of products (parts/supplies) and services, opening
 service orders, running diagnosis and quote approval, tracking execution, and delivering the
 vehicle. A service order moves through
-`RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE`
-(status values are kept in Portuguese by product decision), with a full audit trail of status
-changes and per-service execution timestamps kept alongside it.
+`RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED`,
+with a full audit trail of status changes and per-service execution timestamps kept
+alongside it.
 
 ```bash
 export DATABASE_URL=postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable

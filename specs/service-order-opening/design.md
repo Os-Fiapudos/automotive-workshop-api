@@ -31,12 +31,13 @@ internal/features/service-order/
 - `ServiceOrder` (`model.go`) is the aggregate: `ID`, `Code`, `CustomerID`, `VehicleID`,
   `OpenedAt`, `Status`, `Notes`, `RequestedServiceIDs []uuid.UUID`, `CreatedAt`,
   `UpdatedAt`.
-- `Status` is a string type holding the Portuguese enum values already fixed by
-  `docs/entities.md`/`docs/schema.sql` (`RECEBIDA`, `EM_DIAGNOSTICO`, ...) — this feature
-  only ever produces `RECEBIDA`; it does not implement any transition.
+- `Status` is a string type holding the enum values already fixed by
+  `docs/entities.md`/`docs/schema.sql` (`RECEIVED`, `IN_DIAGNOSIS`, ...; Portuguese
+  when this spec was written, renamed to English on 2026-08-26) — this feature
+  only ever produces `RECEIVED`; it does not implement any transition.
 - `NewServiceOrder(customerID, vehicleID uuid.UUID, notes string, requestedServiceIDs
   []uuid.UUID) (*ServiceOrder, error)` is the only constructor; it always sets
-  `Status = RECEBIDA`. There is no setter for `Status` and no other constructor — mirrors
+  `Status = RECEIVED`. There is no setter for `Status` and no other constructor — mirrors
   `customer.NewCustomer` always producing `StatusActive` with no way to construct
   otherwise.
 - Validation this constructor performs: `requestedServiceIDs` must be non-empty is **not**
@@ -146,7 +147,7 @@ requested. Add:
 
 ### 2.3 Invariants
 
-- A `ServiceOrder` cannot be constructed with any status other than `RECEBIDA`.
+- A `ServiceOrder` cannot be constructed with any status other than `RECEIVED`.
 - A `ServiceOrder` cannot be constructed without a valid customer and vehicle id (existence
   and business-rule checks happen in the service layer, not the constructor — see §1.2).
 
@@ -251,7 +252,7 @@ func (r *PostgresServiceOrderRepository) Create(ctx context.Context, order *Serv
 
     if _, err := tx.Exec(ctx,
         `INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-         VALUES ($1, 'creation', $2, 'RECEBIDA', 'RECEBIDA')`,
+         VALUES ($1, 'creation', $2, 'RECEIVED', 'RECEIVED')`,
         order.ID, "Service order opened.",
     ); err != nil {
         return err
@@ -262,7 +263,7 @@ func (r *PostgresServiceOrderRepository) Create(ctx context.Context, order *Serv
 ```
 
 Any error at any step rolls back all three writes together (RNF07). `status` itself is
-never passed in on insert — the column's `DEFAULT 'RECEBIDA'` (already in `docs/schema.sql`)
+never passed in on insert — the column's `DEFAULT 'RECEIVED'` (already in `docs/schema.sql`)
 is the single source of truth for the initial value, which is also why a `status` field in
 the request body has nothing to bind to even if present (§8 of `requirements.md`).
 
@@ -313,7 +314,7 @@ or, identifying customer/vehicle by document/plate instead of id:
   optional (default: empty list / empty string).
 - Any `status` field present in the body is ignored.
 - `201 Created`, `Location: /api/v1/service-orders/{id}`, body = full order
-  (status `RECEBIDA`).
+  (status `RECEIVED`).
 - Error mapping per the table in §1.5.
 
 ### 4.2 `ServiceOrder` response shape
@@ -325,7 +326,7 @@ or, identifying customer/vehicle by document/plate instead of id:
   "customer": { "id": "a0000000-...-0001", "code": 1, "name": "João Pedro Silva" },
   "vehicle": { "id": "b0000000-...-0001", "code": 1, "licensePlate": "ABC1D23" },
   "openedAt": "2026-08-17T12:00:00Z",
-  "status": "RECEBIDA",
+  "status": "RECEIVED",
   "notes": "Customer reported a light engine noise.",
   "requestedServices": [
     { "id": "d0000000-...-0001", "code": 1, "name": "Oil Change" }
@@ -357,7 +358,7 @@ write, so it does not need to be inside the transaction).
 ## 5. Testing strategy
 
 - **Unit tests** (stdlib `testing` + `testify`, same as `customer`):
-  - `model_test.go`: `NewServiceOrder` always produces `RECEBIDA`; there is no way to
+  - `model_test.go`: `NewServiceOrder` always produces `RECEIVED`; there is no way to
     construct any other status.
   - `service_test.go`: an in-memory fake implementing `ServiceOrderRepository` +
     `serviceOrderLookups` (plain struct backed by maps, no mocking framework) drives

@@ -18,7 +18,7 @@ already used to justify not creating `internal/features/quote/`. New logic goes 
 
 ```
 internal/features/service-order/
-├── model.go              → + StatusCancelada; sendQuote/approveQuote/rejectQuote;
+├── model.go              → + StatusCanceled; sendQuote/approveQuote/rejectQuote;
 │                            Quote.Version/SentAt/SentVersion
 ├── quote_notifier.go      → + QuoteNotifier port, NoOpQuoteNotifier (new file)
 ├── quote_dto.go           → + QuoteResponse.Version/SentAt/SentVersion;
@@ -50,11 +50,11 @@ feature that would need to import it.
 ### 1.2 Erratum: `ComposeQuote` no longer transitions the order
 
 `specs/service-order-diagnosis-quote/design.md` §1.6 made `SaveQuote`'s `UPDATE
-service_orders SET status = 'AGUARDANDO_APROVACAO'` part of every successful compose. Per
+service_orders SET status = 'AWAITING_APPROVAL'` part of every successful compose. Per
 `requirements.md` §3 item 2, that transition now belongs exclusively to `SendQuote`. Concretely:
 
 - `ComposeQuote` (quote_service.go) replaces its call to the old `order.markAwaitingApproval()`
-  with a direct, side-effect-free check: `if order.Status == StatusRecebida { return nil,
+  with a direct, side-effect-free check: `if order.Status == StatusReceived { return nil,
   ErrDiagnosisNotStarted }`. Diagnosis must still have started; composing/recomposing itself
   no longer changes `order.Status`.
 - `SaveQuote` (quote_repository.go) drops the `UPDATE service_orders` statement entirely. Its
@@ -64,9 +64,9 @@ service_orders SET status = 'AGUARDANDO_APROVACAO'` part of every successful com
   legitimate history record of "this event happened while the order was in this status", the
   same pattern `Create`'s own `creation` event already uses).
 - This is a behavioral change to already-merged code, not a reinterpretation: existing tests
-  in `internal/handlers_test/service_order_test.go` that asserted `AGUARDANDO_APROVACAO`
+  in `internal/handlers_test/service_order_test.go` that asserted `AWAITING_APPROVAL`
   immediately after a `PUT .../quote` (`TestServiceOrderComposeQuoteFullFlow`,
-  `TestServiceOrderDetailByIDFullLifecycle`) were updated to assert `EM_DIAGNOSTICO` instead,
+  `TestServiceOrderDetailByIDFullLifecycle`) were updated to assert `IN_DIAGNOSIS` instead,
   with a comment pointing at this design section.
 - `specs/service-order-diagnosis-quote/design.md` §1.6 itself is annotated with a forward
   reference to this section rather than rewritten, per `specs/README.md`'s "a specification
@@ -77,20 +77,20 @@ service_orders SET status = 'AGUARDANDO_APROVACAO'` part of every successful com
 
 `model.go` gains:
 
-- `StatusCancelada Status = "CANCELADA"`, added to `knownStatusValues` (used by
+- `StatusCanceled Status = "CANCELED"`, added to `knownStatusValues` (used by
   `specs/service-order-query/`'s status filter).
 - Three new `ServiceOrder` methods, replacing `markAwaitingApproval` (deleted):
-  - `sendQuote() error` — requires `Status == StatusEmDiagnostico`
-    (`ErrInvalidStatusTransition` otherwise); sets `Status = StatusAguardandoAprovacao`.
+  - `sendQuote() error` — requires `Status == StatusInDiagnosis`
+    (`ErrInvalidStatusTransition` otherwise); sets `Status = StatusAwaitingApproval`.
     Unlike the old `markAwaitingApproval`, this is a **strict** precondition — it does not
-    accept `AGUARDANDO_APROVACAO` as a no-op source, since sending a second time is not a
+    accept `AWAITING_APPROVAL` as a no-op source, since sending a second time is not a
     requirement this card describes (`requirements.md` AC3).
-  - `approveQuote() error` — requires `Status == StatusAguardandoAprovacao`; sets `Status =
-    StatusEmExecucao`. This is the transition
+  - `approveQuote() error` — requires `Status == StatusAwaitingApproval`; sets `Status =
+    StatusInProgress`. This is the transition
     `specs/service-order-execution/requirements.md` §2.1 flagged as an unimplemented,
     external precondition.
-  - `rejectQuote() error` — requires `Status == StatusAguardandoAprovacao`; sets `Status =
-    StatusCancelada`.
+  - `rejectQuote() error` — requires `Status == StatusAwaitingApproval`; sets `Status =
+    StatusCanceled`.
 - `Quote` gains `Version int`, `SentAt *time.Time`, `SentVersion *int` (requirements.md §3
   item 3).
 
@@ -126,7 +126,7 @@ CHECK (sent_at IS NULL OR sent_at >= generated_at),
 CHECK (responded_at IS NULL OR sent_at IS NULL OR responded_at >= sent_at),
 ```
 
-`service_order_status` gains `'CANCELADA'`. `history_event` gains `'quote_sent'`;
+`service_order_status` gains `'CANCELED'`. `history_event` gains `'quote_sent'`;
 `'approval'`/`'cancellation'` already existed in the enum (added ahead of time when
 `specs/service-order-execution/` was designed) but had no producer until this feature.
 
@@ -139,7 +139,7 @@ tx.Rollback` / `tx.Commit`-at-the-end shape every other multi-statement write in
 already uses (RNF07):
 
 - **`SendQuote(ctx, order, quote) (*Quote, error)`**: `UPDATE service_orders SET status = $2
-  WHERE id = $1 AND status = 'EM_DIAGNOSTICO'` (same race-closing guard `StartDiagnosis`
+  WHERE id = $1 AND status = 'IN_DIAGNOSIS'` (same race-closing guard `StartDiagnosis`
   already uses — zero rows affected maps to `ErrInvalidStatusTransition`), then `UPDATE
   quotes SET sent_at = now(), sent_version = version WHERE id = $1 RETURNING sent_at,
   sent_version, version`, then insert a `quote_sent` history row. Commit only at the end.
@@ -147,7 +147,7 @@ already uses (RNF07):
   $2, responded_at = now() WHERE id = $1 AND status = 'PENDING'` — zero rows affected (a
   concurrent or repeated decision) maps to `ErrQuoteAlreadyDecided` via a `pgx.ErrNoRows`
   check on the `RETURNING` scan; then `UPDATE service_orders SET status = $2 WHERE id = $1
-  AND status = 'AGUARDANDO_APROVACAO'` (same guard pattern, `ErrInvalidStatusTransition` on
+  AND status = 'AWAITING_APPROVAL'` (same guard pattern, `ErrInvalidStatusTransition` on
   zero rows); then an `approval`/`cancellation` history row. Commit only at the end, so a
   failure at the history insert — or at either guarded `UPDATE` — rolls back every write
   already issued in this same transaction (requirements.md AC13). This was verified with an
@@ -232,12 +232,12 @@ be the exact cross-feature coupling `CLAUDE.md` §9.2 forbids for a single strin
 ## 2. Documentation updates
 
 - `docs/entities.md`: `ServiceOrder.status`'s note and the `ServiceOrderStatus` enum gain
-  `CANCELADA`; `Quote` gains `version`/`sentAt`/`sentVersion`; `ServiceOrderHistory.event`'s
+  `CANCELED`; `Quote` gains `version`/`sentAt`/`sentVersion`; `ServiceOrderHistory.event`'s
   enum description gains `quote_sent` and attributes `approval`/`cancellation` to this
   feature.
-- `docs/seed.sql`: every quote whose order already reached `AGUARDANDO_APROVACAO` or beyond
+- `docs/seed.sql`: every quote whose order already reached `AWAITING_APPROVAL` or beyond
   gets a `sent_at`/`sent_version` consistent with that (it could only have gotten there by
-  being sent); the one quote seeded against a still-`RECEBIDA` order is left unsent.
+  being sent); the one quote seeded against a still-`RECEIVED` order is left unsent.
 
 ## 3. Testing strategy
 
@@ -245,7 +245,7 @@ be the exact cross-feature coupling `CLAUDE.md` §9.2 forbids for a single strin
   rules, replacing the deleted `markAwaitingApproval` tests.
 - **Unit tests** (`quote_service_test.go`, extending `fake_repository_test.go`):
   `ComposeQuote`'s own success assertion updated to expect no order transition; `SendQuote`
-  success (records `sentAt`/`sentVersion`, transitions to `AGUARDANDO_APROVACAO`), rejects an
+  success (records `sentAt`/`sentVersion`, transitions to `AWAITING_APPROVAL`), rejects an
   incomplete quote, rejects sending twice, rejects an unknown order; `ApproveQuote`/
   `RejectQuote` success, missing/wrong/cross-order token, unknown code, approve-then-reject
   conflict, repeated-approve conflict.

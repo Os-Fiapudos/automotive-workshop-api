@@ -11,7 +11,7 @@ This is the direct follow-up explicitly deferred by
 
 > A future card (diagnosis + quote composition) will introduce `Orcamento`/`ItemOrcamento`
 > on top of the `ServiceOrder` created here, with automatic price calculation and status
-> transitions (`RECEBIDA` → `EM_DIAGNOSTICO` → ...).
+> transitions (`RECEIVED` → `IN_DIAGNOSIS` → ...).
 
 `docs/schema.sql` already models Orçamento/ItemOrçamento as `quotes`/`quote_products`/
 `quote_services` (English translation, per `CLAUDE.md` §8), created together with
@@ -28,12 +28,12 @@ Source: `card.txt` (RF05, RF06, RF08, RNF07).
 
 ## 3. Business rules
 
-1. Starting the diagnosis is only allowed for a service order currently `RECEBIDA`. It
-   transitions the order to `EM_DIAGNOSTICO`. Starting diagnosis on an order in any other
+1. Starting the diagnosis is only allowed for a service order currently `RECEIVED`. It
+   transitions the order to `IN_DIAGNOSIS`. Starting diagnosis on an order in any other
    status is rejected (RF08).
 2. Composing (or recomposing) the quote is only allowed once diagnosis has started, i.e.
-   the order is `EM_DIAGNOSTICO` or `AGUARDANDO_APROVACAO` — not `RECEBIDA`. It is rejected
-   for `RECEBIDA` (diagnosis not started yet).
+   the order is `IN_DIAGNOSIS` or `AWAITING_APPROVAL` — not `RECEIVED`. It is rejected
+   for `RECEIVED` (diagnosis not started yet).
 3. A composed quote must have at least one item (product or service combined).
 4. Each item (product or service) records: a description snapshot, a quantity (> 0), a
    unit price snapshot, and a total (`quantity * unit price`).
@@ -48,7 +48,7 @@ Source: `card.txt` (RF05, RF06, RF08, RNF07).
 9. A quote that has already been decided (`APPROVED` or `REJECTED`) cannot be altered — a
    later composition request for it is rejected. Composing (`PUT`) is otherwise idempotent
    while the quote is `PENDING`: it fully replaces the item list and recalculates the total
-   every time it's called, and (re-)sets the order status to `AGUARDANDO_APROVACAO` (this
+   every time it's called, and (re-)sets the order status to `AWAITING_APPROVAL` (this
    also covers the very first composition, which additionally performs that transition).
 10. Every relevant change (diagnosis start, quote composition) must generate a
     `service_order_history` entry, transactionally with the change itself (RNF07).
@@ -68,7 +68,7 @@ In scope for this feature:
   `StartDiagnosis` and `ComposeQuote`.
 - `Quote`/quote-item domain types and their persistence (`quotes`, `quote_products`,
   `quote_services`).
-- Status transitions `RECEBIDA → EM_DIAGNOSTICO` and `→ AGUARDANDO_APROVACAO`, each
+- Status transitions `RECEIVED → IN_DIAGNOSIS` and `→ AWAITING_APPROVAL`, each
   recorded in `service_order_history`.
 - Schema additions: description snapshot columns on `quote_products`/`quote_services`,
   `quantity` on `quote_services`, and two new `history_event` values.
@@ -79,9 +79,9 @@ In scope for this feature:
 
 Out of scope (see §7):
 
-- Quote approval/rejection by the customer (`AGUARDANDO_APROVACAO → EM_EXECUCAO`, or
+- Quote approval/rejection by the customer (`AWAITING_APPROVAL → IN_PROGRESS`, or
   `Quote.status` moving away from `PENDING`) — a future card.
-- Any status transition beyond `EM_DIAGNOSTICO`/`AGUARDANDO_APROVACAO`.
+- Any status transition beyond `IN_DIAGNOSIS`/`AWAITING_APPROVAL`.
 - Stock movements (`AuditServices`, decrementing `current_stock` on execution) — a future
   card; explicitly rule §3.8 forbids it happening here.
 - Service catalog management (CRUD, `status` field) — not owned by this feature (§3.12).
@@ -105,9 +105,9 @@ GET  /api/v1/service-orders/{id}/quote
 ## 6. Acceptance criteria
 
 ```
-[ ] Diagnosis can be registered for an order that is RECEBIDA
-[ ] The order automatically moves to EM_DIAGNOSTICO
-[ ] Starting diagnosis on a non-RECEBIDA order is rejected
+[ ] Diagnosis can be registered for an order that is RECEIVED
+[ ] The order automatically moves to IN_DIAGNOSIS
+[ ] Starting diagnosis on a non-RECEIVED order is rejected
 [ ] Services, parts, and supplies can be added to a quote
 [ ] Invalid quantities (<= 0) are rejected
 [ ] A non-existent or inactive product is rejected
@@ -117,7 +117,7 @@ GET  /api/v1/service-orders/{id}/quote
 [ ] Values sent by the API client do not override the official calculation
 [ ] Composing the quote does not reduce stock
 [ ] A decided quote (APPROVED/REJECTED) cannot be altered
-[ ] Composing the quote (first time or recompose) sets the order to AGUARDANDO_APROVACAO
+[ ] Composing the quote (first time or recompose) sets the order to AWAITING_APPROVAL
 [ ] Changes generate service order history entries
 [ ] GET returns the current quote with its items
 [ ] There are calculation tests, price/description snapshot tests, and transition tests
@@ -128,7 +128,7 @@ GET  /api/v1/service-orders/{id}/quote
 ### 7.1 Quote approval/rejection
 
 Moving `Quote.status` away from `PENDING` (and the corresponding
-`AGUARDANDO_APROVACAO → EM_EXECUCAO` order transition) is a separate, not-yet-specified
+`AWAITING_APPROVAL → IN_PROGRESS` order transition) is a separate, not-yet-specified
 future card. This feature only ever produces/keeps `Quote.status = PENDING`.
 
 ### 7.2 Stock movement
@@ -155,7 +155,7 @@ decision.
 
 ## 8. Open questions resolved before implementation
 
-- **Does composing the quote transition the order to `AGUARDANDO_APROVACAO`?** Yes, every
+- **Does composing the quote transition the order to `AWAITING_APPROVAL`?** Yes, every
   successful `PUT`, including recomposition while still `PENDING`. Resolved with the
   project owner — see §3.9.
 - **Snapshot of item description**: the existing schema only snapshot price/quantity.

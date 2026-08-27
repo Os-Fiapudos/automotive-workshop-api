@@ -890,7 +890,7 @@
       "_type": "request",
       "parentId": "fld_service_orders",
       "name": "Start diagnosis",
-      "description": "RECEBIDA -> EM_DIAGNOSTICO. No request body.",
+      "description": "RECEIVED -> IN_DIAGNOSIS. No request body.",
       "method": "POST",
       "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/diagnosis",
       "parameters": [],
@@ -961,7 +961,7 @@
       "_type": "request",
       "parentId": "fld_service_orders",
       "name": "Send quote to customer",
-      "description": "Mechanic action. Moves the order to AGUARDANDO_APROVACAO. No request body.",
+      "description": "Mechanic action. Moves the order to AWAITING_APPROVAL. No request body.",
       "method": "POST",
       "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote/send",
       "parameters": [],
@@ -982,7 +982,7 @@
       "_type": "request",
       "parentId": "fld_service_orders",
       "name": "List service orders",
-      "description": "status is one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE. createdFrom/createdTo are RFC3339.",
+      "description": "status is one of RECEIVED, IN_DIAGNOSIS, AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED. createdFrom/createdTo are RFC3339.",
       "method": "GET",
       "url": "{{ _.baseUrl }}/api/v1/service-orders",
       "parameters": [
@@ -1003,7 +1003,7 @@
         },
         {
           "name": "status",
-          "value": "EM_EXECUCAO",
+          "value": "IN_PROGRESS",
           "disabled": true
         },
         {
@@ -1123,7 +1123,7 @@
       "_type": "request",
       "parentId": "fld_service_orders",
       "name": "Finalize service order",
-      "description": "EM_EXECUCAO -> FINALIZADA. No request body.",
+      "description": "IN_PROGRESS -> COMPLETED. No request body.",
       "method": "POST",
       "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/finalize",
       "parameters": [],
@@ -1144,7 +1144,7 @@
       "_type": "request",
       "parentId": "fld_service_orders",
       "name": "Deliver service order",
-      "description": "FINALIZADA -> ENTREGUE. No request body.",
+      "description": "COMPLETED -> DELIVERED. No request body.",
       "method": "POST",
       "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/deliver",
       "parameters": [],

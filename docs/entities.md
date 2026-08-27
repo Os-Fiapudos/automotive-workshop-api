@@ -79,18 +79,22 @@
 | customerId  | uuid      | Reference to the requesting `Customer`.                                                                     |
 | vehicleId   | uuid      | Reference to the `Vehicle` being serviced.                                                                  |
 | openedAt    | string    | Date/time the service order was opened.                                                                     |
-| status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). `AGUARDANDO_APROVACAO` branches to `CANCELADA` instead of `EM_EXECUCAO` if the customer rejects the quote (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). |
+| status      | string    | Current status of the service order: `RECEIVED` (vehicle received) → `IN_DIAGNOSIS` (under diagnosis) → `AWAITING_APPROVAL` (quote sent to customer) → `IN_PROGRESS` (work in progress) → `COMPLETED` (work completed) → `DELIVERED` (vehicle returned to customer). `AWAITING_APPROVAL` branches to `CANCELED` instead of `IN_PROGRESS` if the customer rejects the quote (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
 | requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
 | createdAt   | string    | Record creation date/time, generated automatically.                                                         |
 | updatedAt   | string    | Record last update date/time, generated automatically.                                                      |
 
-> **Note on `status` values**: every other Portuguese identifier in this project was
-> translated to English. The `ServiceOrder.status` values are the single deliberate
-> exception — kept in Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`,
-> `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`, `CANCELADA`) by explicit product decision. Do not
-> translate these values without an explicit new decision.
+> **Note on `status` values — changed on 2026-08-26**: these values used to be kept in
+> Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`,
+> `FINALIZADA`, `ENTREGUE`, `CANCELADA`) as the single deliberate exception to this
+> project's "every domain identifier in English" convention. That exception was dropped:
+> the enum now uses the English values above, so no part of the domain language is split
+> between two languages. Existing databases are migrated with `ALTER TYPE ... RENAME
+> VALUE` — see the note in [schema.sql](schema.sql). Older `specs/` documents still
+> quoting the Portuguese values are records of the decision as it stood when they were
+> written.
 
 ## Quote
 
@@ -143,7 +147,7 @@ traceability purposes.
 | id             | uuid   | Technical identifier of the history record.                                        |
 | serviceOrderId | uuid   | Reference to the `ServiceOrder` this event belongs to.                             |
 | occurredAt     | string | Date/time the event occurred.                                                      |
-| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `quote_sent`, `approval`, `completion`, `cancellation` or `delivery`. `quote_sent`, `approval` (for `AGUARDANDO_APROVACAO` → `EM_EXECUCAO`) and `cancellation` (for `AGUARDANDO_APROVACAO` → `CANCELADA`) are produced by [specs/service-order-quote-decision/](../specs/service-order-quote-decision/); `delivery` and `completion` (`EM_EXECUCAO` → `FINALIZADA`) by [specs/service-order-execution/](../specs/service-order-execution/). |
+| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `quote_sent`, `approval`, `completion`, `cancellation` or `delivery`. `quote_sent`, `approval` (for `AWAITING_APPROVAL` → `IN_PROGRESS`) and `cancellation` (for `AWAITING_APPROVAL` → `CANCELED`) are produced by [specs/service-order-quote-decision/](../specs/service-order-quote-decision/); `delivery` and `completion` (`IN_PROGRESS` → `COMPLETED`) by [specs/service-order-execution/](../specs/service-order-execution/). |
 | description    | string | Details of what happened in the event.                                             |
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |
@@ -205,7 +209,7 @@ parts/supplies usage deduction and its reversal (`serviceOrderId` present —
 | reversedMovementId | uuid?   | For a reversal `ENTRY`, the original `EXIT` movement it undoes. Absent for every other movement. A movement is reversed at most once. |
 | occurredAt         | string  | Date/time the movement occurred.                                                   |
 
-> **Note**: a service-order usage deduction requires the order to be `EM_EXECUCAO`, the
+> **Note**: a service-order usage deduction requires the order to be `IN_PROGRESS`, the
 > product to be `ACTIVE`, and the resulting balance to never go negative — see
 > `specs/service-order-stock-usage/requirements.md`. The deducted quantity is independent
 > from any quantity budgeted in the order's `Quote` — it is tracked here, not reconciled
@@ -229,12 +233,12 @@ Administrative user of the API (authentication only in the MVP — no user CRUD)
 
 ### ServiceOrderStatus
 
-Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit product decision
-(see note in the `ServiceOrder` section above).
+Possible values for `ServiceOrder.status`. Renamed from Portuguese to English on
+2026-08-26 (see note in the `ServiceOrder` section above).
 
 | Field              | Type   | Description                                                        |
 | ------------------ | ------ | ---------------------------------------------------------------------- |
-| serviceOrderStatus | string | `RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`, `CANCELADA`. |
+| serviceOrderStatus | string | `RECEIVED`, `IN_DIAGNOSIS`, `AWAITING_APPROVAL`, `IN_PROGRESS`, `COMPLETED`, `DELIVERED`, `CANCELED`. |
 
 ### QuoteStatus
 

@@ -21,17 +21,17 @@ func seedOrder(repo *fakeRepository, status Status) *ServiceOrder {
 func TestStartDiagnosisSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusRecebida)
+	order := seedOrder(repo, StatusReceived)
 
 	updated, err := service.StartDiagnosis(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusEmDiagnostico, updated.Status)
+	assert.Equal(t, StatusInDiagnosis, updated.Status)
 }
 
-func TestServiceStartDiagnosisRejectsNonRecebida(t *testing.T) {
+func TestServiceStartDiagnosisRejectsNonReceived(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.StartDiagnosis(context.Background(), order.ID)
 	require.Error(t, err)
@@ -50,7 +50,7 @@ func TestStartDiagnosisUnknownOrder(t *testing.T) {
 func TestComposeQuoteSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 35.90, Active: true})
@@ -64,14 +64,14 @@ func TestComposeQuoteSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.InDelta(t, 151.80, quote.TotalAmount, 0.0001) // 2*35.90 + 80.00
-	assert.Equal(t, StatusEmDiagnostico, order.Status, "composing a quote no longer transitions the order — only SendQuote does (specs/service-order-quote-decision/)")
+	assert.Equal(t, StatusInDiagnosis, order.Status, "composing a quote no longer transitions the order — only SendQuote does (specs/service-order-quote-decision/)")
 	require.Len(t, quote.Items, 2)
 }
 
 func TestComposeQuoteRejectsBeforeDiagnosis(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusRecebida)
+	order := seedOrder(repo, StatusReceived)
 
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
@@ -95,7 +95,7 @@ func TestComposeQuoteUnknownOrder(t *testing.T) {
 func TestComposeQuoteRejectsEmptyItems(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, nil)
 	require.Error(t, err)
@@ -105,7 +105,7 @@ func TestComposeQuoteRejectsEmptyItems(t *testing.T) {
 func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
 
@@ -119,7 +119,7 @@ func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 func TestComposeQuoteRejectsUnknownProduct(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: QuoteItemProduct, ProductID: uuid.New().String(), Quantity: 1},
@@ -131,7 +131,7 @@ func TestComposeQuoteRejectsUnknownProduct(t *testing.T) {
 func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: false, UnitPrice: 10})
 
@@ -145,7 +145,7 @@ func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 func TestComposeQuoteRejectsUnknownService(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: QuoteItemService, ServiceID: uuid.New().String(), Quantity: 1},
@@ -157,7 +157,7 @@ func TestComposeQuoteRejectsUnknownService(t *testing.T) {
 func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
 
@@ -177,7 +177,7 @@ func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusAguardandoAprovacao)
+	order := seedOrder(repo, StatusAwaitingApproval)
 	repo.seedDecidedQuote(order.ID, QuoteStatusApproved)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
@@ -192,7 +192,7 @@ func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 func TestGetQuoteNotFoundBeforeComposition(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.GetQuote(context.Background(), order.ID)
 	require.Error(t, err)
@@ -202,7 +202,7 @@ func TestGetQuoteNotFoundBeforeComposition(t *testing.T) {
 func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "A part"})
 
@@ -222,7 +222,7 @@ func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "Original description"})
 
@@ -257,13 +257,13 @@ func composeQuoteForOrder(t *testing.T, service *ServiceOrderService, repo *fake
 func TestSendQuoteSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	composeQuoteForOrder(t, service, repo, order)
 
 	quote, err := service.SendQuote(context.Background(), order.ID)
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusAguardandoAprovacao, order.Status)
+	assert.Equal(t, StatusAwaitingApproval, order.Status)
 	require.NotNil(t, quote.SentAt)
 	require.NotNil(t, quote.SentVersion)
 	assert.Equal(t, quote.Version, *quote.SentVersion)
@@ -272,18 +272,18 @@ func TestSendQuoteSuccess(t *testing.T) {
 func TestSendQuoteRejectsIncompleteQuote(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.SendQuote(context.Background(), order.ID)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrQuoteNotFound)
-	assert.Equal(t, StatusEmDiagnostico, order.Status)
+	assert.Equal(t, StatusInDiagnosis, order.Status)
 }
 
 func TestSendQuoteRejectsAlreadySent(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	composeQuoteForOrder(t, service, repo, order)
 
 	_, err := service.SendQuote(context.Background(), order.ID)
@@ -305,11 +305,11 @@ func TestSendQuoteUnknownOrder(t *testing.T) {
 
 // seedSentQuote composes and sends a quote for order, then registers rawToken
 // as its tracking token — the fixture ApproveQuote/RejectQuote tests build
-// on, mirroring how a real order reaches AGUARDANDO_APROVACAO with a token
+// on, mirroring how a real order reaches AWAITING_APPROVAL with a token
 // issued at creation (specs/service-order-tracking/).
 func seedSentQuote(t *testing.T, service *ServiceOrderService, repo *fakeRepository, rawToken string) *ServiceOrder {
 	t.Helper()
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	composeQuoteForOrder(t, service, repo, order)
 	_, err := service.SendQuote(context.Background(), order.ID)
 	require.NoError(t, err)
@@ -325,7 +325,7 @@ func TestApproveQuoteSuccess(t *testing.T) {
 	updatedOrder, quote, err := service.ApproveQuote(context.Background(), order.Code, "the-real-token")
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusEmExecucao, updatedOrder.Status)
+	assert.Equal(t, StatusInProgress, updatedOrder.Status)
 	assert.Equal(t, QuoteStatusApproved, quote.Status)
 	assert.NotNil(t, quote.RespondedAt)
 }
@@ -338,7 +338,7 @@ func TestRejectQuoteSuccess(t *testing.T) {
 	updatedOrder, quote, err := service.RejectQuote(context.Background(), order.Code, "the-real-token")
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusCancelada, updatedOrder.Status)
+	assert.Equal(t, StatusCanceled, updatedOrder.Status)
 	assert.Equal(t, QuoteStatusRejected, quote.Status)
 	assert.NotNil(t, quote.RespondedAt)
 }
@@ -398,7 +398,7 @@ func TestApproveThenRejectSameQuoteFails(t *testing.T) {
 	_, _, err = service.RejectQuote(context.Background(), order.Code, "the-real-token")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
-	assert.Equal(t, StatusEmExecucao, order.Status, "a rejected second decision must not alter the order reached by the first")
+	assert.Equal(t, StatusInProgress, order.Status, "a rejected second decision must not alter the order reached by the first")
 }
 
 // TestApproveQuoteTwiceIsConsistentConflict covers "repetição da mesma
@@ -416,5 +416,5 @@ func TestApproveQuoteTwiceIsConsistentConflict(t *testing.T) {
 	_, _, err = service.ApproveQuote(context.Background(), order.Code, "the-real-token")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
-	assert.Equal(t, StatusEmExecucao, order.Status)
+	assert.Equal(t, StatusInProgress, order.Status)
 }

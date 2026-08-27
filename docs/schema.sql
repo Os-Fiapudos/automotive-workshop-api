@@ -42,25 +42,37 @@ DO $$ BEGIN
     CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- NOTE: the values of this enum are a deliberate exception to the "everything in
--- English" convention. ServiceOrder.status is kept in Portuguese by explicit
--- product decision (see docs/entities.md) — do not translate these values.
+-- Changed on 2026-08-26: these values used to be kept in Portuguese ('RECEBIDA',
+-- 'EM_DIAGNOSTICO', 'AGUARDANDO_APROVACAO', 'EM_EXECUCAO', 'FINALIZADA', 'ENTREGUE',
+-- 'CANCELADA') as the single deliberate exception to the "everything in English"
+-- convention; the exception was dropped so the whole domain speaks one language
+-- (see docs/entities.md).
+-- This file only runs on the initial creation of the Docker volume, so a database
+-- created before that date still holds the old labels. Migrate it in place with:
+--     ALTER TYPE service_order_status RENAME VALUE 'RECEBIDA' TO 'RECEIVED';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_DIAGNOSTICO' TO 'IN_DIAGNOSIS';
+--     ALTER TYPE service_order_status RENAME VALUE 'AGUARDANDO_APROVACAO' TO 'AWAITING_APPROVAL';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_EXECUCAO' TO 'IN_PROGRESS';
+--     ALTER TYPE service_order_status RENAME VALUE 'FINALIZADA' TO 'COMPLETED';
+--     ALTER TYPE service_order_status RENAME VALUE 'ENTREGUE' TO 'DELIVERED';
+--     ALTER TYPE service_order_status RENAME VALUE 'CANCELADA' TO 'CANCELED';
+-- RENAME VALUE rewrites only the label, preserving every existing row.
 DO $$ BEGIN
     CREATE TYPE service_order_status AS ENUM (
-        'RECEBIDA',
-        'EM_DIAGNOSTICO',
-        'AGUARDANDO_APROVACAO',
-        'EM_EXECUCAO',
-        'FINALIZADA',
-        'ENTREGUE',
-        'CANCELADA'
+        'RECEIVED',
+        'IN_DIAGNOSIS',
+        'AWAITING_APPROVAL',
+        'IN_PROGRESS',
+        'COMPLETED',
+        'DELIVERED',
+        'CANCELED'
     );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
--- 'CANCELADA' was added by specs/service-order-quote-decision/: a branch from
--- AGUARDANDO_APROVACAO taken when the customer rejects the quote, since a
+-- 'CANCELED' was added by specs/service-order-quote-decision/: a branch from
+-- AWAITING_APPROVAL taken when the customer rejects the quote, since a
 -- REJECTED quote can never be altered (specs/service-order-diagnosis-quote/
 -- requirements.md §3.9) and the order otherwise had no way to leave
--- AGUARDANDO_APROVACAO.
+-- AWAITING_APPROVAL.
 
 DO $$ BEGIN
     CREATE TYPE quote_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
@@ -69,12 +81,12 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- 'diagnosis_started' and 'quote_composed' were added by the Service Order
 -- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
 -- 'delivery' was added by the Service Order Execution/Finalization/Delivery feature
--- (specs/service-order-execution/) for the FINALIZADA -> ENTREGUE transition; that same
--- feature reuses 'completion' for EM_EXECUCAO -> FINALIZADA. 'approval' and
+-- (specs/service-order-execution/) for the COMPLETED -> DELIVERED transition; that same
+-- feature reuses 'completion' for IN_PROGRESS -> COMPLETED. 'approval' and
 -- 'cancellation' existed unused until specs/service-order-quote-decision/ became their
--- first producer: 'approval' for AGUARDANDO_APROVACAO -> EM_EXECUCAO (quote approved),
--- 'cancellation' for AGUARDANDO_APROVACAO -> CANCELADA (quote rejected). That same
--- feature adds 'quote_sent' for EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO (quote sent to
+-- first producer: 'approval' for AWAITING_APPROVAL -> IN_PROGRESS (quote approved),
+-- 'cancellation' for AWAITING_APPROVAL -> CANCELED (quote rejected). That same
+-- feature adds 'quote_sent' for IN_DIAGNOSIS -> AWAITING_APPROVAL (quote sent to
 -- the customer).
 DO $$ BEGIN
     CREATE TYPE history_event AS ENUM (
@@ -217,7 +229,7 @@ CREATE TABLE IF NOT EXISTS service_orders (
     customer_id  UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
     vehicle_id   UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
     opened_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status       service_order_status NOT NULL DEFAULT 'RECEBIDA',
+    status       service_order_status NOT NULL DEFAULT 'RECEIVED',
     notes        TEXT NOT NULL DEFAULT '',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -229,7 +241,7 @@ COMMENT ON COLUMN service_orders.code IS 'Human-readable/sequential identifier o
 COMMENT ON COLUMN service_orders.customer_id IS 'Reference to the requesting Customer.';
 COMMENT ON COLUMN service_orders.vehicle_id IS 'Reference to the Vehicle being serviced.';
 COMMENT ON COLUMN service_orders.opened_at IS 'Date/time the service order was opened.';
-COMMENT ON COLUMN service_orders.status IS 'RECEBIDA -> EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO -> EM_EXECUCAO -> FINALIZADA -> ENTREGUE. Values intentionally kept in Portuguese (see docs/entities.md).';
+COMMENT ON COLUMN service_orders.status IS 'RECEIVED -> IN_DIAGNOSIS -> AWAITING_APPROVAL -> IN_PROGRESS -> COMPLETED -> DELIVERED; AWAITING_APPROVAL branches to CANCELED when the customer rejects the quote (see docs/entities.md).';
 COMMENT ON COLUMN service_orders.notes IS 'Free-form notes about the service (e.g. customer report, vehicle condition).';
 COMMENT ON COLUMN service_orders.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN service_orders.updated_at IS 'Record last update date/time, generated automatically.';
@@ -475,7 +487,7 @@ CREATE INDEX IF NOT EXISTS ix_service_orders_customer_opened
 -- ignoring service orders already completed/delivered (most of the history).
 CREATE INDEX IF NOT EXISTS ix_service_orders_status_active
     ON service_orders (status, opened_at DESC)
-    WHERE status NOT IN ('FINALIZADA', 'ENTREGUE');
+    WHERE status NOT IN ('COMPLETED', 'DELIVERED');
 
 -- Filter by product type (PART/SUPPLY) on catalog/stock screens.
 CREATE INDEX IF NOT EXISTS ix_products_type ON products (type);

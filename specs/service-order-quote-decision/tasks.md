@@ -2,12 +2,12 @@
 
 Each task references the `design.md` section it implements. All tasks below are complete.
 
-1. **Schema** (design.md §1.5, §2) — `docs/schema.sql`: add `CANCELADA` to
+1. **Schema** (design.md §1.5, §2) — `docs/schema.sql`: add `CANCELED` to
    `service_order_status`; add `quote_sent` to `history_event`; add `version`/`sent_at`/
    `sent_version` + their `CHECK` constraints to `quotes`. `docs/entities.md`: document the
    new status, event, and `Quote` fields. `docs/seed.sql`: backfill `version`/`sent_at`/
    `sent_version` for existing seed quotes.
-2. **Domain model** (design.md §1.3) — `model.go`: add `StatusCancelada`; delete
+2. **Domain model** (design.md §1.3) — `model.go`: add `StatusCanceled`; delete
    `markAwaitingApproval`; add `sendQuote`/`approveQuote`/`rejectQuote`; add `Quote.Version`/
    `SentAt`/`SentVersion`.
 3. **Notification port** (design.md §1.4) — new `quote_notifier.go`: `QuoteNotifier`
@@ -22,7 +22,7 @@ Each task references the `design.md` section it implements. All tasks below are 
    order transition, increment `version`, return new columns); implement `SendQuote`,
    `DecideQuote`; update `FindQuoteByServiceOrderID`'s scan for the new columns.
 7. **Erratum applied to `ComposeQuote`** (design.md §1.2) — `quote_service.go`: replace the
-   `markAwaitingApproval()` call with a direct `RECEBIDA` check.
+   `markAwaitingApproval()` call with a direct `RECEIVED` check.
 8. **Application layer** (design.md §1.6) — `quote_service.go`: add `SendQuote`,
    `ApproveQuote`, `RejectQuote`, `decideQuote`.
 9. **DTOs** (design.md §1.7) — `quote_dto.go`: extend `QuoteResponse`; add

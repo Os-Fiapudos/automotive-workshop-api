@@ -24,7 +24,7 @@ tasks depend on earlier ones.
 - [ ] `internal/features/service-order/doc.go` — package comment.
 - [ ] `internal/features/service-order/model.go` — `ServiceOrder`, `Status`,
       `NewServiceOrder`.
-- [ ] `internal/features/service-order/model_test.go` — always `RECEBIDA`, no alternate
+- [ ] `internal/features/service-order/model_test.go` — always `RECEIVED`, no alternate
       constructor path.
 
 ## 4. Errors (`design.md` §1.3)

@@ -10,8 +10,8 @@ import (
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
-// StartDiagnosis transitions a service order from RECEBIDA to
-// EM_DIAGNOSTICO (requirements.md §3.1).
+// StartDiagnosis transitions a service order from RECEIVED to
+// IN_DIAGNOSIS (requirements.md §3.1).
 func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
@@ -31,16 +31,16 @@ func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceO
 
 // ComposeQuote replaces the service order's quote with the given items and
 // recalculates the total exclusively on the server (RF06) (requirements.md
-// §3.2, §3.9). It no longer transitions the order to AGUARDANDO_APROVACAO —
+// §3.2, §3.9). It no longer transitions the order to AWAITING_APPROVAL —
 // specs/service-order-quote-decision/ moved that transition to SendQuote,
 // which owns the explicit "send to customer" step; composing/recomposing
-// only requires diagnosis to have started (order not RECEBIDA).
+// only requires diagnosis to have started (order not RECEIVED).
 func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrderID uuid.UUID, inputs []QuoteItemInput) (*Quote, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status == StatusRecebida {
+	if order.Status == StatusReceived {
 		return nil, ErrDiagnosisNotStarted
 	}
 
@@ -67,7 +67,7 @@ func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrd
 // SendQuote sends the service order's composed quote to the customer
 // (specs/service-order-quote-decision/requirements.md): only a complete
 // quote (at least one item) can be sent, and only while the order is
-// EM_DIAGNOSTICO — sending is what moves it to AGUARDANDO_APROVACAO.
+// IN_DIAGNOSIS — sending is what moves it to AWAITING_APPROVAL.
 func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
@@ -103,7 +103,7 @@ func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderI
 // identified by the order's public code and validated via its tracking
 // token (RF12) — the same secure, non-JWT mechanism
 // specs/service-order-tracking/ established. Approving moves the order to
-// EM_EXECUCAO. Returns the updated order alongside the quote since the
+// IN_PROGRESS. Returns the updated order alongside the quote since the
 // public response reports both statuses.
 func (service *ServiceOrderService) ApproveQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
 	return service.decideQuote(ctx, code, rawTrackingToken, QuoteStatusApproved)
@@ -111,7 +111,7 @@ func (service *ServiceOrderService) ApproveQuote(ctx context.Context, code int64
 
 // RejectQuote records the customer's rejection of the service order's
 // quote, identified and authenticated the same way as ApproveQuote.
-// Rejecting moves the order to CANCELADA.
+// Rejecting moves the order to CANCELED.
 func (service *ServiceOrderService) RejectQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
 	return service.decideQuote(ctx, code, rawTrackingToken, QuoteStatusRejected)
 }

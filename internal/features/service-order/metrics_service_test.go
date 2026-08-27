@@ -14,7 +14,7 @@ import (
 // in-progress) execution of serviceID within a fresh order, started at
 // startedAt.
 func seedExecution(repo *fakeRepository, customerID, vehicleID, serviceID uuid.UUID, startedAt time.Time, endedAt *time.Time) {
-	order := seedListOrder(repo, customerID, vehicleID, StatusEmExecucao, startedAt)
+	order := seedListOrder(repo, customerID, vehicleID, StatusInProgress, startedAt)
 	execution := &ServiceExecution{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
@@ -130,7 +130,7 @@ func TestAverageExecutionTimeCombinedFilters(t *testing.T) {
 	oldStart := time.Now().Add(-30 * 24 * time.Hour)
 	oldEnd := oldStart.Add(10 * time.Minute)
 	seedExecution(repo, customerID, vehicleID, targetID, recentStart, &recentEnd)
-	seedExecution(repo, customerID, vehicleID, targetID, oldStart, &oldEnd) // outside range
+	seedExecution(repo, customerID, vehicleID, targetID, oldStart, &oldEnd)      // outside range
 	seedExecution(repo, customerID, vehicleID, otherID, recentStart, &recentEnd) // wrong service
 
 	from := time.Now().Add(-24 * time.Hour)

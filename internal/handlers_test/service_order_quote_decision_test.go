@@ -34,7 +34,7 @@ func doTrackingPost(t *testing.T, server, path, trackingToken string) *http.Resp
 
 // createOrderWithSentQuote drives an order through diagnosis, quote
 // composition, and sending, via the real authenticated API, returning it
-// with AGUARDANDO_APROVACAO and a token ready to approve/reject through the
+// with AWAITING_APPROVAL and a token ready to approve/reject through the
 // public /acompanhamento endpoints.
 func createOrderWithSentQuote(t *testing.T, server string, pool *pgxpool.Pool, authToken string) serviceorder.Response {
 	t.Helper()
@@ -85,7 +85,7 @@ func TestQuoteDecisionSendFullFlow(t *testing.T) {
 	var status string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", status)
+	assert.Equal(t, "AWAITING_APPROVAL", status)
 
 	var previousStatus, newStatus string
 	err = pool.QueryRow(context.Background(),
@@ -93,8 +93,8 @@ func TestQuoteDecisionSendFullFlow(t *testing.T) {
 		order.ID,
 	).Scan(&previousStatus, &newStatus)
 	require.NoError(t, err)
-	assert.Equal(t, "EM_DIAGNOSTICO", previousStatus)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", newStatus)
+	assert.Equal(t, "IN_DIAGNOSIS", previousStatus)
+	assert.Equal(t, "AWAITING_APPROVAL", newStatus)
 }
 
 func TestQuoteDecisionSendRequiresAuth(t *testing.T) {
@@ -139,7 +139,7 @@ func TestQuoteDecisionApproveFullFlow(t *testing.T) {
 	var respondedAt *string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "EM_EXECUCAO", status)
+	assert.Equal(t, "IN_PROGRESS", status)
 
 	err = pool.QueryRow(context.Background(), `SELECT status, responded_at::text FROM quotes WHERE service_order_id = $1`, order.ID).Scan(&quoteStatus, &respondedAt)
 	require.NoError(t, err)
@@ -152,8 +152,8 @@ func TestQuoteDecisionApproveFullFlow(t *testing.T) {
 		order.ID,
 	).Scan(&previousStatus, &newStatus)
 	require.NoError(t, err)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", previousStatus)
-	assert.Equal(t, "EM_EXECUCAO", newStatus)
+	assert.Equal(t, "AWAITING_APPROVAL", previousStatus)
+	assert.Equal(t, "IN_PROGRESS", newStatus)
 }
 
 func TestQuoteDecisionRejectFullFlow(t *testing.T) {
@@ -166,7 +166,7 @@ func TestQuoteDecisionRejectFullFlow(t *testing.T) {
 	var status, quoteStatus string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "CANCELADA", status)
+	assert.Equal(t, "CANCELED", status)
 
 	err = pool.QueryRow(context.Background(), `SELECT status FROM quotes WHERE service_order_id = $1`, order.ID).Scan(&quoteStatus)
 	require.NoError(t, err)
@@ -178,8 +178,8 @@ func TestQuoteDecisionRejectFullFlow(t *testing.T) {
 		order.ID,
 	).Scan(&previousStatus, &newStatus)
 	require.NoError(t, err)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", previousStatus)
-	assert.Equal(t, "CANCELADA", newStatus)
+	assert.Equal(t, "AWAITING_APPROVAL", previousStatus)
+	assert.Equal(t, "CANCELED", newStatus)
 }
 
 func TestQuoteDecisionApproveMissingToken(t *testing.T) {
@@ -218,7 +218,7 @@ func TestQuoteDecisionCrossOrderToken(t *testing.T) {
 	var status string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, orderA.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "AGUARDANDO_APROVACAO", status, "a rejected cross-order attempt must not change order A")
+	assert.Equal(t, "AWAITING_APPROVAL", status, "a rejected cross-order attempt must not change order A")
 }
 
 func TestQuoteDecisionDoesNotRequireAdminJWT(t *testing.T) {
@@ -248,7 +248,7 @@ func TestQuoteDecisionApproveThenRejectConflict(t *testing.T) {
 	var status, quoteStatus string
 	err := pool.QueryRow(context.Background(), `SELECT status FROM service_orders WHERE id = $1`, order.ID).Scan(&status)
 	require.NoError(t, err)
-	assert.Equal(t, "EM_EXECUCAO", status, "the rejected second decision must not alter the order reached by the first")
+	assert.Equal(t, "IN_PROGRESS", status, "the rejected second decision must not alter the order reached by the first")
 
 	err = pool.QueryRow(context.Background(), `SELECT status FROM quotes WHERE service_order_id = $1`, order.ID).Scan(&quoteStatus)
 	require.NoError(t, err)
