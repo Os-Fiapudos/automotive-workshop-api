@@ -121,12 +121,12 @@ type ServiceOrderRepository interface {
 	// Added by specs/service-order-quote-decision/.
 
 	// SendQuote records quote as sent (sent_at/sent_version) and transitions
-	// order from EM_DIAGNOSTICO to AGUARDANDO_APROVACAO, transactionally.
+	// order from IN_DIAGNOSIS to AWAITING_APPROVAL, transactionally.
 	SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error)
 
 	// DecideQuote records the customer's decision on quote (APPROVED or
-	// REJECTED, per decision), transitions order accordingly (EM_EXECUCAO or
-	// CANCELADA), and writes the corresponding history entry, all in one
+	// REJECTED, per decision), transitions order accordingly (IN_PROGRESS or
+	// CANCELED), and writes the corresponding history entry, all in one
 	// transaction (RNF07): a failure at any step, including the history
 	// insert, rolls back every other write this call made.
 	DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error)

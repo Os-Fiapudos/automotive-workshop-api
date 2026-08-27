@@ -46,7 +46,7 @@ func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Co
 	return nil
 }
 
-// FinalizeOrder moves order to FINALIZADA and records the transition in
+// FinalizeOrder moves order to COMPLETED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // StartDiagnosis.
 func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *ServiceOrder) error {
@@ -57,7 +57,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'EM_EXECUCAO'`,
+		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'IN_PROGRESS'`,
 		order.ID, string(order.Status),
 	)
 	if err != nil {
@@ -69,7 +69,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-		 VALUES ($1, 'completion', $2, 'EM_EXECUCAO', $3)`,
+		 VALUES ($1, 'completion', $2, 'IN_PROGRESS', $3)`,
 		order.ID, "Service order finalized.", string(order.Status),
 	); err != nil {
 		return err
@@ -78,7 +78,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 	return tx.Commit(ctx)
 }
 
-// DeliverOrder moves order to ENTREGUE and records the transition in
+// DeliverOrder moves order to DELIVERED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // FinalizeOrder.
 func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *ServiceOrder) error {
@@ -89,7 +89,7 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'FINALIZADA'`,
+		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'COMPLETED'`,
 		order.ID, string(order.Status),
 	)
 	if err != nil {
@@ -101,7 +101,7 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-		 VALUES ($1, 'delivery', $2, 'FINALIZADA', $3)`,
+		 VALUES ($1, 'delivery', $2, 'COMPLETED', $3)`,
 		order.ID, "Vehicle delivered to customer.", string(order.Status),
 	); err != nil {
 		return err

@@ -16,14 +16,14 @@ func newTestOrder(t *testing.T, status Status) *ServiceOrder {
 	return order
 }
 
-func TestStartDiagnosisFromRecebida(t *testing.T) {
-	order := newTestOrder(t, StatusRecebida)
+func TestStartDiagnosisFromReceived(t *testing.T) {
+	order := newTestOrder(t, StatusReceived)
 	require.NoError(t, order.startDiagnosis())
-	assert.Equal(t, StatusEmDiagnostico, order.Status)
+	assert.Equal(t, StatusInDiagnosis, order.Status)
 }
 
-func TestStartDiagnosisRejectsNonRecebida(t *testing.T) {
-	for _, status := range []Status{StatusEmDiagnostico, StatusAguardandoAprovacao} {
+func TestStartDiagnosisRejectsNonReceived(t *testing.T) {
+	for _, status := range []Status{StatusInDiagnosis, StatusAwaitingApproval} {
 		order := newTestOrder(t, status)
 		err := order.startDiagnosis()
 		require.Error(t, err)
@@ -32,14 +32,14 @@ func TestStartDiagnosisRejectsNonRecebida(t *testing.T) {
 	}
 }
 
-func TestSendQuoteFromEmDiagnostico(t *testing.T) {
-	order := newTestOrder(t, StatusEmDiagnostico)
+func TestSendQuoteFromInDiagnosis(t *testing.T) {
+	order := newTestOrder(t, StatusInDiagnosis)
 	require.NoError(t, order.sendQuote())
-	assert.Equal(t, StatusAguardandoAprovacao, order.Status)
+	assert.Equal(t, StatusAwaitingApproval, order.Status)
 }
 
-func TestSendQuoteRejectsNonEmDiagnostico(t *testing.T) {
-	for _, status := range []Status{StatusRecebida, StatusAguardandoAprovacao, StatusEmExecucao} {
+func TestSendQuoteRejectsNonInDiagnosis(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusAwaitingApproval, StatusInProgress} {
 		order := newTestOrder(t, status)
 		err := order.sendQuote()
 		require.Error(t, err)
@@ -48,14 +48,14 @@ func TestSendQuoteRejectsNonEmDiagnostico(t *testing.T) {
 	}
 }
 
-func TestApproveQuoteFromAguardandoAprovacao(t *testing.T) {
-	order := newTestOrder(t, StatusAguardandoAprovacao)
+func TestApproveQuoteFromAwaitingApproval(t *testing.T) {
+	order := newTestOrder(t, StatusAwaitingApproval)
 	require.NoError(t, order.approveQuote())
-	assert.Equal(t, StatusEmExecucao, order.Status)
+	assert.Equal(t, StatusInProgress, order.Status)
 }
 
-func TestApproveQuoteRejectsNonAguardandoAprovacao(t *testing.T) {
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusEmExecucao} {
+func TestApproveQuoteRejectsNonAwaitingApproval(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
 		order := newTestOrder(t, status)
 		err := order.approveQuote()
 		require.Error(t, err)
@@ -64,14 +64,14 @@ func TestApproveQuoteRejectsNonAguardandoAprovacao(t *testing.T) {
 	}
 }
 
-func TestRejectQuoteFromAguardandoAprovacao(t *testing.T) {
-	order := newTestOrder(t, StatusAguardandoAprovacao)
+func TestRejectQuoteFromAwaitingApproval(t *testing.T) {
+	order := newTestOrder(t, StatusAwaitingApproval)
 	require.NoError(t, order.rejectQuote())
-	assert.Equal(t, StatusCancelada, order.Status)
+	assert.Equal(t, StatusCanceled, order.Status)
 }
 
-func TestRejectQuoteRejectsNonAguardandoAprovacao(t *testing.T) {
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusEmExecucao} {
+func TestRejectQuoteRejectsNonAwaitingApproval(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
 		order := newTestOrder(t, status)
 		err := order.rejectQuote()
 		require.Error(t, err)

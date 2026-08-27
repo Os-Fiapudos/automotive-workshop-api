@@ -12,7 +12,7 @@ import (
 func TestRegisterStockUsageSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
@@ -28,16 +28,16 @@ func TestRegisterStockUsageSuccess(t *testing.T) {
 	assert.Equal(t, order.ID, *movements[0].ServiceOrderID)
 }
 
-// TestRegisterStockUsageRejectsWithoutEmExecucao covers BR1: a deduction can
-// only be registered while the order is EM_EXECUCAO.
-func TestRegisterStockUsageRejectsWithoutEmExecucao(t *testing.T) {
+// TestRegisterStockUsageRejectsWithoutInProgress covers BR1: a deduction can
+// only be registered while the order is IN_PROGRESS.
+func TestRegisterStockUsageRejectsWithoutInProgress(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusAguardandoAprovacao, StatusFinalizada, StatusEntregue} {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusCompleted, StatusDelivered} {
 		order := seedOrder(repo, status)
 		_, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
 			{ProductID: productID.String(), Quantity: 1},
@@ -50,7 +50,7 @@ func TestRegisterStockUsageRejectsWithoutEmExecucao(t *testing.T) {
 func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
@@ -64,7 +64,7 @@ func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
 func TestRegisterStockUsageRejectsEmptyItems(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 
 	_, err := service.RegisterStockUsage(context.Background(), order.ID, nil)
 	assert.ErrorIs(t, err, ErrEmptyStockUsage)
@@ -75,7 +75,7 @@ func TestRegisterStockUsageRejectsEmptyItems(t *testing.T) {
 func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 2)
@@ -89,7 +89,7 @@ func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
 func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: false})
 	repo.setProductStock(productID, 10)
@@ -103,7 +103,7 @@ func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
 func TestReverseStockMovementSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
@@ -126,7 +126,7 @@ func TestReverseStockMovementSuccess(t *testing.T) {
 func TestListStockMovements(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)

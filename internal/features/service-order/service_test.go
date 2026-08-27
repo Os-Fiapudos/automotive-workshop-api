@@ -38,7 +38,7 @@ func TestServiceCreateByID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusRecebida, result.Order.Status)
+	assert.Equal(t, StatusReceived, result.Order.Status)
 	assert.EqualValues(t, 1, result.Order.Code)
 	assert.Len(t, result.Services, 1)
 	assert.NotEmpty(t, result.TrackingToken)
@@ -54,7 +54,7 @@ func TestServiceCreateByDocumentAndPlate(t *testing.T) {
 		LicensePlate:     "ABC1D23",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, StatusRecebida, result.Order.Status)
+	assert.Equal(t, StatusReceived, result.Order.Status)
 }
 
 func TestServiceCreateCustomerNotFound(t *testing.T) {

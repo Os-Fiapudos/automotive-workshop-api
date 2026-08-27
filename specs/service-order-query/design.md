@@ -84,7 +84,7 @@ Query parameters on `GET /api/v1/service-orders`, all optional and combined with
 | Param | Maps to | Matching |
 | --- | --- | --- |
 | `code` | `service_orders.code` | exact (parsed as int64; a non-numeric value is a `400 VALIDATION_ERROR`, not silently ignored — it can never match a real order, but a client sending garbage should learn that, unlike `page`/`pageSize`, which have a sane default to fall back to) |
-| `status` | `service_orders.status` | exact, validated against the six values `docs/entities.md`'s `ServiceOrderStatus` enum documents (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) — not just the three this package currently has `Status` constants for (§1.6 below), since the other three are real, documented values a caller may reasonably filter for even though no feature transitions an order into them yet |
+| `status` | `service_orders.status` | exact, validated against the six values `docs/entities.md`'s `ServiceOrderStatus` enum documents (`RECEIVED`, `IN_DIAGNOSIS`, `AWAITING_APPROVAL`, `IN_PROGRESS`, `COMPLETED`, `DELIVERED`) — not just the three this package currently has `Status` constants for (§1.6 below), since the other three are real, documented values a caller may reasonably filter for even though no feature transitions an order into them yet |
 | `document` | `customers.document` | exact, normalized the same way `service-order-opening`'s own `resolveCustomer` already normalizes an inbound customer document (`internal/shared/document.Normalize`), so a formatted or unformatted CPF/CNPJ both work |
 | `licensePlate` | `vehicles.license_plate` | exact, trimmed and upper-cased before matching (plates are stored normalized already by `vehicle`; this feature cannot reuse `vehicle`'s own `plate.Normalize` without importing another feature's package — `CLAUDE.md` §9.2 — so it applies this same minimal, dependency-free normalization instead) |
 | `createdFrom` / `createdTo` | `service_orders.created_at` | inclusive range bound, each parsed as RFC3339 (`time.RFC3339`) — the same format Go's `encoding/json` already uses for every `time.Time` field this project returns, so a client filtering by a value it just read back from a previous response needs no reformatting; an unparseable value is a `400 VALIDATION_ERROR` |
@@ -134,11 +134,11 @@ majority, actually-paginated precedent instead of picking a third shape.
   `NewStatus`) — read-only, this feature never writes a history row, only reads the ones
   `service-order-opening`/`service-order-diagnosis-quote` already write.
 - A package-level list of the six known `Status` string values (for filter validation, §1.3)
-  — kept separate from the existing `StatusRecebida`/`StatusEmDiagnostico`/
-  `StatusAguardandoAprovacao` constants, which specifically mean "a status this package's own
+  — kept separate from the existing `StatusReceived`/`StatusInDiagnosis`/
+  `StatusAwaitingApproval` constants, which specifically mean "a status this package's own
   transition methods (`startDiagnosis`, `markAwaitingApproval`) know how to reach or leave,"
-  not "every status value that exists." Adding `StatusEmExecucao`/`StatusFinalizada`/
-  `StatusEntregue` constants without also giving them a transition method would be
+  not "every status value that exists." Adding `StatusInProgress`/`StatusCompleted`/
+  `StatusDelivered` constants without also giving them a transition method would be
   half-finished, unused code — this feature only needs the *strings* to validate a filter
   against, so that's all it adds.
 
@@ -212,7 +212,7 @@ func (service *ServiceOrderService) GetDetailByCode(ctx context.Context, code in
 customer, vehicle, requested services, and history unconditionally, and the quote
 conditionally: `FindQuoteByServiceOrderID` returning `ErrQuoteNotFound` is translated to
 `Quote: nil`, not propagated as an error (`requirements.md` AC8 — the quote is `null`/absent,
-not a `404`, for an order that hasn't reached `AGUARDANDO_APROVACAO` yet).
+not a `404`, for an order that hasn't reached `AWAITING_APPROVAL` yet).
 
 ### 1.9 API layer
 
@@ -329,7 +329,7 @@ hand-written fakes, no mocking library.
   detail by id and by code returning the same shape, `404` for an unknown id/code, `401`
   without a bearer token on all three routes, and a full lifecycle case (create → start
   diagnosis → compose quote) whose detail view is checked to show the composed quote and a
-  multi-entry history, followed by a case that never leaves `RECEBIDA` whose detail is
+  multi-entry history, followed by a case that never leaves `RECEIVED` whose detail is
   checked to show `quote: null`/absent and a single `creation` history entry.
 
 ## 4. Documentation

@@ -10,7 +10,7 @@ import (
 
 // RegisterStockUsage implements ServiceOrderRepository
 // (specs/service-order-stock-usage/design.md §4.1): re-confirms the order is
-// EM_EXECUCAO, then deducts every item's quantity from its product and
+// IN_PROGRESS, then deducts every item's quantity from its product and
 // records one EXIT StockMovement per item, all in one transaction (RNF07,
 // BR6/BR7) — a failure at any item, including an unknown/inactive product or
 // insufficient balance, rolls back every deduction already made in this
@@ -33,7 +33,7 @@ func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context
 		}
 		return nil, err
 	}
-	if status != string(StatusEmExecucao) {
+	if status != string(StatusInProgress) {
 		return nil, ErrInvalidStatusTransition
 	}
 

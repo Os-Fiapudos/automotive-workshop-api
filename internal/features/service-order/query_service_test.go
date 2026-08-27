@@ -32,8 +32,8 @@ func TestListNoFilterReturnsMostRecentFirst(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 
-	older := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now().Add(-2*time.Hour))
-	newer := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	older := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now().Add(-2*time.Hour))
+	newer := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{}, 1, 20)
 	require.NoError(t, err)
@@ -47,8 +47,8 @@ func TestListFiltersByCode(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
-	target := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
+	target := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{Code: &target.Code}, 1, 20)
 	require.NoError(t, err)
@@ -61,10 +61,10 @@ func TestListFiltersByStatus(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
-	diagnosing := seedListOrder(repo, customerID, vehicleID, StatusEmDiagnostico, time.Now())
+	seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
+	diagnosing := seedListOrder(repo, customerID, vehicleID, StatusInDiagnosis, time.Now())
 
-	status := string(StatusEmDiagnostico)
+	status := string(StatusInDiagnosis)
 	items, total, err := service.List(context.Background(), ListFilter{Status: &status}, 1, 20)
 	require.NoError(t, err)
 	assert.Equal(t, 1, total)
@@ -76,13 +76,13 @@ func TestListFiltersByCustomerDocument(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	target := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	target := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 
 	otherCustomerID := uuid.New()
 	otherVehicleID := uuid.New()
 	repo.addCustomer(&customerRef{ID: otherCustomerID, Code: 2, Name: "Other", Active: true, Document: "22233344400"}, "22233344400")
 	repo.addVehicle(&vehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: otherCustomerID, Active: true})
-	seedListOrder(repo, otherCustomerID, otherVehicleID, StatusRecebida, time.Now())
+	seedListOrder(repo, otherCustomerID, otherVehicleID, StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{CustomerDocument: normalizedDocument}, 1, 20)
 	require.NoError(t, err)
@@ -95,11 +95,11 @@ func TestListFiltersByLicensePlate(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	target := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	target := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 
 	otherVehicleID := uuid.New()
 	repo.addVehicle(&vehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: customerID, Active: true})
-	seedListOrder(repo, customerID, otherVehicleID, StatusRecebida, time.Now())
+	seedListOrder(repo, customerID, otherVehicleID, StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{LicensePlate: "ABC1D23"}, 1, 20)
 	require.NoError(t, err)
@@ -114,9 +114,9 @@ func TestListFiltersByCreatedRange(t *testing.T) {
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 
 	base := time.Now()
-	seedListOrder(repo, customerID, vehicleID, StatusRecebida, base.Add(-48*time.Hour))
-	inRange := seedListOrder(repo, customerID, vehicleID, StatusRecebida, base.Add(-24*time.Hour))
-	seedListOrder(repo, customerID, vehicleID, StatusRecebida, base)
+	seedListOrder(repo, customerID, vehicleID, StatusReceived, base.Add(-48*time.Hour))
+	inRange := seedListOrder(repo, customerID, vehicleID, StatusReceived, base.Add(-24*time.Hour))
+	seedListOrder(repo, customerID, vehicleID, StatusReceived, base)
 
 	from := base.Add(-30 * time.Hour)
 	to := base.Add(-1 * time.Hour)
@@ -131,10 +131,10 @@ func TestListCombinesFiltersWithAnd(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
-	target := seedListOrder(repo, customerID, vehicleID, StatusEmDiagnostico, time.Now())
+	seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
+	target := seedListOrder(repo, customerID, vehicleID, StatusInDiagnosis, time.Now())
 
-	status := string(StatusEmDiagnostico)
+	status := string(StatusInDiagnosis)
 	items, total, err := service.List(context.Background(), ListFilter{
 		Status:           &status,
 		CustomerDocument: normalizedDocument,
@@ -150,7 +150,7 @@ func TestListPagination(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	for i := 0; i < 5; i++ {
-		seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now().Add(time.Duration(i)*time.Minute))
+		seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now().Add(time.Duration(i)*time.Minute))
 	}
 
 	firstPage, total, err := service.List(context.Background(), ListFilter{}, 1, 2)
@@ -168,17 +168,17 @@ func TestGetDetailAssemblesEveryField(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	order := seedListOrder(repo, customerID, vehicleID, StatusAguardandoAprovacao, time.Now())
+	order := seedListOrder(repo, customerID, vehicleID, StatusAwaitingApproval, time.Now())
 
 	requestedServiceID := uuid.New()
 	repo.setRequestedServices(order.ID, []*serviceRef{{ID: requestedServiceID, Code: 1, Name: "Oil Change"}})
 	repo.addHistory(order.ID, &ServiceOrderHistory{
 		ID: uuid.New(), ServiceOrderID: order.ID, Event: "creation",
-		PreviousStatus: StatusRecebida, NewStatus: StatusRecebida,
+		PreviousStatus: StatusReceived, NewStatus: StatusReceived,
 	})
 	repo.addHistory(order.ID, &ServiceOrderHistory{
 		ID: uuid.New(), ServiceOrderID: order.ID, Event: "quote_composed",
-		PreviousStatus: StatusEmDiagnostico, NewStatus: StatusAguardandoAprovacao,
+		PreviousStatus: StatusInDiagnosis, NewStatus: StatusAwaitingApproval,
 	})
 	repo.quotes[order.ID] = &Quote{ID: uuid.New(), ServiceOrderID: order.ID, Status: QuoteStatusPending, TotalAmount: 150}
 
@@ -198,7 +198,7 @@ func TestGetDetailQuoteNilBeforeComposition(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	order := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	order := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 
 	detail, err := service.GetDetail(context.Background(), order.ID)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestGetDetailByCode(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
-	order := seedListOrder(repo, customerID, vehicleID, StatusRecebida, time.Now())
+	order := seedListOrder(repo, customerID, vehicleID, StatusReceived, time.Now())
 	order.Code = 42
 
 	detail, err := service.GetDetailByCode(context.Background(), 42)

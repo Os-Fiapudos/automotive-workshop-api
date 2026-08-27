@@ -7,7 +7,7 @@ import (
 )
 
 // RegisterStockUsage registers one or more parts/supplies deductions against
-// a service order that must already be EM_EXECUCAO (BR1). Product
+// a service order that must already be IN_PROGRESS (BR1). Product
 // existence/active/balance checks are not duplicated here — they are
 // enforced atomically by the repository's guarded UPDATE (design.md §3), to
 // avoid a check-then-act race with a concurrent request (BR8).
@@ -16,7 +16,7 @@ func (service *ServiceOrderService) RegisterStockUsage(ctx context.Context, serv
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusEmExecucao {
+	if order.Status != StatusInProgress {
 		return nil, ErrInvalidStatusTransition
 	}
 

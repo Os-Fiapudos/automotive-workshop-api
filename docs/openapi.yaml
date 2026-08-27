@@ -1025,7 +1025,7 @@ paths:
         one of vehicleId/licensePlate must be present (specs/service-order-opening/design.md
         §4.1). Any `status` field sent in the body is ignored — the server
         is the only author of a new order's status, which always starts
-        RECEBIDA (requirements.md §3.6). requestedServiceIds and notes are
+        RECEIVED (requirements.md §3.6). requestedServiceIds and notes are
         optional.
       operationId: createServiceOrder
       security: [{ bearerAuth: [] }]
@@ -1053,7 +1053,7 @@ paths:
       responses:
         "201":
           description: >
-            The created order, status RECEBIDA. `trackingToken` is the raw
+            The created order, status RECEIVED. `trackingToken` is the raw
             customer-tracking token (specs/service-order-tracking/design.md
             §5) — returned only here, once, and never logged (RNF08).
           headers:
@@ -1116,13 +1116,13 @@ paths:
             type: string
             enum:
               [
-                RECEBIDA,
-                EM_DIAGNOSTICO,
-                AGUARDANDO_APROVACAO,
-                EM_EXECUCAO,
-                FINALIZADA,
-                ENTREGUE,
-                CANCELADA,
+                RECEIVED,
+                IN_DIAGNOSIS,
+                AWAITING_APPROVAL,
+                IN_PROGRESS,
+                COMPLETED,
+                DELIVERED,
+                CANCELED,
               ]
         - name: document
           in: query
@@ -1220,7 +1220,7 @@ paths:
       tags: [service-orders]
       summary: Start diagnosis on a service order
       description: >
-        Transitions the order from RECEBIDA to EM_DIAGNOSTICO
+        Transitions the order from RECEIVED to IN_DIAGNOSIS
         (specs/service-order-diagnosis-quote/requirements.md §3.1). No
         request body.
       operationId: startServiceOrderDiagnosis
@@ -1243,7 +1243,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
-          description: The order is not RECEBIDA (code `INVALID_STATUS_TRANSITION`).
+          description: The order is not RECEIVED (code `INVALID_STATUS_TRANSITION`).
           content:
             application/json:
               schema:
@@ -1260,7 +1260,7 @@ paths:
         total is always computed server-side (RF06) — there is no
         client-sendable total/totalAmount field. Recomposition is allowed
         any number of times while the quote is still PENDING and the order
-        has left RECEBIDA; each item resolves and snapshots its price from
+        has left RECEIVED; each item resolves and snapshots its price from
         the product/service catalog at compose time
         (specs/service-order-diagnosis-quote/requirements.md §3.2, §3.9,
         §3.11, §3.12). This no longer transitions the order's status — only
@@ -1312,7 +1312,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            Diagnosis has not started — order still RECEBIDA (code
+            Diagnosis has not started — order still RECEIVED (code
             `DIAGNOSIS_NOT_STARTED`), the quote has already been decided
             (code `QUOTE_ALREADY_DECIDED`), or a referenced product is
             inactive (code `PRODUCT_INACTIVE`).
@@ -1349,8 +1349,8 @@ paths:
       summary: Send a service order's composed quote to the customer
       description: >
         Only a complete quote (at least one item) can be sent, and only
-        while the order is EM_DIAGNOSTICO — sending is what moves it to
-        AGUARDANDO_APROVACAO (specs/service-order-quote-decision/). No
+        while the order is IN_DIAGNOSIS — sending is what moves it to
+        AWAITING_APPROVAL (specs/service-order-quote-decision/). No
         request body. Notification to the customer is best-effort: the MVP
         has no real e-mail integration, and a notification failure never
         undoes or blocks the already-recorded send.
@@ -1377,7 +1377,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            The order is not EM_DIAGNOSTICO (code
+            The order is not IN_DIAGNOSIS (code
             `INVALID_STATUS_TRANSITION`), or the quote has no items (code
             `VALIDATION_ERROR`).
           content:
@@ -1390,7 +1390,7 @@ paths:
       tags: [service-orders]
       summary: Start a service's execution within a service order
       description: >
-        The order must already be EM_EXECUCAO (an external precondition
+        The order must already be IN_PROGRESS (an external precondition
         this feature does not itself produce — see
         specs/service-order-execution/requirements.md §2.1) and the
         referenced service must exist in the catalog.
@@ -1437,7 +1437,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
-          description: The order is not EM_EXECUCAO (code `INVALID_STATUS_TRANSITION`).
+          description: The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`).
           content:
             application/json:
               schema:
@@ -1449,7 +1449,7 @@ paths:
       summary: Record the end of a previously started service execution
       description: >
         endedAt is optional in the request body — an omitted or empty body
-        means "now" (design.md §2.5). The order must still be EM_EXECUCAO —
+        means "now" (design.md §2.5). The order must still be IN_PROGRESS —
         a finalized order accepts no more finishes (BR6).
       operationId: finishServiceOrderExecution
       security: [{ bearerAuth: [] }]
@@ -1490,7 +1490,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            The order is not EM_EXECUCAO (code `INVALID_STATUS_TRANSITION`),
+            The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`),
             or the execution was already finished (code
             `SERVICE_EXECUTION_ALREADY_FINISHED`).
           content:
@@ -1503,7 +1503,7 @@ paths:
       tags: [service-orders]
       summary: Finalize a service order
       description: >
-        Transitions the order from EM_EXECUCAO to FINALIZADA once every
+        Transitions the order from IN_PROGRESS to COMPLETED once every
         required execution — one per distinct service line item of its
         approved quote — has been finished (BR5). No request body.
       operationId: finalizeServiceOrder
@@ -1527,7 +1527,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            The order is not EM_EXECUCAO (code `INVALID_STATUS_TRANSITION`),
+            The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`),
             or it has pending, unfinished executions (code
             `EXECUTIONS_NOT_COMPLETED`, BR5).
           content:
@@ -1540,7 +1540,7 @@ paths:
       tags: [service-orders]
       summary: Mark a service order as delivered to the customer
       description: >
-        Transitions the order from FINALIZADA to ENTREGUE (BR7). No request
+        Transitions the order from COMPLETED to DELIVERED (BR7). No request
         body.
       operationId: deliverServiceOrder
       security: [{ bearerAuth: [] }]
@@ -1562,7 +1562,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
-          description: The order is not FINALIZADA (code `INVALID_STATUS_TRANSITION`).
+          description: The order is not COMPLETED (code `INVALID_STATUS_TRANSITION`).
           content:
             application/json:
               schema:
@@ -1682,7 +1682,7 @@ paths:
         — never accepts or requires the administrative JWT; authenticates
         with the X-Tracking-Token header instead, same convention as
         GET /api/v1/acompanhamento/{codigo}. Approving moves the order from
-        AGUARDANDO_APROVACAO to EM_EXECUCAO. No request body.
+        AWAITING_APPROVAL to IN_PROGRESS. No request body.
       operationId: approveServiceOrderQuote
       security:
         - trackingToken: []
@@ -1738,11 +1738,11 @@ paths:
       summary: Reject a service order's sent quote (customer-facing)
       description: >
         Same authentication and precedence rules as .../orcamento/aprovar.
-        Rejecting moves the order from AGUARDANDO_APROVACAO to CANCELADA —
+        Rejecting moves the order from AWAITING_APPROVAL to CANCELED —
         the closing status decided for a rejected quote, since a REJECTED
         quote can never be altered
         (specs/service-order-diagnosis-quote/requirements.md §3.9) and the
-        order would otherwise have no way to leave AGUARDANDO_APROVACAO. No
+        order would otherwise have no way to leave AWAITING_APPROVAL. No
         request body.
       operationId: rejectServiceOrderQuote
       security:
@@ -2109,13 +2109,13 @@ components:
           type: string
           enum:
             [
-              RECEBIDA,
-              EM_DIAGNOSTICO,
-              AGUARDANDO_APROVACAO,
-              EM_EXECUCAO,
-              FINALIZADA,
-              ENTREGUE,
-              CANCELADA,
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
             ]
         openedAt:
           type: string
@@ -2330,13 +2330,13 @@ components:
           type: string
           enum:
             [
-              RECEBIDA,
-              EM_DIAGNOSTICO,
-              AGUARDANDO_APROVACAO,
-              EM_EXECUCAO,
-              FINALIZADA,
-              ENTREGUE,
-              CANCELADA,
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
             ]
         notes:
           type: string
@@ -2422,13 +2422,13 @@ components:
           type: string
           enum:
             [
-              RECEBIDA,
-              EM_DIAGNOSTICO,
-              AGUARDANDO_APROVACAO,
-              EM_EXECUCAO,
-              FINALIZADA,
-              ENTREGUE,
-              CANCELADA,
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
             ]
         vehicle:
           $ref: "#/components/schemas/ServiceOrderTrackingVehicle"
@@ -2817,8 +2817,8 @@ components:
           format: date-time
         status:
           type: string
-          enum: [RECEBIDA]
-          description: Always RECEBIDA — this is a newly created order.
+          enum: [RECEIVED]
+          description: Always RECEIVED — this is a newly created order.
         notes:
           type: string
         requestedServices:
@@ -2849,13 +2849,13 @@ components:
           type: string
           enum:
             [
-              RECEBIDA,
-              EM_DIAGNOSTICO,
-              AGUARDANDO_APROVACAO,
-              EM_EXECUCAO,
-              FINALIZADA,
-              ENTREGUE,
-              CANCELADA,
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
             ]
 
     ComposeQuoteRequest:
@@ -2899,13 +2899,13 @@ components:
           type: string
           enum:
             [
-              RECEBIDA,
-              EM_DIAGNOSTICO,
-              AGUARDANDO_APROVACAO,
-              EM_EXECUCAO,
-              FINALIZADA,
-              ENTREGUE,
-              CANCELADA,
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
             ]
         respondedAt:
           type: string

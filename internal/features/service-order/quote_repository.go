@@ -75,9 +75,9 @@ func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Co
 	return ref, nil
 }
 
-// StartDiagnosis moves order to EM_DIAGNOSTICO and records the transition in
+// StartDiagnosis moves order to IN_DIAGNOSIS and records the transition in
 // service_order_history, transactionally (RNF07). The
-// "AND status = 'RECEBIDA'" guard closes a race with a concurrent
+// "AND status = 'RECEIVED'" guard closes a race with a concurrent
 // transition: zero rows affected is treated the same as the pre-checked
 // ErrInvalidStatusTransition.
 func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Context, order *ServiceOrder) error {
@@ -88,7 +88,7 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'RECEBIDA'`,
+		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'RECEIVED'`,
 		order.ID, string(order.Status),
 	)
 	if err != nil {
@@ -100,7 +100,7 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-		 VALUES ($1, 'diagnosis_started', $2, 'RECEBIDA', $3)`,
+		 VALUES ($1, 'diagnosis_started', $2, 'RECEIVED', $3)`,
 		order.ID, "Diagnosis started.", string(order.Status),
 	); err != nil {
 		return err
@@ -114,7 +114,7 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 // design.md §1.6). A PUT is a full replace, not a diff: existing items are
 // deleted and the new set is inserted. It no longer transitions the order's
 // status — specs/service-order-quote-decision/ moved the
-// EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO transition to SendQuote, since that
+// IN_DIAGNOSIS -> AWAITING_APPROVAL transition to SendQuote, since that
 // feature introduced an explicit "send" step distinct from composition.
 func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -180,9 +180,9 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 }
 
 // SendQuote implements ServiceOrderRepository (specs/service-order-quote-decision/
-// design.md): moves order from EM_DIAGNOSTICO to AGUARDANDO_APROVACAO and
+// design.md): moves order from IN_DIAGNOSIS to AWAITING_APPROVAL and
 // records quote as sent, transactionally (RNF07). The
-// "AND status = 'EM_DIAGNOSTICO'" guard closes a race with a concurrent
+// "AND status = 'IN_DIAGNOSIS'" guard closes a race with a concurrent
 // transition, same pattern as StartDiagnosis.
 func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
@@ -192,7 +192,7 @@ func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context,
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'EM_DIAGNOSTICO'`,
+		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'IN_DIAGNOSIS'`,
 		order.ID, string(order.Status),
 	)
 	if err != nil {
@@ -212,7 +212,7 @@ func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context,
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-		 VALUES ($1, 'quote_sent', $2, 'EM_DIAGNOSTICO', $3)`,
+		 VALUES ($1, 'quote_sent', $2, 'IN_DIAGNOSIS', $3)`,
 		order.ID, "Quote sent to customer.", string(order.Status),
 	); err != nil {
 		return nil, err
@@ -243,7 +243,7 @@ func decisionEventFor(decision QuoteStatus) string {
 // anything else) fails, the quote/order updates already issued within this
 // same transaction are rolled back too, since Commit is only ever reached at
 // the very end. The "AND status = 'PENDING'"/"AND status =
-// 'AGUARDANDO_APROVACAO'" guards make a second decision attempt (approve
+// 'AWAITING_APPROVAL'" guards make a second decision attempt (approve
 // after reject, or a repeated identical decision) affect zero rows, which is
 // reported as ErrQuoteAlreadyDecided — the same outcome regardless of
 // whether the second attempt matches the first decision or not.
@@ -267,7 +267,7 @@ func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Contex
 	quote.Status = decision
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'AGUARDANDO_APROVACAO'`,
+		`UPDATE service_orders SET status = $2 WHERE id = $1 AND status = 'AWAITING_APPROVAL'`,
 		order.ID, string(order.Status),
 	)
 	if err != nil {
@@ -283,7 +283,7 @@ func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Contex
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
-		 VALUES ($1, $2, $3, 'AGUARDANDO_APROVACAO', $4)`,
+		 VALUES ($1, $2, $3, 'AWAITING_APPROVAL', $4)`,
 		order.ID, decisionEventFor(decision), description, string(order.Status),
 	); err != nil {
 		return nil, err

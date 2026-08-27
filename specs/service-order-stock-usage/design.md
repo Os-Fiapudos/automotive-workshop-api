@@ -30,7 +30,7 @@ without importing that package, per CLAUDE.md §9.2's "no direct coupling betwee
 ### 1.1 Same package, not a new feature
 
 This feature operates on the same `ServiceOrder` aggregate `service-order-opening` created
-and reuses its `EM_EXECUCAO` status, so it adds new files to the existing
+and reuses its `IN_PROGRESS` status, so it adds new files to the existing
 `internal/features/service-order/` package, mirroring the existing `execution_*.go`/
 `quote_*.go` split:
 
@@ -100,7 +100,7 @@ func validateStockUsageItems(items []StockUsageItem) error {
 }
 ```
 
-No new `ServiceOrder` transition or method: BR1's "must be `EM_EXECUCAO`" is a plain status
+No new `ServiceOrder` transition or method: BR1's "must be `IN_PROGRESS`" is a plain status
 equality check in the service layer, same shape `StartExecution`/`FinishExecution` already
 use (`execution_service.go`) — there is no state to transition, only a precondition to gate.
 
@@ -112,7 +112,7 @@ func (service *ServiceOrderService) RegisterStockUsage(ctx, serviceOrderID uuid.
     if err != nil {
         return nil, err
     }
-    if order.Status != StatusEmExecucao {
+    if order.Status != StatusInProgress {
         return nil, ErrInvalidStatusTransition
     }
     if err := validateStockUsageItems(items); err != nil {
@@ -155,7 +155,7 @@ Same `Begin` / `defer Rollback` / `Commit`-once-at-the-end shape `DecideQuote` e
 (`quote_repository.go`):
 
 1. `SELECT status FROM service_orders WHERE id = $1` inside the transaction to re-confirm
-   `EM_EXECUCAO` (closes the same race `StartDiagnosis`'s status guard closes) — zero/mismatched
+   `IN_PROGRESS` (closes the same race `StartDiagnosis`'s status guard closes) — zero/mismatched
    rows → `ErrServiceOrderNotFound`/`ErrInvalidStatusTransition`.
 2. For each item, the same guarded, atomic `UPDATE` `product.AdjustStock`
    (`internal/features/product/repository.go:246`) already established for exactly this
@@ -221,7 +221,7 @@ The list envelope is `{"items": [...]}` (CLAUDE.md §8's "reuse this shape for n
 endpoints" convention, first defined by the service catalog listing) — this is a genuinely
 new top-level list endpoint, not an addition to the order detail response's existing
 `data/page/pageSize/total/totalPages` shape, and a service order's movement count in one
-`EM_EXECUCAO` window does not need pagination.
+`IN_PROGRESS` window does not need pagination.
 
 ## 6. `product` package: minimal touch to persist its own movements
 
@@ -260,9 +260,9 @@ no unrelated refactor.
 ## 9. Testing (requirements.md §7's last checklist item, RNF06)
 
 - Unit (service layer, fake repository): `stockusage_service_test.go` — BR1 (must be
-  `EM_EXECUCAO`), BR3 (quantity > 0), empty items rejected.
+  `IN_PROGRESS`), BR3 (quantity > 0), empty items rejected.
 - Integration (`internal/handlers_test/service_order_test.go`), against a real Postgres,
-  reusing `insertProduct`/`productStock`/`moveServiceOrderToEmExecucao`:
+  reusing `insertProduct`/`productStock`/`moveServiceOrderToInProgress`:
   - successful multi-item deduction decrements every product and links every movement to
     the order (BR5).
   - insufficient stock on one item rolls back every item in that request, verified via

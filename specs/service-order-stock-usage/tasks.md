@@ -31,7 +31,7 @@ Each task references the `design.md` section it implements.
     `internal/features/product/fake_repository_test.go` to match.
 13. **Integration tests** (design.md §9) — add HTTP-level tests to
     `internal/handlers_test/service_order_test.go` covering the full acceptance checklist in
-    `requirements.md` §6, reusing `insertProduct`/`productStock`/`moveServiceOrderToEmExecucao`.
+    `requirements.md` §6, reusing `insertProduct`/`productStock`/`moveServiceOrderToInProgress`.
 14. **Architecture doc** (design.md §8) — append the new addendum block to
     `specs/architecture.md`.
 15. **Verification** — `go build ./...`, `go vet ./...`, `go test ./...` all green; walk

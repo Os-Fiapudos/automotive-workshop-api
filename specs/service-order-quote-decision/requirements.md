@@ -12,10 +12,10 @@ This is the direct follow-up explicitly deferred by
 `specs/service-order-diagnosis-quote/requirements.md` §7.1 ("Quote approval/rejection") and
 flagged as an external, unimplemented precondition by
 `specs/service-order-execution/requirements.md` §2.1: no code in the repository produced the
-`AGUARDANDO_APROVACAO → EM_EXECUCAO` transition until this feature. It also introduces the
+`AWAITING_APPROVAL → IN_PROGRESS` transition until this feature. It also introduces the
 explicit "send the quote to the customer" step the original card described but
 `service-order-diagnosis-quote` did not implement — composing a quote there already moved
-the order to `AGUARDANDO_APROVACAO` by itself.
+the order to `AWAITING_APPROVAL` by itself.
 
 Source: Jira user story (RF06, RF07, RF08, RF12, RNF07), pasted into the SDD prompt that
 started this feature.
@@ -31,18 +31,18 @@ started this feature.
 The source spec left several points ambiguous or in direct conflict with already-shipped
 behavior. These were resolved with the requester before writing `design.md`:
 
-1. **`CANCELADA` status** (source spec's own flagged, non-final recommendation): **added**.
+1. **`CANCELED` status** (source spec's own flagged, non-final recommendation): **added**.
    Without it, a rejected quote — which `specs/service-order-diagnosis-quote/requirements.md`
    §3.9 already forbids altering once decided — would leave its order permanently stuck in
-   `AGUARDANDO_APROVACAO` with no path forward. `CANCELADA` is the order's explicit closing
+   `AWAITING_APPROVAL` with no path forward. `CANCELED` is the order's explicit closing
    status for this case (§5).
-2. **Compose vs. send owning the `EM_DIAGNOSTICO → AGUARDANDO_APROVACAO` transition**:
+2. **Compose vs. send owning the `IN_DIAGNOSIS → AWAITING_APPROVAL` transition**:
    `specs/service-order-diagnosis-quote/design.md` §1.6 already made `ComposeQuote` (`PUT
    .../quote`) perform this transition on every successful compose, including a recompose.
    This card's own RF06 explicitly attributes the transition to *sending* the quote, not
    composing it. Resolved: **sending owns the transition**. `ComposeQuote` no longer
    transitions the order — it only requires diagnosis to have started (order not
-   `RECEBIDA`), same precondition as before, just without the side effect. This is a
+   `RECEIVED`), same precondition as before, just without the side effect. This is a
    behavioral change to already-shipped code from
    `specs/service-order-diagnosis-quote/design.md` §1.6/§1.4, recorded there as an erratum
    rather than rewritten as if it had always been this way (`specs/README.md`'s "the
@@ -66,13 +66,13 @@ behavior. These were resolved with the requester before writing `design.md`:
    guarantees before a quote can exist at all) can be sent. Sending a service order with no
    composed quote yet is rejected.
 2. Sending records the send date/time (`sent_at`) and the quote version actually presented
-   (`sent_version`), and moves the order from `EM_DIAGNOSTICO` to `AGUARDANDO_APROVACAO`.
-   Sending is only allowed while the order is `EM_DIAGNOSTICO`.
+   (`sent_version`), and moves the order from `IN_DIAGNOSIS` to `AWAITING_APPROVAL`.
+   Sending is only allowed while the order is `IN_DIAGNOSIS`.
 3. The customer's decision (approve/reject) is only allowed while the quote is `PENDING`.
 4. Approving sets the quote to `APPROVED`, records the response date/time (`responded_at`),
-   and automatically moves the order to `EM_EXECUCAO`.
+   and automatically moves the order to `IN_PROGRESS`.
 5. Rejecting sets the quote to `REJECTED`, records `responded_at`, and automatically moves
-   the order to `CANCELADA` (§3 item 1).
+   the order to `CANCELED` (§3 item 1).
 6. The response date and the customer's decision are immutable once recorded — a quote that
    is no longer `PENDING` cannot be decided again, in either direction.
 7. A second response — whether the same decision repeated or a different one — is rejected
@@ -89,12 +89,12 @@ behavior. These were resolved with the requester before writing `design.md`:
 10. The MVP registers the send even though no real e-mail integration exists — a
     notification failure must never block or undo a send that already happened.
 
-## 5. `CANCELADA` (domain decision, §3 item 1)
+## 5. `CANCELED` (domain decision, §3 item 1)
 
-`ServiceOrder.status` gains a seventh value, `CANCELADA`, reached only from
-`AGUARDANDO_APROVACAO` when the quote is rejected. The six statuses required by the original
-domain (`docs/entities.md`) are unchanged; `CANCELADA` is an additional branch, not a
-replacement for any of them. No other transition produces or consumes `CANCELADA` in this
+`ServiceOrder.status` gains a seventh value, `CANCELED`, reached only from
+`AWAITING_APPROVAL` when the quote is rejected. The six statuses required by the original
+domain (`docs/entities.md`) are unchanged; `CANCELED` is an additional branch, not a
+replacement for any of them. No other transition produces or consumes `CANCELED` in this
 feature's scope (e.g. there is no "reopen a cancelled order" action here).
 
 ## 6. Endpoints
@@ -126,14 +126,14 @@ POST /api/v1/acompanhamento/{codigo}/orcamento/reprovar
 
 - [ ] AC1 — An incomplete quote (none composed yet) cannot be sent.
 - [ ] AC2 — Sending records `sent_at`/`sent_version` and moves the order to
-      `AGUARDANDO_APROVACAO`.
-- [ ] AC3 — Sending is only allowed from `EM_DIAGNOSTICO` (not before diagnosis, not a
+      `AWAITING_APPROVAL`.
+- [ ] AC3 — Sending is only allowed from `IN_DIAGNOSIS` (not before diagnosis, not a
       second time once already sent).
 - [ ] AC4 — Approval is only accepted while the quote is `PENDING`.
 - [ ] AC5 — Approval records `responded_at`.
-- [ ] AC6 — Approval moves the order to `EM_EXECUCAO`.
+- [ ] AC6 — Approval moves the order to `IN_PROGRESS`.
 - [ ] AC7 — Rejection records `responded_at` and sets the quote to `REJECTED`.
-- [ ] AC8 — Rejection moves the order to `CANCELADA` (§5).
+- [ ] AC8 — Rejection moves the order to `CANCELED` (§5).
 - [ ] AC9 — A quote cannot be both approved and rejected.
 - [ ] AC10 — A repeated decision (same or different) on an already-decided quote is
       rejected consistently (409), never partially applied.
@@ -151,5 +151,5 @@ POST /api/v1/acompanhamento/{codigo}/orcamento/reprovar
 Per the source spec's own "Fora de escopo" section: real e-mail integration, editing the
 quote after it has been sent (recomposing after send is unaffected — it was already possible
 before this feature and is not extended or restricted here), quote creation itself (owned by
-`specs/service-order-diagnosis-quote/`), and any definition of `CANCELADA` beyond the
+`specs/service-order-diagnosis-quote/`), and any definition of `CANCELED` beyond the
 explicit decision recorded in §5.

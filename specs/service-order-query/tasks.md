@@ -12,8 +12,8 @@ Each task references the `design.md` section it implements.
 
 - [x] Add `ServiceOrderHistory` struct to `model.go`.
 - [x] Add the package-level list of the six known status strings (for filter validation),
-      kept separate from the `StatusRecebida`/`StatusEmDiagnostico`/
-      `StatusAguardandoAprovacao` transition constants.
+      kept separate from the `StatusReceived`/`StatusInDiagnosis`/
+      `StatusAwaitingApproval` transition constants.
 - [x] Extend `customerRef` with `Document`/`Phone`; extend `vehicleRef` with
       `Brand`/`Model`/`Year`/`Color` (`repository.go`).
 
@@ -67,7 +67,7 @@ Each task references the `design.md` section it implements.
       detail assembly (quote present/absent), not-found by id/code.
 - [x] `internal/handlers_test/service_order_test.go`: pagination, every filter, combined
       filters, detail by id/code, `404` unknown id/code, `401` without a token on both
-      routes, full-lifecycle detail (with quote + multi-entry history) vs. `RECEBIDA`-only
+      routes, full-lifecycle detail (with quote + multi-entry history) vs. `RECEIVED`-only
       detail (`quote` absent, single history entry).
 
 ## 8. Documentation (`design.md` §4)

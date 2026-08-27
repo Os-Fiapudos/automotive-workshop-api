@@ -38,7 +38,7 @@ needs to validate a vehicle at order-opening time (see §7.2).
 5. The order receives a unique, human-readable `code`, assigned by the database
    (`service_orders.code`, already `GENERATED ALWAYS AS IDENTITY` in `docs/schema.sql`) —
    nothing new needed here.
-6. The order's initial status is always `RECEBIDA`. The API consumer cannot choose or
+6. The order's initial status is always `RECEIVED`. The API consumer cannot choose or
    override it: a `status` field present in the request body, if any, is ignored — it does
    not fail the request, it simply has no effect on the created order.
 7. The services initially requested (`requestedServiceIds`) represent the customer's
@@ -47,7 +47,7 @@ needs to validate a vehicle at order-opening time (see §7.2).
    specified). Each requested service id must reference an existing `Service` in the
    catalog; an unknown id rejects the whole request.
 8. Creating the order must also record a `service_order_history` event
-   (`event = 'creation'`, `previous_status = new_status = 'RECEBIDA'` — see
+   (`event = 'creation'`, `previous_status = new_status = 'RECEIVED'` — see
    `docs/seed.sql`'s existing seed data for this exact convention already in use).
 9. The service order row and its first history row must be created in the same database
    transaction (RNF07): if writing the history event fails, the service order creation
@@ -59,7 +59,7 @@ needs to validate a vehicle at order-opening time (see §7.2).
 In scope for this feature:
 
 - `ServiceOrder` domain aggregate: id, code, customer, vehicle, opened-at, status
-  (always `RECEBIDA` on creation), notes, requested services, timestamps.
+  (always `RECEIVED` on creation), notes, requested services, timestamps.
 - One use case: create a service order (`POST /api/v1/service-orders`).
 - Validation: customer exists/active, vehicle exists/active/owned by customer, requested
   services exist.
@@ -71,7 +71,7 @@ In scope for this feature:
 Out of scope for this feature (see §7, "Future requirements"):
 
 - Any other Service Order use case (diagnosis, quote composition/approval, execution,
-  delivery, status transitions beyond the initial `RECEBIDA`) — future cards (e.g. FP-16
+  delivery, status transitions beyond the initial `RECEIVED`) — future cards (e.g. FP-16
   and beyond).
 - Vehicle management (create/update/list/deactivate a vehicle) — a teammate's separate,
   not-yet-specified feature. This feature only reads `vehicles` for validation.
@@ -108,14 +108,14 @@ POST /api/v1/service-orders
 [ ] Reject when the vehicle is INACTIVE
 [ ] Reject when the vehicle belongs to a different customer than the one identified
 [ ] The order always receives a unique code
-[ ] The order's initial status is always RECEBIDA
+[ ] The order's initial status is always RECEIVED
 [ ] A status value sent in the request body is ignored, not applied, and does not fail the request
 [ ] Requested services are persisted as the initial demand (no price)
 [ ] Reject when a requested service id does not exist in the catalog
-[ ] A creation history event is recorded (event=creation, previous=new=RECEBIDA)
+[ ] A creation history event is recorded (event=creation, previous=new=RECEIVED)
 [ ] A failure writing the history event rolls back the whole order creation (no orphan order)
 [ ] The response returns code, customer, vehicle, requested services, and status
-[ ] Unit tests for the aggregate (always starts RECEBIDA, no way to set another status)
+[ ] Unit tests for the aggregate (always starts RECEIVED, no way to set another status)
 [ ] Unit tests for service-layer validation (customer/vehicle/service rules) via an in-memory fake repository
 [ ] Integration tests for the endpoint, including the transactional-rollback case
 ```
@@ -128,7 +128,7 @@ POST /api/v1/service-orders
 
 A future card (diagnosis + quote composition) will introduce `Orcamento`/`ItemOrcamento`
 on top of the `ServiceOrder` created here, with automatic price calculation and status
-transitions (`RECEBIDA` → `EM_DIAGNOSTICO` → ...). No code in this feature should
+transitions (`RECEIVED` → `IN_DIAGNOSIS` → ...). No code in this feature should
 anticipate or stub that.
 
 ### 7.2 Vehicle management
