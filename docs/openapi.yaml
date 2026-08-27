@@ -1,6 +1,6 @@
-openapi: 3.0.3
+﻿openapi: 3.0.3
 info:
-  title: automotive-workshop-api — Customer & Vehicle Management
+  title: automotive-workshop-api â€” Customer & Vehicle Management
   description: >
     Auth, Customer Management, Vehicle Management, Service catalog, Product &
     Stock Management, Service Order opening/diagnosis/quote/execution, Service
@@ -17,9 +17,9 @@ info:
     bearerAuth security scheme; POST /api/v1/auth/login itself is the one
     exception, since it is what issues the token); Customer routes and
     Service Order creation do not (see
-    specs/customer-management/requirements.md §7.2 and CLAUDE.md §1); Service
+    specs/customer-management/requirements.md Â§7.2 and CLAUDE.md Â§1); Service
     Order Tracking and the customer-facing quote approve/reject endpoints use
-    neither — they validate their own per-order tracking token instead (see
+    neither â€” they validate their own per-order tracking token instead (see
     the trackingToken security scheme).
   version: "1.0.0"
 servers:
@@ -49,7 +49,7 @@ tags:
       (specs/product-management/). Every endpoint requires a valid JWT.
       Route segments are kept in Portuguese (`produtos`/`estoque`/
       `ajustes`/`movimentacoes`) by the same deliberate exception CLAUDE.md
-      §8 documents for the ServiceOrder status enum — do not translate them.
+      Â§8 documents for the ServiceOrder status enum â€” do not translate them.
   - name: service-orders
     description: >
       Open a service order and drive it through its full lifecycle: creation
@@ -58,7 +58,7 @@ tags:
       (specs/service-order-quote-decision/), execution, finalization, and
       delivery (specs/service-order-execution/), plus listing/detail
       (specs/service-order-query/). Order creation is unauthenticated (see
-      CLAUDE.md §1); every other endpoint here requires a valid JWT. The
+      CLAUDE.md Â§1); every other endpoint here requires a valid JWT. The
       customer-facing quote approval/rejection endpoints live under the
       `tracking` tag instead, since they authenticate with a tracking token,
       not a JWT (specs/service-order-quote-decision/).
@@ -75,7 +75,7 @@ paths:
       tags: [auth]
       summary: Administrative login
       description: >
-        Issues a JWT for an administrative user (specs/auth/design.md §4).
+        Issues a JWT for an administrative user (specs/auth/design.md Â§4).
         The identifier is e-mail; unknown e-mail and wrong password return
         the exact same 401 body so a client cannot enumerate users (BR4).
       operationId: login
@@ -106,7 +106,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "401":
           description: >
-            Unknown e-mail or wrong password (code `UNAUTHORIZED`) —
+            Unknown e-mail or wrong password (code `UNAUTHORIZED`) â€”
             deliberately identical for both cases (BR4).
           content:
             application/json:
@@ -268,7 +268,7 @@ paths:
       summary: Logically deactivate a customer
       description: >
         Soft delete: sets status to INACTIVE. The record is never physically
-        removed and remains fully queryable. Idempotent — deactivating an
+        removed and remains fully queryable. Idempotent â€” deactivating an
         already-inactive customer returns 200 with no change. There is no
         endpoint to reactivate a customer in this feature.
       operationId: deactivateCustomer
@@ -456,7 +456,7 @@ paths:
       summary: Logically deactivate a vehicle
       description: >
         Soft delete: sets status to INACTIVE. The record is never physically
-        removed and remains fully queryable. Idempotent — deactivating an
+        removed and remains fully queryable. Idempotent â€” deactivating an
         already-inactive vehicle returns 200 with no change. There is no
         endpoint to reactivate a vehicle in this feature.
       operationId: deactivateVehicle
@@ -514,7 +514,7 @@ paths:
       summary: List a customer's vehicles
       description: >
         An existing customer with no vehicles returns 200 with an empty data
-        array. An inactive customer's vehicles are still listed — inactivity
+        array. An inactive customer's vehicles are still listed â€” inactivity
         only affects future service-order eligibility, not visibility.
       operationId: listVehiclesByCustomer
       security: [{ bearerAuth: [] }]
@@ -548,7 +548,7 @@ paths:
       tags: [services]
       summary: Register a new catalog service
       description: >
-        specs/service-catalog/design.md §D1: `code` is optional — when
+        specs/service-catalog/design.md Â§D1: `code` is optional â€” when
         omitted, the database generates the sequential identifier; when
         present, a collision with an existing service's code is rejected.
       operationId: createCatalogService
@@ -584,7 +584,7 @@ paths:
         "400":
           description: >
             Malformed JSON body (code `INVALID_BODY`), or a missing/invalid
-            field — empty name, negative price, non-positive code or
+            field â€” empty name, negative price, non-positive code or
             estimated_time (code `VALIDATION_ERROR`, BR1/BR2/BR3/BR4).
           content:
             application/json:
@@ -602,9 +602,9 @@ paths:
       tags: [services]
       summary: List catalog services
       description: >
-        Ordered by code. Not paginated — the `{"items": [...]}` envelope is
+        Ordered by code. Not paginated â€” the `{"items": [...]}` envelope is
         used instead of the page/pageSize/total/totalPages shape (see
-        CLAUDE.md §8's "Collection responses" note, which this endpoint
+        CLAUDE.md Â§8's "Collection responses" note, which this endpoint
         first established).
       operationId: listCatalogServices
       security: [{ bearerAuth: [] }]
@@ -698,7 +698,7 @@ paths:
       summary: Logically deactivate a catalog service
       description: >
         Soft delete: sets active to false, preserving history (BR7). An
-        inactive service must not be used in new quotes (BR6). Idempotent —
+        inactive service must not be used in new quotes (BR6). Idempotent â€”
         deactivating an already-inactive service still succeeds.
       operationId: deactivateCatalogService
       security: [{ bearerAuth: [] }]
@@ -714,7 +714,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
-  /api/v1/produtos:
+  /api/v1/products:
     post:
       tags: [products]
       summary: Register a new product (part or supply)
@@ -730,8 +730,8 @@ paths:
               part:
                 summary: A replacement part
                 value:
-                  name: Filtro de Óleo
-                  description: Filtro de óleo compatível com motores 1.0/1.6.
+                  name: Filtro de Ã“leo
+                  description: Filtro de Ã³leo compatÃ­vel com motores 1.0/1.6.
                   unitPrice: 35.9
                   currentStock: 50
                   type: PART
@@ -750,7 +750,7 @@ paths:
         "400":
           description: >
             Malformed JSON body (code `INVALID_BODY`), or a missing/invalid
-            field — empty name, missing/negative unitPrice, missing/negative
+            field â€” empty name, missing/negative unitPrice, missing/negative
             currentStock, non-positive code, or type not PART/SUPPLY (code
             `VALIDATION_ERROR`).
           content:
@@ -795,7 +795,7 @@ paths:
         "401":
           description: Missing, malformed, or expired bearer token.
 
-  /api/v1/produtos/{id}:
+  /api/v1/products/{id}:
     parameters:
       - $ref: "#/components/parameters/ProductId"
     get:
@@ -829,9 +829,9 @@ paths:
       summary: Partially update a product's cadastral data
       description: >
         Name, description, unitPrice, and type may be updated. `currentStock`
-        is deliberately not modifiable through this endpoint (RNF07) — a
+        is deliberately not modifiable through this endpoint (RNF07) â€” a
         request that includes it is rejected wholesale, even alongside other,
-        otherwise-valid fields; use POST .../estoque/ajustes instead.
+        otherwise-valid fields; use POST .../stock/adjustments instead.
       operationId: updateProduct
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -888,7 +888,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
-  /api/v1/produtos/{id}/estoque/ajustes:
+  /api/v1/products/{id}/stock/adjustments:
     post:
       tags: [products]
       summary: Register a stock adjustment (entry or exit)
@@ -913,7 +913,7 @@ paths:
                 value:
                   type: ENTRY
                   quantity: 10
-                  reason: Ajuste de inventário anual
+                  reason: Ajuste de inventÃ¡rio anual
       responses:
         "201":
           description: The created stock movement record.
@@ -947,7 +947,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
-  /api/v1/produtos/{id}/estoque:
+  /api/v1/products/{id}/stock:
     get:
       tags: [products]
       summary: Retrieve a product's current stock balance
@@ -971,7 +971,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
-  /api/v1/produtos/{id}/movimentacoes:
+  /api/v1/products/{id}/movements:
     get:
       tags: [products]
       summary: List a product's stock movement history (RF10)
@@ -1002,12 +1002,12 @@ paths:
       tags: [service-orders]
       summary: Open a new service order
       description: >
-        Unauthenticated (CLAUDE.md §1, same open decision as Customer
+        Unauthenticated (CLAUDE.md Â§1, same open decision as Customer
         Management). Exactly one of customerId/customerDocument and exactly
         one of vehicleId/licensePlate must be present (specs/service-order-opening/design.md
-        §4.1). Any `status` field sent in the body is ignored — the server
+        Â§4.1). Any `status` field sent in the body is ignored â€” the server
         is the only author of a new order's status, which always starts
-        RECEIVED (requirements.md §3.6). requestedServiceIds and notes are
+        RECEIVED (requirements.md Â§3.6). requestedServiceIds and notes are
         optional.
       operationId: createServiceOrder
       requestBody:
@@ -1036,7 +1036,7 @@ paths:
           description: >
             The created order, status RECEIVED. `trackingToken` is the raw
             customer-tracking token (specs/service-order-tracking/design.md
-            §5) — returned only here, once, and never logged (RNF08).
+            Â§5) â€” returned only here, once, and never logged (RNF08).
           headers:
             Location:
               description: URL of the newly created service order.
@@ -1151,12 +1151,12 @@ paths:
       summary: Retrieve a service order's full detail, by id or by code
       description: >
         {id} accepts either the order's technical id (a UUID) or its
-        sequential code (an integer) — the two value spaces never overlap, so
+        sequential code (an integer) â€” the two value spaces never overlap, so
         the server tells them apart automatically. Both forms return the same
         ServiceOrderDetail shape: customer, vehicle, status, notes, the
         services requested at opening, the composed quote (its item values
         are the quote's own stored snapshot, never the catalog's current
-        price — absent/null when no quote has been composed yet), and the
+        price â€” absent/null when no quote has been composed yet), and the
         full status-change history, oldest first. A related customer,
         vehicle, product, or service that has since become inactive is still
         shown.
@@ -1200,7 +1200,7 @@ paths:
       summary: Start diagnosis on a service order
       description: >
         Transitions the order from RECEIVED to IN_DIAGNOSIS
-        (specs/service-order-diagnosis-quote/requirements.md §3.1). No
+        (specs/service-order-diagnosis-quote/requirements.md Â§3.1). No
         request body.
       operationId: startServiceOrderDiagnosis
       security: [{ bearerAuth: [] }]
@@ -1236,13 +1236,13 @@ paths:
       summary: Compose (or recompose) a service order's quote
       description: >
         Replaces the order's quote wholesale with the given items; the
-        total is always computed server-side (RF06) — there is no
+        total is always computed server-side (RF06) â€” there is no
         client-sendable total/totalAmount field. Recomposition is allowed
         any number of times while the quote is still PENDING and the order
         has left RECEIVED; each item resolves and snapshots its price from
         the product/service catalog at compose time
-        (specs/service-order-diagnosis-quote/requirements.md §3.2, §3.9,
-        §3.11, §3.12). This no longer transitions the order's status — only
+        (specs/service-order-diagnosis-quote/requirements.md Â§3.2, Â§3.9,
+        Â§3.11, Â§3.12). This no longer transitions the order's status â€” only
         POST .../quote/send does (specs/service-order-quote-decision/).
       operationId: composeServiceOrderQuote
       security: [{ bearerAuth: [] }]
@@ -1291,7 +1291,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            Diagnosis has not started — order still RECEIVED (code
+            Diagnosis has not started â€” order still RECEIVED (code
             `DIAGNOSIS_NOT_STARTED`), the quote has already been decided
             (code `QUOTE_ALREADY_DECIDED`), or a referenced product is
             inactive (code `PRODUCT_INACTIVE`).
@@ -1328,7 +1328,7 @@ paths:
       summary: Send a service order's composed quote to the customer
       description: >
         Only a complete quote (at least one item) can be sent, and only
-        while the order is IN_DIAGNOSIS — sending is what moves it to
+        while the order is IN_DIAGNOSIS â€” sending is what moves it to
         AWAITING_APPROVAL (specs/service-order-quote-decision/). No
         request body. Notification to the customer is best-effort: the MVP
         has no real e-mail integration, and a notification failure never
@@ -1370,8 +1370,8 @@ paths:
       summary: Start a service's execution within a service order
       description: >
         The order must already be IN_PROGRESS (an external precondition
-        this feature does not itself produce — see
-        specs/service-order-execution/requirements.md §2.1) and the
+        this feature does not itself produce â€” see
+        specs/service-order-execution/requirements.md Â§2.1) and the
         referenced service must exist in the catalog.
       operationId: startServiceOrderExecution
       security: [{ bearerAuth: [] }]
@@ -1427,8 +1427,8 @@ paths:
       tags: [service-orders]
       summary: Record the end of a previously started service execution
       description: >
-        endedAt is optional in the request body — an omitted or empty body
-        means "now" (design.md §2.5). The order must still be IN_PROGRESS —
+        endedAt is optional in the request body â€” an omitted or empty body
+        means "now" (design.md Â§2.5). The order must still be IN_PROGRESS â€”
         a finalized order accepts no more finishes (BR6).
       operationId: finishServiceOrderExecution
       security: [{ bearerAuth: [] }]
@@ -1483,8 +1483,8 @@ paths:
       summary: Finalize a service order
       description: >
         Transitions the order from IN_PROGRESS to COMPLETED once every
-        required execution — one per distinct service line item of its
-        approved quote — has been finished (BR5). No request body.
+        required execution â€” one per distinct service line item of its
+        approved quote â€” has been finished (BR5). No request body.
       operationId: finalizeServiceOrder
       security: [{ bearerAuth: [] }]
       parameters:
@@ -1602,15 +1602,15 @@ paths:
       tags: [tracking]
       summary: Look up a service order's public tracking view
       description: >
-        Customer-facing read view (RF12) — never accepts or requires the
+        Customer-facing read view (RF12) â€” never accepts or requires the
         administrative JWT (specs/service-order-tracking/requirements.md
         AC10); authenticates with the X-Tracking-Token header instead (see
         the trackingToken security scheme). The response is a deliberately
         limited projection, distinct from the administrative
         ServiceOrderDetail: only the order's code, current status, a partial
-        vehicle identification (license plate, brand, model, year, color —
+        vehicle identification (license plate, brand, model, year, color â€”
         no id/code/status/owning customer), and the milestone trail (event,
-        previous/new status, occurredAt — no free-text description). Customer
+        previous/new status, occurredAt â€” no free-text description). Customer
         PII (CPF/CNPJ, phone, e-mail), internal ids, and any other order are
         never present (AC6-AC9).
       operationId: getServiceOrderTracking
@@ -1635,7 +1635,7 @@ paths:
           description: >
             The X-Tracking-Token header is missing, malformed, wrong,
             belongs to a different service order, or has been revoked (code
-            `INVALID_TRACKING_TOKEN`) — all deliberately indistinguishable
+            `INVALID_TRACKING_TOKEN`) â€” all deliberately indistinguishable
             from each other, so a wrong token never reveals which specific
             way it was wrong (AC2, AC4, AC5).
           content:
@@ -1645,7 +1645,7 @@ paths:
         "404":
           description: >
             No service order with this code, or {codigo} is not a valid
-            integer (code `NOT_FOUND`) — checked before the token, so it
+            integer (code `NOT_FOUND`) â€” checked before the token, so it
             takes precedence regardless of what token was supplied.
           content:
             application/json:
@@ -1658,7 +1658,7 @@ paths:
       summary: Approve a service order's sent quote (customer-facing)
       description: >
         Customer-facing decision endpoint (specs/service-order-quote-decision/)
-        — never accepts or requires the administrative JWT; authenticates
+        â€” never accepts or requires the administrative JWT; authenticates
         with the X-Tracking-Token header instead, same convention as
         GET /api/v1/acompanhamento/{codigo}. Approving moves the order from
         AWAITING_APPROVAL to IN_PROGRESS. No request body.
@@ -1676,7 +1676,7 @@ paths:
       responses:
         "200":
           description: >
-            The reduced, public decision projection — no internal ids, no
+            The reduced, public decision projection â€” no internal ids, no
             item breakdown (same "reduced read projection" principle as
             ServiceOrderTracking).
           content:
@@ -1687,7 +1687,7 @@ paths:
           description: >
             The X-Tracking-Token header is missing, malformed, wrong,
             belongs to a different service order, or has been revoked (code
-            `INVALID_TRACKING_TOKEN`) — all deliberately indistinguishable
+            `INVALID_TRACKING_TOKEN`) â€” all deliberately indistinguishable
             from each other.
           content:
             application/json:
@@ -1695,7 +1695,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: >
-            No service order with this code (code `NOT_FOUND`) — checked
+            No service order with this code (code `NOT_FOUND`) â€” checked
             before the token, so it takes precedence regardless of what
             token was supplied.
           content:
@@ -1704,7 +1704,7 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "409":
           description: >
-            The quote has already been decided — approved or rejected
+            The quote has already been decided â€” approved or rejected
             already (code `QUOTE_ALREADY_DECIDED`).
           content:
             application/json:
@@ -1717,10 +1717,10 @@ paths:
       summary: Reject a service order's sent quote (customer-facing)
       description: >
         Same authentication and precedence rules as .../orcamento/aprovar.
-        Rejecting moves the order from AWAITING_APPROVAL to CANCELED —
+        Rejecting moves the order from AWAITING_APPROVAL to CANCELED â€”
         the closing status decided for a rejected quote, since a REJECTED
         quote can never be altered
-        (specs/service-order-diagnosis-quote/requirements.md §3.9) and the
+        (specs/service-order-diagnosis-quote/requirements.md Â§3.9) and the
         order would otherwise have no way to leave AWAITING_APPROVAL. No
         request body.
       operationId: rejectServiceOrderQuote
@@ -1772,14 +1772,14 @@ components:
       description: >
         Required on every Vehicle Management route, every Service catalog and
         Product Management route, GET /api/v1/auth/me, and every Service
-        Order route except creation (RNF02) — that includes the Service
+        Order route except creation (RNF02) â€” that includes the Service
         Order Query routes plus the diagnosis/quote/execution routes added by
         specs/service-order-diagnosis-quote/,
         specs/service-order-quote-decision/ (only its send-quote endpoint;
         approve/reject are customer-facing, see trackingToken), and
         specs/service-order-execution/. Not required on Customer Management
-        routes (see specs/customer-management/requirements.md §7.2) nor on
-        POST /api/v1/service-orders (CLAUDE.md §1), and not accepted at all
+        routes (see specs/customer-management/requirements.md Â§7.2) nor on
+        POST /api/v1/service-orders (CLAUDE.md Â§1), and not accepted at all
         by the Service Order Tracking route or the customer-facing quote
         approve/reject routes (see trackingToken).
     trackingToken:
@@ -1791,7 +1791,7 @@ components:
         POST /api/v1/service-orders's creation response (there is no
         separate issuance endpoint). Deliberately a distinct header, not
         Authorization: Bearer, so it can never be confused with the
-        administrative JWT (specs/service-order-tracking/requirements.md §0).
+        administrative JWT (specs/service-order-tracking/requirements.md Â§0).
 
   parameters:
     CustomerId:
@@ -1831,7 +1831,7 @@ components:
       description: >
         The service order's technical UUID. Unlike
         GET /api/v1/service-orders/{id}, this parameter never accepts the
-        sequential code — every route that uses it only ever looks the order
+        sequential code â€” every route that uses it only ever looks the order
         up by UUID.
       schema:
         type: string
@@ -1873,7 +1873,7 @@ components:
         document:
           type: string
           description: >
-            CPF (11 digits) or CNPJ (14 characters — digits, or, since July 2026, uppercase
+            CPF (11 digits) or CNPJ (14 characters â€” digits, or, since July 2026, uppercase
             letters A-Z in the first 12 with numeric check digits), with or without
             punctuation.
           example: "123.456.789-09"
@@ -1984,7 +1984,7 @@ components:
       type: object
       description: >
         Every field is optional; omitted fields are left unchanged. License
-        plate and customerId are not part of this request's shape — they are
+        plate and customerId are not part of this request's shape â€” they are
         immutable after creation.
       properties:
         brand:
@@ -2345,7 +2345,7 @@ components:
     ServiceOrderTrackingVehicle:
       type: object
       description: >
-        Deliberately partial — no id, code, status, or owning customer
+        Deliberately partial â€” no id, code, status, or owning customer
         (specs/service-order-tracking/requirements.md AC6).
       properties:
         licensePlate:
@@ -2389,7 +2389,7 @@ components:
     ServiceOrderTracking:
       type: object
       description: >
-        The public tracking contract — a distinct type from the
+        The public tracking contract â€” a distinct type from the
         administrative ServiceOrderDetail, with no shared fields beyond code
         and status (AC9). Never contains CPF/CNPJ, phone, e-mail, internal
         ids, or any other service order (AC7, AC8).
@@ -2499,7 +2499,7 @@ components:
 
     CurrentUser:
       type: object
-      description: The authenticated administrative user's public data — never the password hash.
+      description: The authenticated administrative user's public data â€” never the password hash.
       properties:
         id:
           type: string
@@ -2581,7 +2581,7 @@ components:
       type: object
       description: >
         Not the page/pageSize/total/totalPages envelope other list endpoints
-        use — this listing is not paginated (CLAUDE.md §8).
+        use â€” this listing is not paginated (CLAUDE.md Â§8).
       properties:
         items:
           type: array
@@ -2616,9 +2616,9 @@ components:
       type: object
       description: >
         Every field is optional; omitted fields keep their current value.
-        `currentStock` is never part of this request's shape — it is
+        `currentStock` is never part of this request's shape â€” it is
         immutable through this endpoint (RNF07); use
-        POST .../estoque/ajustes instead.
+        POST .../stock/adjustments instead.
       properties:
         name:
           type: string
@@ -2756,8 +2756,8 @@ components:
       description: >
         Exactly one of customerId/customerDocument and exactly one of
         vehicleId/licensePlate must be present. Any `status` field is
-        ignored — the server is the only author of a new order's status
-        (requirements.md §3.6/§8).
+        ignored â€” the server is the only author of a new order's status
+        (requirements.md Â§3.6/Â§8).
       properties:
         customerId:
           type: string
@@ -2797,7 +2797,7 @@ components:
         status:
           type: string
           enum: [RECEIVED]
-          description: Always RECEIVED — this is a newly created order.
+          description: Always RECEIVED â€” this is a newly created order.
         notes:
           type: string
         requestedServices:
@@ -2814,7 +2814,7 @@ components:
           type: string
           description: >
             The raw customer-tracking token for this order (see the
-            trackingToken security scheme). Returned only here, once —
+            trackingToken security scheme). Returned only here, once â€”
             never on any other response, and never logged (RNF08).
 
     ServiceOrderStatusResponse:
@@ -2846,7 +2846,7 @@ components:
           description: >
             Each item must identify exactly one of productId/serviceId.
             There is deliberately no total/totalAmount field anywhere in
-            this request — the server is the only author of a quote's total
+            this request â€” the server is the only author of a quote's total
             (RF06).
           items:
             type: object
@@ -2865,7 +2865,7 @@ components:
       type: object
       description: >
         The reduced, public response for the customer-facing quote
-        approve/reject endpoints — no internal ids, no item breakdown, same
+        approve/reject endpoints â€” no internal ids, no item breakdown, same
         principle as ServiceOrderTracking.
       properties:
         code:
@@ -2901,12 +2901,12 @@ components:
 
     FinishExecutionRequest:
       type: object
-      description: Entirely optional request body — an omitted/empty body is treated as "no endedAt sent".
+      description: Entirely optional request body â€” an omitted/empty body is treated as "no endedAt sent".
       properties:
         endedAt:
           type: string
           format: date-time
-          description: Optional; an omitted value means "now" (design.md §2.5).
+          description: Optional; an omitted value means "now" (design.md Â§2.5).
 
     ServiceExecution:
       type: object

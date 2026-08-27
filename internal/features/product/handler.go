@@ -33,16 +33,16 @@ func RegisterRoutes(mux *http.ServeMux, service *ProductService, requireAuth fun
 		return h
 	}
 
-	mux.Handle("POST /api/v1/produtos", wrap(handler.create))
-	mux.Handle("GET /api/v1/produtos", wrap(handler.list))
-	mux.Handle("GET /api/v1/produtos/{id}", wrap(handler.getByID))
-	mux.Handle("PATCH /api/v1/produtos/{id}", wrap(handler.update))
-	mux.Handle("DELETE /api/v1/produtos/{id}", wrap(handler.deactivate))
+	mux.Handle("POST /api/v1/products", wrap(handler.create))
+	mux.Handle("GET /api/v1/products", wrap(handler.list))
+	mux.Handle("GET /api/v1/products/{id}", wrap(handler.getByID))
+	mux.Handle("PATCH /api/v1/products/{id}", wrap(handler.update))
+	mux.Handle("DELETE /api/v1/products/{id}", wrap(handler.deactivate))
 
 	// Stock adjustment and balance routes (RF03, RF10, RNF07)
-	mux.Handle("POST /api/v1/produtos/{id}/estoque/ajustes", wrap(handler.adjustStock))
-	mux.Handle("GET /api/v1/produtos/{id}/estoque", wrap(handler.getStockBalance))
-	mux.Handle("GET /api/v1/produtos/{id}/movimentacoes", wrap(handler.listMovements))
+	mux.Handle("POST /api/v1/products/{id}/stock/adjustments", wrap(handler.adjustStock))
+	mux.Handle("GET /api/v1/products/{id}/stock", wrap(handler.getStockBalance))
+	mux.Handle("GET /api/v1/products/{id}/movements", wrap(handler.listMovements))
 }
 
 type productHandler struct {
@@ -77,7 +77,7 @@ func (handler *productHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Location", "/api/v1/produtos/"+product.ID.String())
+	w.Header().Set("Location", "/api/v1/products/"+product.ID.String())
 	writeJSON(w, http.StatusCreated, toResponse(product))
 }
 

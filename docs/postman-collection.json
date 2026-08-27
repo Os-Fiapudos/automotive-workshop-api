@@ -1,4 +1,4 @@
-{
+﻿{
   "info": {
     "name": "automotive-workshop-api",
     "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for protected routes.\n- Customers and POST /api/v1/service-orders are currently unauthenticated (open decision, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
@@ -484,7 +484,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos",
+              "raw": "{{baseUrl}}/api/v1/products",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -494,7 +494,7 @@
                 "produtos"
               ]
             },
-            "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted). Routes are in Portuguese (/produtos) by design.",
+            "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Filtro de oleo\",\n  \"description\": \"Filtro de oleo motor 1.0\",\n  \"unitPrice\": 45.5,\n  \"currentStock\": 20,\n  \"type\": \"PART\"\n}",
@@ -525,7 +525,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos?page=1&pageSize=20",
+              "raw": "{{baseUrl}}/api/v1/products?page=1&pageSize=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -567,7 +567,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -592,7 +592,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -621,7 +621,7 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -647,7 +647,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque/ajustes",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}/stock/adjustments",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -679,7 +679,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}/stock",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -700,7 +700,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/movimentacoes?page=1&pageSize=20",
+              "raw": "{{baseUrl}}/api/v1/products/{{productId}}/movements?page=1&pageSize=20",
               "host": [
                 "{{baseUrl}}"
               ],

@@ -1,10 +1,10 @@
-# automotive-workshop-api
+﻿# automotive-workshop-api
 
 REST API for managing an automotive workshop's full service flow: registering customers and
 their vehicles, maintaining a catalog of products (parts/supplies) and services, opening
 service orders, running diagnosis and quote approval, tracking execution, and delivering the
 vehicle. A service order moves through
-`RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED`,
+`RECEIVED â†’ IN_DIAGNOSIS â†’ AWAITING_APPROVAL â†’ IN_PROGRESS â†’ COMPLETED â†’ DELIVERED`,
 with a full audit trail of status changes and per-service execution timestamps kept
 alongside it.
 
@@ -13,18 +13,18 @@ export DATABASE_URL=postgres://workshop:workshop@localhost:5432/automotive_works
 go run ./cmd/api
 ```
 
-(`DATABASE_URL` is required — the API refuses to start without it. Bring up Postgres first,
+(`DATABASE_URL` is required â€” the API refuses to start without it. Bring up Postgres first,
 e.g. with `docker compose up -d db`, or run everything via Docker Compose as below.)
 
 ## Stack
 
-**Go REST API** — Go API with the standard cmd/ + internal/ layout (handlers/models/services).
+**Go REST API** â€” Go API with the standard cmd/ + internal/ layout (handlers/models/services).
 Database access uses `pgx v5`; tests use the stdlib `testing` package plus `testify`
 (`require`/`assert`) for assertions.
 
 ## Architecture
 
-**Vertical Slice (Feature-based)** — Organized by functionality; each feature gathers its own
+**Vertical Slice (Feature-based)** â€” Organized by functionality; each feature gathers its own
 layers (handler, service, repository, model) in `internal/features/<feature>/`. See
 [specs/architecture.md](specs/architecture.md) for the current, code-observed architecture.
 Each implemented feature has its own requirements/design/tasks under `specs/`: `auth`,
@@ -70,14 +70,14 @@ DELETE /api/v1/services/{id}    (logical deactivation, not a physical delete)
 ```
 
 ```
-POST   /api/v1/produtos
-GET    /api/v1/produtos
-GET    /api/v1/produtos/{id}
-PATCH  /api/v1/produtos/{id}
-DELETE /api/v1/produtos/{id}    (logical deactivation, not a physical delete)
-POST   /api/v1/produtos/{id}/estoque/ajustes
-GET    /api/v1/produtos/{id}/estoque
-GET    /api/v1/produtos/{id}/movimentacoes
+POST   /api/v1/products
+GET    /api/v1/products
+GET    /api/v1/products/{id}
+PATCH  /api/v1/products/{id}
+DELETE /api/v1/products/{id}    (logical deactivation, not a physical delete)
+POST   /api/v1/products/{id}/stock/adjustments
+GET    /api/v1/products/{id}/stock
+GET    /api/v1/products/{id}/movements
 ```
 
 ```
@@ -106,7 +106,7 @@ POST   /api/v1/acompanhamento/{codigo}/orcamento/reprovar           (unauthentic
 
 Except for the routes marked otherwise above (login itself, Customer Management, service order
 creation, and the customer-facing `/acompanhamento` tracking routes), every route requires a
-JWT (`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
+JWT (`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) â€” see
 [specs/auth/](specs/auth/) and [specs/vehicle-management/](specs/vehicle-management/) for the
 authentication contract, and `docs/openapi.yaml`'s `bearerAuth`/`trackingToken` security
 schemes for the exact per-endpoint requirement.
@@ -147,7 +147,7 @@ docker compose up -d
 ```
 
 - **Postgres**: `localhost:5432` (credentials in `.env`), with `docs/schema.sql` applied automatically on first startup.
-- **Adminer**: http://localhost:8081 — system `PostgreSQL`, server `db`, user/password/database as in `.env`.
+- **Adminer**: http://localhost:8081 â€” system `PostgreSQL`, server `db`, user/password/database as in `.env`.
 - **API**: http://localhost:8080/health
 - **Swagger UI**: http://localhost:8082
 
@@ -155,7 +155,7 @@ docker compose up -d
 
 There is no separate migration tool (e.g. `golang-migrate`, `goose`) in this project today.
 [docs/schema.sql](docs/schema.sql) is the single source of truth for the database schema, and
-Postgres applies it automatically — via `docker-entrypoint-initdb.d` — only on the **initial
+Postgres applies it automatically â€” via `docker-entrypoint-initdb.d` â€” only on the **initial
 creation** of the `db_data` volume. To apply a schema change (a new/edited table, column, or
 enum in `schema.sql`), recreate the volume so it re-runs the init script from scratch:
 
@@ -171,14 +171,14 @@ seed command below if needed.
 
 [docs/seed.sql](docs/seed.sql) populates the database with customers, vehicles, products, services, and service orders covering the main statuses of the flow. It uses fixed IDs with `ON CONFLICT DO NOTHING`, so it can be re-run without duplicating data.
 
-It is mounted as `/docker-entrypoint-initdb.d/02-seed.sql` and therefore **runs automatically right after `schema.sql`** on the initial creation of the Postgres volume — a fresh `docker compose up -d` already has the sample data and the administrative users below, with no extra step:
+It is mounted as `/docker-entrypoint-initdb.d/02-seed.sql` and therefore **runs automatically right after `schema.sql`** on the initial creation of the Postgres volume â€” a fresh `docker compose up -d` already has the sample data and the administrative users below, with no extra step:
 
 | Email | Password |
 | --- | --- |
 | `admin@workshop.local` | `admin123` |
 | `soat-architecture@workshop.local` | `soat-architecture` |
 
-Both are dev/evaluation-only credentials — never use them outside a local environment.
+Both are dev/evaluation-only credentials â€” never use them outside a local environment.
 
 To re-apply it to a volume that already exists, copy the file into the container before running (avoids UTF-8 encoding issues that occur when using pipe/redirection from stdin on PowerShell):
 
@@ -202,11 +202,11 @@ Unit tests run alongside each feature/shared package (`internal/features/*/*_tes
 `service_order_quote_decision_test.go`, `service_order_metrics_test.go`,
 `service_order_tracking_test.go`, `sensitive_data_test.go`) connect to a real Postgres via
 `DATABASE_URL` (defaulting to the local docker-compose credentials) and **skip
-themselves** — they don't fail — when that database isn't reachable, so `go test ./...`
+themselves** â€” they don't fail â€” when that database isn't reachable, so `go test ./...`
 passes either way.
 
 To actually exercise them, the database needs **both** `docs/schema.sql` and
-`docs/seed.sql` applied — the seed is not optional here, because it creates the
+`docs/seed.sql` applied â€” the seed is not optional here, because it creates the
 administrative user the authentication tests log in as (schema alone produces 74
 failures):
 
@@ -232,7 +232,7 @@ COVERAGE_HTML=1 scripts/coverage.sh    # also write coverage/coverage.html
 Enforces RNF06: at least 80% statement coverage on the critical domains
 (`service-order`, `product`, `service-order-tracking`), and prints every other package for
 information. Requires the same `DATABASE_URL` and `JWT_SECRET` as the integration tests and
-**refuses to run without them** — coverage measured over skipped tests would report roughly
+**refuses to run without them** â€” coverage measured over skipped tests would report roughly
 a third of the real figure. CI runs it on every push
 ([.github/workflows/ci.yml](.github/workflows/ci.yml), job `coverage`).
 
@@ -265,7 +265,7 @@ flowchart TD
   n4 --> n5
   n6["user/"]
   n5 --> n6
-  n7("doc.go — placeholder, unimplemented")
+  n7("doc.go â€” placeholder, unimplemented")
   n6 --> n7
   n50["auth/"]
   n5 --> n50
