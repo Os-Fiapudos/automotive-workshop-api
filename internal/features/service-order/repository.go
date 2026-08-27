@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
 // customerRef is the minimal customer data this feature needs to resolve
@@ -15,19 +17,28 @@ import (
 // Customer type — importing internal/features/customer directly would
 // violate the "no direct coupling between features" rule (CLAUDE.md §9.2).
 type customerRef struct {
-	ID     uuid.UUID
-	Code   int64
-	Name   string
-	Active bool
+	ID       uuid.UUID
+	Code     int64
+	Name     string
+	Active   bool
+	Document string
+	Phone    string
 }
 
-// vehicleRef is the vehicle-side equivalent of customerRef.
+// vehicleRef is the vehicle-side equivalent of customerRef. Brand/Model/Year/
+// Color are only needed by the detail view (specs/service-order-query/), left
+// unused (but always populated — same query as everyone else, see
+// scanVehicleRef) by the create flow.
 type vehicleRef struct {
 	ID           uuid.UUID
 	Code         int64
 	LicensePlate string
 	CustomerID   uuid.UUID
 	Active       bool
+	Brand        string
+	Model        string
+	Year         int
+	Color        string
 }
 
 // serviceRef is the minimal service-catalog data needed to display a
@@ -62,18 +73,80 @@ type serviceOrderLookups interface {
 	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*ServiceOrder, error)
 	findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error)
 	findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error)
+
+	// Added by specs/service-order-query/.
+	findServiceOrderByCode(ctx context.Context, code int64) (*ServiceOrder, error)
+	findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error)
+	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error)
+	listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error)
+
+	// Added by specs/service-order-execution/.
+	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error)
+	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error)
+
+	// Added by specs/service-order-metrics/.
+	findAverageExecutionTimeByService(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error)
+
+	// Added by specs/service-order-quote-decision/: resolves the order
+	// identified by its public code first (so an unknown code always maps to
+	// ErrServiceOrderNotFound regardless of the token), then checks
+	// tokenHash against that specific order's active tracking token
+	// (ErrTrackingTokenInvalid otherwise) — same precedence as
+	// service-order-tracking's FindByCodeAndTokenHash, reading
+	// service_order_tracking_tokens directly via SQL rather than importing
+	// that feature's Go package (CLAUDE.md §9.2).
+	findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
 // aggregate. It only has the writes this feature performs — no speculative
 // CRUD methods for reads this feature doesn't need (design.md §3.2).
 type ServiceOrderRepository interface {
-	Create(ctx context.Context, order *ServiceOrder) error
+	// Create persists order and returns the raw tracking token generated for
+	// it (specs/service-order-tracking/design.md §5) — only that call ever
+	// sees the raw value; the database only ever stores its hash.
+	Create(ctx context.Context, order *ServiceOrder) (trackingToken string, err error)
 
 	// Added by specs/service-order-diagnosis-quote/.
 	StartDiagnosis(ctx context.Context, order *ServiceOrder) error
 	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
 	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
+
+	// Added by specs/service-order-execution/.
+	StartExecution(ctx context.Context, execution *ServiceExecution) error
+	FinishExecution(ctx context.Context, execution *ServiceExecution) error
+	FinalizeOrder(ctx context.Context, order *ServiceOrder) error
+	DeliverOrder(ctx context.Context, order *ServiceOrder) error
+
+	// Added by specs/service-order-quote-decision/.
+
+	// SendQuote records quote as sent (sent_at/sent_version) and transitions
+	// order from IN_DIAGNOSIS to AWAITING_APPROVAL, transactionally.
+	SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error)
+
+	// DecideQuote records the customer's decision on quote (APPROVED or
+	// REJECTED, per decision), transitions order accordingly (IN_PROGRESS or
+	// CANCELED), and writes the corresponding history entry, all in one
+	// transaction (RNF07): a failure at any step, including the history
+	// insert, rolls back every other write this call made.
+	DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error)
+
+	// Added by specs/service-order-stock-usage/.
+
+	// RegisterStockUsage deducts every item's quantity from its product's
+	// stock and records one EXIT StockMovement per item, transactionally
+	// (RNF07): a failure at any item rolls back every deduction already made
+	// in this call.
+	RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error)
+
+	// ReverseStockMovement restores the quantity of a previously registered
+	// EXIT movement and records a linked, inverse ENTRY movement,
+	// transactionally (RNF07).
+	ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*StockMovement, error)
+
+	// ListStockMovements loads every stock movement recorded against an
+	// order, most recent first.
+	ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*StockMovement, error)
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and
@@ -86,15 +159,16 @@ func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrder
 	return &PostgresServiceOrderRepository{pool: pool}
 }
 
-// Create persists order, its requested services, and its creation history
-// event in a single transaction (RNF07, design.md §3.3): if any step fails,
-// everything is rolled back — the API never leaves a service order without
-// its creation history entry, or a requested service link without the order
-// it belongs to.
-func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *ServiceOrder) error {
+// Create persists order, its requested services, its creation history event,
+// and its auto-generated tracking token in a single transaction (RNF07,
+// design.md §3.3; specs/service-order-tracking/design.md §5): if any step
+// fails, everything is rolled back — the API never leaves a service order
+// without its creation history entry or its tracking token, or a requested
+// service link without the order it belongs to.
+func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *ServiceOrder) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
@@ -104,7 +178,7 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 		 RETURNING code, opened_at, created_at, updated_at`,
 		order.ID, order.CustomerID, order.VehicleID, order.Notes,
 	).Scan(&order.Code, &order.OpenedAt, &order.CreatedAt, &order.UpdatedAt); err != nil {
-		return err
+		return "", err
 	}
 
 	for _, serviceID := range order.RequestedServiceIDs {
@@ -112,7 +186,7 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 			`INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES ($1, $2)`,
 			order.ID, serviceID,
 		); err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -121,27 +195,41 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 		 VALUES ($1, 'creation', $2, $3, $3)`,
 		order.ID, "Service order opened.", string(order.Status),
 	); err != nil {
-		return err
+		return "", err
 	}
 
-	return tx.Commit(ctx)
+	rawToken, err := trackingtoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO service_order_tracking_tokens (service_order_id, token_hash) VALUES ($1, $2)`,
+		order.ID, trackingtoken.Hash(rawToken),
+	); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return rawToken, nil
 }
 
 func (repository *PostgresServiceOrderRepository) findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE' FROM customers WHERE id = $1`, id)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE id = $1`, id)
 	return scanCustomerRef(row)
 }
 
 func (repository *PostgresServiceOrderRepository) findCustomerByDocument(ctx context.Context, normalizedDocument string) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE' FROM customers WHERE document = $1`, normalizedDocument)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE document = $1`, normalizedDocument)
 	return scanCustomerRef(row)
 }
 
 func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 	ref := &customerRef{}
-	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active); err != nil {
+	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCustomerNotFound
 		}
@@ -152,19 +240,20 @@ func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 
 func (repository *PostgresServiceOrderRepository) findVehicleByID(ctx context.Context, id uuid.UUID) (*vehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE' FROM vehicles WHERE id = $1`, id)
+		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE id = $1`, id)
 	return scanVehicleRef(row)
 }
 
 func (repository *PostgresServiceOrderRepository) findVehicleByPlate(ctx context.Context, plate string) (*vehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE' FROM vehicles WHERE license_plate = $1`, plate)
+		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE license_plate = $1`, plate)
 	return scanVehicleRef(row)
 }
 
 func scanVehicleRef(row pgx.Row) (*vehicleRef, error) {
 	ref := &vehicleRef{}
-	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active); err != nil {
+	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active,
+		&ref.Brand, &ref.Model, &ref.Year, &ref.Color); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrVehicleNotFound
 		}
@@ -206,6 +295,42 @@ func (repository *PostgresServiceOrderRepository) findMissingServiceIDs(ctx cont
 		}
 	}
 	return missing, nil
+}
+
+// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// (specs/service-order-quote-decision/design.md): the order is resolved by
+// code first, so an unknown code always maps to ErrServiceOrderNotFound
+// regardless of the token; only then is tokenHash checked against that
+// order's active tracking token, mirroring
+// service-order-tracking.PostgresTrackingRepository.FindByCodeAndTokenHash.
+func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error) {
+	order := &ServiceOrder{}
+	err := repository.pool.QueryRow(ctx,
+		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
+		 FROM service_orders WHERE code = $1`, code,
+	).Scan(&order.ID, &order.Code, &order.CustomerID, &order.VehicleID, &order.OpenedAt,
+		&order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrServiceOrderNotFound
+		}
+		return nil, err
+	}
+
+	var matches bool
+	if err := repository.pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM service_order_tracking_tokens
+			WHERE service_order_id = $1 AND token_hash = $2 AND revoked_at IS NULL
+		)`, order.ID, tokenHash,
+	).Scan(&matches); err != nil {
+		return nil, err
+	}
+	if !matches {
+		return nil, ErrTrackingTokenInvalid
+	}
+
+	return order, nil
 }
 
 // findServicesByIDs loads the display data (code, name) for a set of

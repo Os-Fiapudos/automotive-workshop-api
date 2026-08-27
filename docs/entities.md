@@ -15,10 +15,10 @@
 | createdAt    | string  | Record creation date/time, generated automatically.                    |
 | updatedAt    | string  | Record last update date/time, generated automatically.                 |
 
-> **Future integration note**: once Service Order exists, opening a new service order must
-> validate that the referenced customer's `status` is `ACTIVE`. This rule is documented here
-> and in `specs/customer-management/requirements.md` §7.1, but is not implemented until the
-> Service Order feature itself is specified.
+> **Service Order integration**: opening a new service order validates that the referenced
+> customer's `status` is `ACTIVE`, rejecting an unknown or `INACTIVE` customer. Implemented
+> in [specs/service-order-opening](../specs/service-order-opening/); originally recorded as
+> a future note here and in `specs/customer-management/requirements.md` §7.1, now fulfilled.
 
 ## Vehicle
 
@@ -32,9 +32,14 @@
 | year        | number | Vehicle manufacturing/model year.                                      |
 | color       | string | Vehicle's predominant color.                                           |
 | customerId  | uuid   | Reference to the owning `Customer`.                                    |
-| status      | string | Vehicle situation: `ACTIVE` or `INACTIVE`. Starts `ACTIVE`. Used by other features (e.g. Service Order Opening) to validate a vehicle before use; full vehicle lifecycle management is a separate, not-yet-specified feature. |
+| status      | string | Vehicle situation: `ACTIVE` or `INACTIVE`. Starts `ACTIVE`; moves to `INACTIVE` only via explicit deactivation (never back automatically). See [specs/vehicle-management](../specs/vehicle-management/). |
 | createdAt   | string | Record creation date/time, generated automatically.                    |
 | updatedAt   | string | Record last update date/time, generated automatically.                 |
+
+> **Service Order integration**: opening a new service order validates that the referenced
+> vehicle's `status` is `ACTIVE`, rejecting an unknown or `INACTIVE` vehicle. Implemented in
+> [specs/service-order-opening](../specs/service-order-opening/); originally recorded as a
+> future note here and in `specs/vehicle-management/requirements.md` §7.1, now fulfilled.
 
 ## Product
 
@@ -74,18 +79,22 @@
 | customerId  | uuid      | Reference to the requesting `Customer`.                                                                     |
 | vehicleId   | uuid      | Reference to the `Vehicle` being serviced.                                                                  |
 | openedAt    | string    | Date/time the service order was opened.                                                                     |
-| status      | string    | Current status of the service order — kept in Portuguese as a deliberate domain/business decision (see note below): `RECEBIDA` (vehicle received) → `EM_DIAGNOSTICO` (under diagnosis) → `AGUARDANDO_APROVACAO` (quote sent to customer) → `EM_EXECUCAO` (work in progress) → `FINALIZADA` (work completed) → `ENTREGUE` (vehicle returned to customer). |
+| status      | string    | Current status of the service order: `RECEIVED` (vehicle received) → `IN_DIAGNOSIS` (under diagnosis) → `AWAITING_APPROVAL` (quote sent to customer) → `IN_PROGRESS` (work in progress) → `COMPLETED` (work completed) → `DELIVERED` (vehicle returned to customer). `AWAITING_APPROVAL` branches to `CANCELED` instead of `IN_PROGRESS` if the customer rejects the quote (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
 | requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
 | createdAt   | string    | Record creation date/time, generated automatically.                                                         |
 | updatedAt   | string    | Record last update date/time, generated automatically.                                                      |
 
-> **Note on `status` values**: every other Portuguese identifier in this project was
-> translated to English. The `ServiceOrder.status` values are the single deliberate
-> exception — kept in Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`,
-> `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) by explicit product decision. Do not translate
-> these values without an explicit new decision.
+> **Note on `status` values — changed on 2026-08-26**: these values used to be kept in
+> Portuguese (`RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`,
+> `FINALIZADA`, `ENTREGUE`, `CANCELADA`) as the single deliberate exception to this
+> project's "every domain identifier in English" convention. That exception was dropped:
+> the enum now uses the English values above, so no part of the domain language is split
+> between two languages. Existing databases are migrated with `ALTER TYPE ... RENAME
+> VALUE` — see the note in [schema.sql](schema.sql). Older `specs/` documents still
+> quoting the Portuguese values are records of the decision as it stood when they were
+> written.
 
 ## Quote
 
@@ -96,7 +105,10 @@
 | serviceOrderId | uuid       | Reference to the `ServiceOrder` this quote belongs to.                               |
 | totalAmount    | number     | Total quote amount (sum of products and services).                                   |
 | status         | string     | Quote status: `PENDING` (awaiting customer response), `APPROVED` (customer accepted) or `REJECTED` (customer declined). |
-| generatedAt    | string     | Date/time the quote was generated and sent to the customer.                          |
+| version        | number     | Incremented every time the quote is (re)composed (see [specs/service-order-diagnosis-quote](../specs/service-order-diagnosis-quote/)). |
+| generatedAt    | string     | Date/time the quote was first generated (composed).                                  |
+| sentAt         | string?    | Date/time the quote was sent to the customer (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). Optional, filled only once sent. |
+| sentVersion    | number?    | The `version` that was actually sent to the customer. Optional, filled only once sent. |
 | respondedAt    | string?    | Date/time the customer responded (approved/rejected). Optional, filled only after a response. |
 | products       | QuoteItem[] | List of products/parts included in the quote, each with its own snapshot (see `QuoteItem` below). |
 | services       | QuoteItem[] | List of services included in the quote, each with its own snapshot (see `QuoteItem` below).       |
@@ -135,23 +147,73 @@ traceability purposes.
 | id             | uuid   | Technical identifier of the history record.                                        |
 | serviceOrderId | uuid   | Reference to the `ServiceOrder` this event belongs to.                             |
 | occurredAt     | string | Date/time the event occurred.                                                      |
-| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `approval`, `completion` or `cancellation`. |
+| event          | string | Type of recorded event: `creation`, `diagnosis_started`, `quote_composed`, `quote_sent`, `approval`, `completion`, `cancellation` or `delivery`. `quote_sent`, `approval` (for `AWAITING_APPROVAL` → `IN_PROGRESS`) and `cancellation` (for `AWAITING_APPROVAL` → `CANCELED`) are produced by [specs/service-order-quote-decision/](../specs/service-order-quote-decision/); `delivery` and `completion` (`IN_PROGRESS` → `COMPLETED`) by [specs/service-order-execution/](../specs/service-order-execution/). |
 | description    | string | Details of what happened in the event.                                             |
 | previousStatus | string | Service order status immediately before the event.                                 |
 | newStatus      | string | Service order status immediately after the event.                                  |
 
-## AuditServices
+## ServiceOrderTrackingToken
 
-Records the start and end of the execution of each service within a service order, for
-time-tracking and productivity control.
+Grants a customer read-only access to their own `ServiceOrder`'s tracking view
+(`GET /api/v1/acompanhamento/{codigo}`) without the administrative JWT. One token is
+auto-generated per `ServiceOrder` when it is created; only its hash is stored. See
+[specs/service-order-tracking](../specs/service-order-tracking/).
 
-| Field          | Type   | Description                                                        |
-| -------------- | ------ | ------------------------------------------------------------------- |
-| id             | uuid   | Technical identifier of the audit record.                           |
-| serviceOrderId | uuid   | Reference to the `ServiceOrder` in progress.                        |
-| serviceId      | uuid   | Reference to the `Service` being executed.                          |
-| occurredAt     | string | Date/time the event was recorded.                                   |
-| event          | string | Event milestone: `start` (execution started) or `end` (execution finished). |
+| Field          | Type    | Description                                                                    |
+| -------------- | ------- | ---------------------------------------------------------------------------------- |
+| id             | uuid    | Technical identifier of the token record.                                          |
+| serviceOrderId | uuid    | Reference to the `ServiceOrder` this token grants access to. One token per order.   |
+| tokenHash      | string  | SHA-256 hash of the token. The raw token is returned to the caller once, at issuance, and never persisted. |
+| createdAt      | string  | Record creation date/time, generated automatically.                                |
+| revokedAt      | string? | Date/time the token was revoked. `null` while active.                              |
+
+> **Service Order Opening integration**: `POST /api/v1/service-orders` now also generates
+> this token and returns the raw value once, in a `trackingToken` field on the creation
+> response — see `specs/service-order-opening/design.md`'s cross-reference note and
+> `specs/service-order-tracking/design.md` §5.
+
+## AuditServices (ServiceExecution)
+
+Records one execution of a service within a service order, for time-tracking and
+productivity control. Implemented in Go as `ServiceExecution` by
+[specs/service-order-execution/](../specs/service-order-execution/) — the first feature to
+implement this entity; see that spec's `design.md` §1.3 for why the persisted shape is one
+row per execution (with its own start/end timestamps) rather than a start/end event log.
+
+| Field          | Type    | Description                                                        |
+| -------------- | ------- | ------------------------------------------------------------------- |
+| id             | uuid    | Technical identifier of the execution record.                       |
+| serviceOrderId | uuid    | Reference to the `ServiceOrder` in progress.                        |
+| serviceId      | uuid    | Reference to the `Service` being executed.                          |
+| startedAt      | string  | Date/time the execution started.                                    |
+| endedAt        | string? | Date/time the execution finished. `null` while still in progress.   |
+
+## StockMovement
+
+Ledger of every change to a `Product`'s stock balance. Two producers write to it: a
+product's own manual adjustment (`serviceOrderId` absent —
+[specs/product-management](../specs/product-management/)) and a service order's
+parts/supplies usage deduction and its reversal (`serviceOrderId` present —
+[specs/service-order-stock-usage](../specs/service-order-stock-usage/)).
+
+| Field              | Type    | Description                                                                    |
+| ------------------ | ------- | ---------------------------------------------------------------------------------- |
+| id                 | uuid    | Technical identifier of the movement record.                                       |
+| productId          | uuid    | Reference to the `Product` whose balance changed.                                  |
+| serviceOrderId     | uuid?   | Reference to the `ServiceOrder` this movement was deducted for/restored to. Absent for a manual product adjustment. |
+| type               | string  | `ENTRY` (adds to stock) or `EXIT` (removes from stock).                            |
+| quantity           | number  | Absolute quantity moved. Always greater than zero; direction is given by `type`.   |
+| previousStock      | number  | Product `currentStock` immediately before this movement.                           |
+| newStock           | number  | Product `currentStock` immediately after this movement.                            |
+| reason             | string? | Free-form justification. Required for a manual product adjustment; absent for a service-order usage/reversal movement, whose `serviceOrderId` already explains it. |
+| reversedMovementId | uuid?   | For a reversal `ENTRY`, the original `EXIT` movement it undoes. Absent for every other movement. A movement is reversed at most once. |
+| occurredAt         | string  | Date/time the movement occurred.                                                   |
+
+> **Note**: a service-order usage deduction requires the order to be `IN_PROGRESS`, the
+> product to be `ACTIVE`, and the resulting balance to never go negative — see
+> `specs/service-order-stock-usage/requirements.md`. The deducted quantity is independent
+> from any quantity budgeted in the order's `Quote` — it is tracked here, not reconciled
+> against `QuoteItem.quantity`.
 
 ## User
 
@@ -171,12 +233,12 @@ Administrative user of the API (authentication only in the MVP — no user CRUD)
 
 ### ServiceOrderStatus
 
-Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit product decision
-(see note in the `ServiceOrder` section above).
+Possible values for `ServiceOrder.status`. Renamed from Portuguese to English on
+2026-08-26 (see note in the `ServiceOrder` section above).
 
 | Field              | Type   | Description                                                        |
 | ------------------ | ------ | ---------------------------------------------------------------------- |
-| serviceOrderStatus | string | `RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`. |
+| serviceOrderStatus | string | `RECEIVED`, `IN_DIAGNOSIS`, `AWAITING_APPROVAL`, `IN_PROGRESS`, `COMPLETED`, `DELIVERED`, `CANCELED`. |
 
 ### QuoteStatus
 
@@ -213,3 +275,9 @@ Possible values for `ServiceOrder.status`. Kept in Portuguese by explicit produc
 | Field         | Type   | Description                                                              |
 | ------------- | ------ | ---------------------------------------------------------------------------- |
 | vehicleStatus | string | Possible values for `Vehicle.status`: `ACTIVE`, `INACTIVE`. |
+
+### StockMovementType
+
+| Field             | Type   | Description                                                       |
+| ----------------- | ------ | ----------------------------------------------------------------------- |
+| stockMovementType | string | Possible values for `StockMovement.type`: `ENTRY`, `EXIT`. |

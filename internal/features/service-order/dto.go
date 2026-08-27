@@ -76,6 +76,9 @@ type serviceSummary struct {
 }
 
 // Response is the JSON representation of a created ServiceOrder.
+// TrackingToken is the raw customer-tracking token generated for this order
+// (specs/service-order-tracking/design.md §5) — it exists only in this
+// creation response; it is never returned again and never logged (RNF08).
 type Response struct {
 	ID                string           `json:"id"`
 	Code              int64            `json:"code"`
@@ -87,6 +90,7 @@ type Response struct {
 	RequestedServices []serviceSummary `json:"requestedServices"`
 	CreatedAt         time.Time        `json:"createdAt"`
 	UpdatedAt         time.Time        `json:"updatedAt"`
+	TrackingToken     string           `json:"trackingToken"`
 }
 
 func toResponse(result *CreateResult) Response {
@@ -118,5 +122,6 @@ func toResponse(result *CreateResult) Response {
 		RequestedServices: requestedServices,
 		CreatedAt:         result.Order.CreatedAt,
 		UpdatedAt:         result.Order.UpdatedAt,
+		TrackingToken:     result.TrackingToken,
 	}
 }

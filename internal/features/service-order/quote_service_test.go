@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
 func seedOrder(repo *fakeRepository, status Status) *ServiceOrder {
@@ -19,17 +21,17 @@ func seedOrder(repo *fakeRepository, status Status) *ServiceOrder {
 func TestStartDiagnosisSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusRecebida)
+	order := seedOrder(repo, StatusReceived)
 
 	updated, err := service.StartDiagnosis(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusEmDiagnostico, updated.Status)
+	assert.Equal(t, StatusInDiagnosis, updated.Status)
 }
 
-func TestServiceStartDiagnosisRejectsNonRecebida(t *testing.T) {
+func TestServiceStartDiagnosisRejectsNonReceived(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.StartDiagnosis(context.Background(), order.ID)
 	require.Error(t, err)
@@ -48,7 +50,7 @@ func TestStartDiagnosisUnknownOrder(t *testing.T) {
 func TestComposeQuoteSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 35.90, Active: true})
@@ -62,14 +64,14 @@ func TestComposeQuoteSuccess(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.InDelta(t, 151.80, quote.TotalAmount, 0.0001) // 2*35.90 + 80.00
-	assert.Equal(t, StatusAguardandoAprovacao, order.Status)
+	assert.Equal(t, StatusInDiagnosis, order.Status, "composing a quote no longer transitions the order — only SendQuote does (specs/service-order-quote-decision/)")
 	require.Len(t, quote.Items, 2)
 }
 
 func TestComposeQuoteRejectsBeforeDiagnosis(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusRecebida)
+	order := seedOrder(repo, StatusReceived)
 
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
@@ -93,7 +95,7 @@ func TestComposeQuoteUnknownOrder(t *testing.T) {
 func TestComposeQuoteRejectsEmptyItems(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, nil)
 	require.Error(t, err)
@@ -103,7 +105,7 @@ func TestComposeQuoteRejectsEmptyItems(t *testing.T) {
 func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
 
@@ -117,7 +119,7 @@ func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 func TestComposeQuoteRejectsUnknownProduct(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: QuoteItemProduct, ProductID: uuid.New().String(), Quantity: 1},
@@ -129,7 +131,7 @@ func TestComposeQuoteRejectsUnknownProduct(t *testing.T) {
 func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: false, UnitPrice: 10})
 
@@ -143,7 +145,7 @@ func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 func TestComposeQuoteRejectsUnknownService(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: QuoteItemService, ServiceID: uuid.New().String(), Quantity: 1},
@@ -155,7 +157,7 @@ func TestComposeQuoteRejectsUnknownService(t *testing.T) {
 func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
 
@@ -175,7 +177,7 @@ func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusAguardandoAprovacao)
+	order := seedOrder(repo, StatusAwaitingApproval)
 	repo.seedDecidedQuote(order.ID, QuoteStatusApproved)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
@@ -190,7 +192,7 @@ func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 func TestGetQuoteNotFoundBeforeComposition(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 
 	_, err := service.GetQuote(context.Background(), order.ID)
 	require.Error(t, err)
@@ -200,7 +202,7 @@ func TestGetQuoteNotFoundBeforeComposition(t *testing.T) {
 func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "A part"})
 
@@ -220,7 +222,7 @@ func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmDiagnostico)
+	order := seedOrder(repo, StatusInDiagnosis)
 	productID := uuid.New()
 	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "Original description"})
 
@@ -234,4 +236,185 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 
 	assert.Equal(t, "Original description", quote.Items[0].Description)
 	assert.InDelta(t, 10.0, quote.Items[0].UnitPrice, 0.0001)
+}
+
+// ---- specs/service-order-quote-decision/ ----
+
+// composeQuoteForOrder composes a one-item quote for order through the real
+// ComposeQuote use case, so SendQuote/ApproveQuote/RejectQuote tests below
+// exercise a realistically-composed quote rather than a hand-built fixture.
+func composeQuoteForOrder(t *testing.T, service *ServiceOrderService, repo *fakeRepository, order *ServiceOrder) *Quote {
+	t.Helper()
+	productID := uuid.New()
+	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 42.50, Description: "A part"})
+	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
+		{Kind: QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
+	})
+	require.NoError(t, err)
+	return quote
+}
+
+func TestSendQuoteSuccess(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, StatusInDiagnosis)
+	composeQuoteForOrder(t, service, repo, order)
+
+	quote, err := service.SendQuote(context.Background(), order.ID)
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusAwaitingApproval, order.Status)
+	require.NotNil(t, quote.SentAt)
+	require.NotNil(t, quote.SentVersion)
+	assert.Equal(t, quote.Version, *quote.SentVersion)
+}
+
+func TestSendQuoteRejectsIncompleteQuote(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, StatusInDiagnosis)
+
+	_, err := service.SendQuote(context.Background(), order.ID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQuoteNotFound)
+	assert.Equal(t, StatusInDiagnosis, order.Status)
+}
+
+func TestSendQuoteRejectsAlreadySent(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, StatusInDiagnosis)
+	composeQuoteForOrder(t, service, repo, order)
+
+	_, err := service.SendQuote(context.Background(), order.ID)
+	require.NoError(t, err)
+
+	_, err = service.SendQuote(context.Background(), order.ID)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+func TestSendQuoteUnknownOrder(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+
+	_, err := service.SendQuote(context.Background(), uuid.New())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrServiceOrderNotFound)
+}
+
+// seedSentQuote composes and sends a quote for order, then registers rawToken
+// as its tracking token — the fixture ApproveQuote/RejectQuote tests build
+// on, mirroring how a real order reaches AWAITING_APPROVAL with a token
+// issued at creation (specs/service-order-tracking/).
+func seedSentQuote(t *testing.T, service *ServiceOrderService, repo *fakeRepository, rawToken string) *ServiceOrder {
+	t.Helper()
+	order := seedOrder(repo, StatusInDiagnosis)
+	composeQuoteForOrder(t, service, repo, order)
+	_, err := service.SendQuote(context.Background(), order.ID)
+	require.NoError(t, err)
+	repo.addTrackingToken(order.ID, trackingtoken.Hash(rawToken))
+	return order
+}
+
+func TestApproveQuoteSuccess(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	updatedOrder, quote, err := service.ApproveQuote(context.Background(), order.Code, "the-real-token")
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusInProgress, updatedOrder.Status)
+	assert.Equal(t, QuoteStatusApproved, quote.Status)
+	assert.NotNil(t, quote.RespondedAt)
+}
+
+func TestRejectQuoteSuccess(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	updatedOrder, quote, err := service.RejectQuote(context.Background(), order.Code, "the-real-token")
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusCanceled, updatedOrder.Status)
+	assert.Equal(t, QuoteStatusRejected, quote.Status)
+	assert.NotNil(t, quote.RespondedAt)
+}
+
+func TestApproveQuoteRejectsMissingToken(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.ApproveQuote(context.Background(), order.Code, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTrackingTokenInvalid)
+}
+
+func TestApproveQuoteRejectsWrongToken(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.ApproveQuote(context.Background(), order.Code, "not-the-real-token")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTrackingTokenInvalid)
+}
+
+func TestApproveQuoteRejectsUnknownCode(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+
+	_, _, err := service.ApproveQuote(context.Background(), 987654321, "any-token")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrServiceOrderNotFound)
+}
+
+// TestApproveQuoteRejectsCrossOrderToken covers "o cliente não consegue
+// responder a orçamento de outra OS": order B's token must not unlock A.
+func TestApproveQuoteRejectsCrossOrderToken(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	orderA := seedSentQuote(t, service, repo, "token-a")
+	seedSentQuote(t, service, repo, "token-b")
+
+	_, _, err := service.ApproveQuote(context.Background(), orderA.Code, "token-b")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTrackingTokenInvalid)
+}
+
+// TestApproveThenRejectSameQuoteFails covers "não é possível aprovar e
+// reprovar o mesmo orçamento".
+func TestApproveThenRejectSameQuoteFails(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.ApproveQuote(context.Background(), order.Code, "the-real-token")
+	require.NoError(t, err)
+
+	_, _, err = service.RejectQuote(context.Background(), order.Code, "the-real-token")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
+	assert.Equal(t, StatusInProgress, order.Status, "a rejected second decision must not alter the order reached by the first")
+}
+
+// TestApproveQuoteTwiceIsConsistentConflict covers "repetição da mesma
+// decisão é idempotente ou tratada de forma consistente" — a repeated
+// identical decision is treated the same as a differing one: 409 conflict,
+// no further state change.
+func TestApproveQuoteTwiceIsConsistentConflict(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.ApproveQuote(context.Background(), order.Code, "the-real-token")
+	require.NoError(t, err)
+
+	_, _, err = service.ApproveQuote(context.Background(), order.Code, "the-real-token")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
+	assert.Equal(t, StatusInProgress, order.Status)
 }

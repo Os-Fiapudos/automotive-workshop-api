@@ -1,0 +1,17 @@
+meta {
+  name: Update Customer
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/customers/{{customerId}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "phone": "+5511988888888"
+  }
+}

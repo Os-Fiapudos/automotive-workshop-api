@@ -9,7 +9,7 @@ serves. Decisions marked **[decision]** were approved by the project owner on 20
 Follows the vertical slice pattern ([specs/architecture.md](../architecture.md)) and reuses
 everything the auth feature already introduced — no new cross-cutting package is needed:
 
-- `internal/features/servicecatalog/` — the feature slice: `handler.go`, `service.go`,
+- `internal/features/service-catalog/` — the feature slice: `handler.go`, `service.go`,
   `repository.go`, `model.go`, `doc.go`.
 - Reused from `internal/shared/`: `database` (pgx pool), `apierror` (JSON error envelope,
   RNF04), `httpx.JSON` (success response writer), `middleware.RequireAuth` (FR6/RNF02).
@@ -234,13 +234,13 @@ and never returning it) — the same shape as `customer/handler.go`'s `writeServ
 
 ## 5. Tests (AC1–AC9)
 
-- `internal/features/servicecatalog/service_test.go` — business rules against a fake
+- `internal/features/service-catalog/service_test.go` — business rules against a fake
   `Store`: required name, required/negative price (BR3), invalid estimated time (BR4),
   invalid code, empty update, and propagation of not-found/duplicate-code errors.
-- `internal/features/servicecatalog/handler_test.go` — status codes and payload shape for
+- `internal/features/service-catalog/handler_test.go` — status codes and payload shape for
   all five endpoints, including 400 on malformed JSON/id/query param, 409, 404, and the
   500 path that must not leak the underlying error text.
-- `internal/handlers_test/servicecatalog_test.go` — integration over real HTTP against the
+- `internal/handlers_test/service_catalog_test.go` — integration over real HTTP against the
   compose Postgres, authenticated with a real login token, covering AC1–AC8. It self-skips
   when `DATABASE_URL` is unset, like `auth_test.go`, and cleans up the rows it creates.
 

@@ -1,0 +1,11 @@
+meta {
+  name: Deactivate Customer
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/api/v1/customers/{{customerId}}
+  body: none
+  auth: none
+}

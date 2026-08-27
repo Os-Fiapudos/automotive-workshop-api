@@ -16,14 +16,14 @@ func newTestOrder(t *testing.T, status Status) *ServiceOrder {
 	return order
 }
 
-func TestStartDiagnosisFromRecebida(t *testing.T) {
-	order := newTestOrder(t, StatusRecebida)
+func TestStartDiagnosisFromReceived(t *testing.T) {
+	order := newTestOrder(t, StatusReceived)
 	require.NoError(t, order.startDiagnosis())
-	assert.Equal(t, StatusEmDiagnostico, order.Status)
+	assert.Equal(t, StatusInDiagnosis, order.Status)
 }
 
-func TestStartDiagnosisRejectsNonRecebida(t *testing.T) {
-	for _, status := range []Status{StatusEmDiagnostico, StatusAguardandoAprovacao} {
+func TestStartDiagnosisRejectsNonReceived(t *testing.T) {
+	for _, status := range []Status{StatusInDiagnosis, StatusAwaitingApproval} {
 		order := newTestOrder(t, status)
 		err := order.startDiagnosis()
 		require.Error(t, err)
@@ -32,23 +32,52 @@ func TestStartDiagnosisRejectsNonRecebida(t *testing.T) {
 	}
 }
 
-func TestMarkAwaitingApprovalRejectsRecebida(t *testing.T) {
-	order := newTestOrder(t, StatusRecebida)
-	err := order.markAwaitingApproval()
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrDiagnosisNotStarted)
+func TestSendQuoteFromInDiagnosis(t *testing.T) {
+	order := newTestOrder(t, StatusInDiagnosis)
+	require.NoError(t, order.sendQuote())
+	assert.Equal(t, StatusAwaitingApproval, order.Status)
 }
 
-func TestMarkAwaitingApprovalFromEmDiagnostico(t *testing.T) {
-	order := newTestOrder(t, StatusEmDiagnostico)
-	require.NoError(t, order.markAwaitingApproval())
-	assert.Equal(t, StatusAguardandoAprovacao, order.Status)
+func TestSendQuoteRejectsNonInDiagnosis(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusAwaitingApproval, StatusInProgress} {
+		order := newTestOrder(t, status)
+		err := order.sendQuote()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
+	}
 }
 
-func TestMarkAwaitingApprovalIsIdempotentFromItself(t *testing.T) {
-	order := newTestOrder(t, StatusAguardandoAprovacao)
-	require.NoError(t, order.markAwaitingApproval())
-	assert.Equal(t, StatusAguardandoAprovacao, order.Status)
+func TestApproveQuoteFromAwaitingApproval(t *testing.T) {
+	order := newTestOrder(t, StatusAwaitingApproval)
+	require.NoError(t, order.approveQuote())
+	assert.Equal(t, StatusInProgress, order.Status)
+}
+
+func TestApproveQuoteRejectsNonAwaitingApproval(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
+		order := newTestOrder(t, status)
+		err := order.approveQuote()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
+	}
+}
+
+func TestRejectQuoteFromAwaitingApproval(t *testing.T) {
+	order := newTestOrder(t, StatusAwaitingApproval)
+	require.NoError(t, order.rejectQuote())
+	assert.Equal(t, StatusCanceled, order.Status)
+}
+
+func TestRejectQuoteRejectsNonAwaitingApproval(t *testing.T) {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
+		order := newTestOrder(t, status)
+		err := order.rejectQuote()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
+	}
 }
 
 func TestValidateQuoteItemsRejectsEmpty(t *testing.T) {

@@ -1,0 +1,11 @@
+meta {
+  name: Start Diagnosis
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/diagnosis
+  body: none
+  auth: inherit
+}

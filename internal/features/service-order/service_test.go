@@ -12,13 +12,13 @@ import (
 const normalizedDocument = "11144477735"
 
 func newTestService(repo *fakeRepository) *ServiceOrderService {
-	return NewServiceOrderService(repo, repo)
+	return NewServiceOrderService(repo, repo, nil)
 }
 
 func seedActiveCustomerAndVehicle(repo *fakeRepository) (customerID, vehicleID uuid.UUID) {
 	customerID = uuid.New()
 	vehicleID = uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true}, normalizedDocument)
+	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true, Document: normalizedDocument}, normalizedDocument)
 	repo.addVehicle(&vehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
 	return customerID, vehicleID
 }
@@ -38,9 +38,10 @@ func TestServiceCreateByID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusRecebida, result.Order.Status)
+	assert.Equal(t, StatusReceived, result.Order.Status)
 	assert.EqualValues(t, 1, result.Order.Code)
 	assert.Len(t, result.Services, 1)
+	assert.NotEmpty(t, result.TrackingToken)
 }
 
 func TestServiceCreateByDocumentAndPlate(t *testing.T) {
@@ -53,7 +54,7 @@ func TestServiceCreateByDocumentAndPlate(t *testing.T) {
 		LicensePlate:     "ABC1D23",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, StatusRecebida, result.Order.Status)
+	assert.Equal(t, StatusReceived, result.Order.Status)
 }
 
 func TestServiceCreateCustomerNotFound(t *testing.T) {

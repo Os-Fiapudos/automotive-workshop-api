@@ -245,12 +245,6 @@ func (handler *productHandler) listMovements(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	_, err := handler.service.Get(r.Context(), id)
-	if err != nil {
-		writeServiceError(w, err)
-		return
-	}
-
 	page := parseIntParam(r, "page", defaultPage)
 	if page < 1 {
 		page = defaultPage
@@ -263,11 +257,27 @@ func (handler *productHandler) listMovements(w http.ResponseWriter, r *http.Requ
 		pageSize = maxPageSize
 	}
 
+	movements, total, err := handler.service.ListMovements(r.Context(), id, page, pageSize)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	responses := make([]StockMovementResponse, 0, len(movements))
+	for _, m := range movements {
+		responses = append(responses, toStockMovementResponse(m))
+	}
+
+	totalPages := 0
+	if pageSize > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+
 	writeJSON(w, http.StatusOK, StockMovementListResponse{
-		Data:       []StockMovementResponse{},
+		Data:       responses,
 		Page:       page,
 		PageSize:   pageSize,
-		Total:      0,
-		TotalPages: 0,
+		Total:      total,
+		TotalPages: totalPages,
 	})
 }

@@ -1,0 +1,1338 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-08-24T00:00:00.000Z",
+  "__export_source": "automotive-workshop-api:docs",
+  "resources": [
+    {
+      "_id": "wrk_automotive_workshop_api",
+      "_type": "workspace",
+      "parentId": null,
+      "name": "automotive-workshop-api",
+      "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for protected routes.\n- Customers and POST /api/v1/service-orders are currently unauthenticated (open decision, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_automotive_workshop_base",
+      "_type": "environment",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Base environment",
+      "data": {
+        "baseUrl": "http://localhost:8080",
+        "token": "",
+        "customerId": "",
+        "customerDocument": "11144477735",
+        "vehicleId": "",
+        "licensePlate": "ABC1D23",
+        "serviceId": "",
+        "productId": "",
+        "serviceOrderId": "",
+        "orderCode": "",
+        "executionId": "",
+        "movementId": "",
+        "trackingToken": ""
+      },
+      "dataPropertyOrder": {
+        "&": [
+          "baseUrl",
+          "token",
+          "customerId",
+          "customerDocument",
+          "vehicleId",
+          "licensePlate",
+          "serviceId",
+          "productId",
+          "serviceOrderId",
+          "orderCode",
+          "executionId",
+          "movementId",
+          "trackingToken"
+        ]
+      },
+      "metaSortKey": 1,
+      "isPrivate": false
+    },
+    {
+      "_id": "env_automotive_workshop_local",
+      "_type": "environment",
+      "parentId": "env_automotive_workshop_base",
+      "name": "Local (docker compose)",
+      "data": {
+        "baseUrl": "http://localhost:8080"
+      },
+      "dataPropertyOrder": {
+        "&": [
+          "baseUrl"
+        ]
+      },
+      "metaSortKey": 2,
+      "isPrivate": false
+    },
+    {
+      "_id": "fld_health",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Health",
+      "environment": {},
+      "metaSortKey": 1000
+    },
+    {
+      "_id": "fld_auth",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Auth",
+      "environment": {},
+      "metaSortKey": 2000
+    },
+    {
+      "_id": "fld_customers",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Customers",
+      "environment": {},
+      "metaSortKey": 3000
+    },
+    {
+      "_id": "fld_service_catalog",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Service catalog",
+      "environment": {},
+      "metaSortKey": 4000
+    },
+    {
+      "_id": "fld_products",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Products",
+      "environment": {},
+      "metaSortKey": 5000
+    },
+    {
+      "_id": "fld_vehicles",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Vehicles",
+      "environment": {},
+      "metaSortKey": 6000
+    },
+    {
+      "_id": "fld_service_orders",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Service orders",
+      "environment": {},
+      "metaSortKey": 7000
+    },
+    {
+      "_id": "fld_tracking__customer_facing",
+      "_type": "request_group",
+      "parentId": "wrk_automotive_workshop_api",
+      "name": "Tracking (customer-facing)",
+      "environment": {},
+      "metaSortKey": 8000
+    },
+    {
+      "_id": "req_health_health_check",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Health check",
+      "description": "Public liveness probe. Returns {\"status\":\"ok\"}.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/health",
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 9000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_auth_login",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login",
+      "description": "Public. Credentials come from docs/seed.sql (dev only). The test script stores access_token in the {{token}} variable used by every protected request.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/auth/login",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 10000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"admin@workshop.local\",\n  \"password\": \"admin123\"\n}"
+      }
+    },
+    {
+      "_id": "req_auth_me",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Me",
+      "description": "Protected. Returns the authenticated administrative user.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/auth/me",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 11000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_customers_create_customer",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "Create customer",
+      "description": "Currently unauthenticated (open decision, CLAUDE.md section 1). document accepts CPF or CNPJ, with or without punctuation. Use fictitious data only.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/customers",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 12000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Maria Silva\",\n  \"document\": \"11144477735\",\n  \"phone\": \"11999998888\",\n  \"email\": \"maria.silva@example.com\"\n}"
+      }
+    },
+    {
+      "_id": "req_customers_list_customers",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "List customers",
+      "description": "Paginated. pageSize is capped at 100; invalid values fall back to the defaults.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/customers",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 13000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_customers_get_customer_by_id",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "Get customer by id",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/customers/{{ _.customerId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 14000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_customers_get_customer_by_document",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "Get customer by document",
+      "description": "Lookup by normalized CPF/CNPJ.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/customers/document/{{ _.customerDocument }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 15000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_customers_update_customer",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "Update customer",
+      "description": "Partial update: send only the fields to change (name, document, phone, email).",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/api/v1/customers/{{ _.customerId }}",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 16000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Maria Silva Souza\",\n  \"phone\": \"11988887777\"\n}"
+      }
+    },
+    {
+      "_id": "req_customers_deactivate_customer",
+      "_type": "request",
+      "parentId": "fld_customers",
+      "name": "Deactivate customer",
+      "description": "Logical deactivation (status INACTIVE), not a physical delete.",
+      "method": "DELETE",
+      "url": "{{ _.baseUrl }}/api/v1/customers/{{ _.customerId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {},
+      "metaSortKey": 17000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_catalog_create_service",
+      "_type": "request",
+      "parentId": "fld_service_catalog",
+      "name": "Create service",
+      "description": "estimated_time is in minutes. code is optional (auto-generated when omitted).",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/services",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 18000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Troca de oleo\",\n  \"description\": \"Troca de oleo e filtro\",\n  \"price\": 189.9,\n  \"estimated_time\": 60\n}"
+      }
+    },
+    {
+      "_id": "req_service_catalog_list_services",
+      "_type": "request",
+      "parentId": "fld_service_catalog",
+      "name": "List services",
+      "description": "Returns {\"items\":[...]}. Optional active=true|false filter.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/services",
+      "parameters": [
+        {
+          "name": "active",
+          "value": "true",
+          "disabled": true
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 19000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_catalog_get_service",
+      "_type": "request",
+      "parentId": "fld_service_catalog",
+      "name": "Get service",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/services/{{ _.serviceId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 20000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_catalog_update_service",
+      "_type": "request",
+      "parentId": "fld_service_catalog",
+      "name": "Update service",
+      "description": "",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/api/v1/services/{{ _.serviceId }}",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 21000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"price\": 209.9,\n  \"estimated_time\": 75\n}"
+      }
+    },
+    {
+      "_id": "req_service_catalog_delete_service",
+      "_type": "request",
+      "parentId": "fld_service_catalog",
+      "name": "Delete service",
+      "description": "Logical deletion (active = false).",
+      "method": "DELETE",
+      "url": "{{ _.baseUrl }}/api/v1/services/{{ _.serviceId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 22000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_products_create_product",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Create product",
+      "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted). Routes are in Portuguese (/produtos) by design.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/produtos",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 23000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"name\": \"Filtro de oleo\",\n  \"description\": \"Filtro de oleo motor 1.0\",\n  \"unitPrice\": 45.5,\n  \"currentStock\": 20,\n  \"type\": \"PART\"\n}"
+      }
+    },
+    {
+      "_id": "req_products_list_products",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "List products",
+      "description": "Optional filters: type (PART|SUPPLY), status (ACTIVE|INACTIVE).",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/produtos",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        },
+        {
+          "name": "type",
+          "value": "PART",
+          "disabled": true
+        },
+        {
+          "name": "status",
+          "value": "ACTIVE",
+          "disabled": true
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 24000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_products_get_product",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Get product",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 25000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_products_update_product",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Update product",
+      "description": "",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 26000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"unitPrice\": 49.9,\n  \"description\": \"Filtro de oleo motor 1.0 - revisado\"\n}"
+      }
+    },
+    {
+      "_id": "req_products_deactivate_product",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Deactivate product",
+      "description": "Logical deactivation (status INACTIVE).",
+      "method": "DELETE",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 27000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_products_adjust_stock",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Adjust stock",
+      "description": "type accepts ENTRY/ENTRADA/IN or EXIT/SAIDA/OUT.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/estoque/ajustes",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 28000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"type\": \"ENTRY\",\n  \"quantity\": 10,\n  \"reason\": \"Reposicao de estoque\"\n}"
+      }
+    },
+    {
+      "_id": "req_products_get_stock_balance",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "Get stock balance",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/estoque",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 29000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_products_list_stock_movements",
+      "_type": "request",
+      "parentId": "fld_products",
+      "name": "List stock movements",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/movimentacoes",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 30000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_vehicles_create_vehicle",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "Create vehicle",
+      "description": "customerId must reference an existing, active customer.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 31000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"licensePlate\": \"ABC1D23\",\n  \"brand\": \"Volkswagen\",\n  \"model\": \"Gol\",\n  \"year\": 2020,\n  \"color\": \"Prata\",\n  \"customerId\": \"{{ _.customerId }}\"\n}"
+      }
+    },
+    {
+      "_id": "req_vehicles_list_vehicles",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "List vehicles",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 32000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_vehicles_get_vehicle_by_plate",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "Get vehicle by plate",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles/plate/{{ _.licensePlate }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 33000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_vehicles_list_vehicles_by_customer",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "List vehicles by customer",
+      "description": "Customer-scoped listing. The path is /vehicles/customer/{customerId} (not /customers/{id}/vehicles) to avoid an ambiguous ServeMux pattern - see specs/vehicle-management/design.md section 1.5.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles/customer/{{ _.customerId }}",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 34000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_vehicles_get_vehicle_by_id",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "Get vehicle by id",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles/{{ _.vehicleId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 35000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_vehicles_update_vehicle",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "Update vehicle",
+      "description": "",
+      "method": "PATCH",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles/{{ _.vehicleId }}",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 36000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"color\": \"Preto\",\n  \"year\": 2021\n}"
+      }
+    },
+    {
+      "_id": "req_vehicles_deactivate_vehicle",
+      "_type": "request",
+      "parentId": "fld_vehicles",
+      "name": "Deactivate vehicle",
+      "description": "Logical deactivation (status INACTIVE).",
+      "method": "DELETE",
+      "url": "{{ _.baseUrl }}/api/v1/vehicles/{{ _.vehicleId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 37000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_open_service_order",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Open service order",
+      "description": "Currently unauthenticated (same open decision as Customers). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 38000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"customerId\": \"{{ _.customerId }}\",\n  \"vehicleId\": \"{{ _.vehicleId }}\",\n  \"requestedServiceIds\": [\n    \"{{ _.serviceId }}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_start_diagnosis",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Start diagnosis",
+      "description": "RECEIVED -> IN_DIAGNOSIS. No request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/diagnosis",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 39000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_compose_quote",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Compose quote",
+      "description": "Each item carries either serviceId or productId, never both.",
+      "method": "PUT",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 40000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"items\": [\n    {\n      \"serviceId\": \"{{ _.serviceId }}\",\n      \"quantity\": 1\n    },\n    {\n      \"productId\": \"{{ _.productId }}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_get_quote",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Get quote",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 41000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_send_quote_to_customer",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Send quote to customer",
+      "description": "Mechanic action. Moves the order to AWAITING_APPROVAL. No request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote/send",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 42000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_list_service_orders",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "List service orders",
+      "description": "status is one of RECEIVED, IN_DIAGNOSIS, AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED. createdFrom/createdTo are RFC3339.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders",
+      "parameters": [
+        {
+          "name": "page",
+          "value": "1",
+          "disabled": false
+        },
+        {
+          "name": "pageSize",
+          "value": "20",
+          "disabled": false
+        },
+        {
+          "name": "code",
+          "value": "1",
+          "disabled": true
+        },
+        {
+          "name": "status",
+          "value": "IN_PROGRESS",
+          "disabled": true
+        },
+        {
+          "name": "document",
+          "value": "11144477735",
+          "disabled": true
+        },
+        {
+          "name": "licensePlate",
+          "value": "ABC1D23",
+          "disabled": true
+        },
+        {
+          "name": "createdFrom",
+          "value": "2026-01-01T00:00:00Z",
+          "disabled": true
+        },
+        {
+          "name": "createdTo",
+          "value": "2026-12-31T23:59:59Z",
+          "disabled": true
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 43000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_get_service_order",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Get service order",
+      "description": "The path parameter accepts either the UUID or the sequential code.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 44000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_start_service_execution",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Start service execution",
+      "description": "Opens an audit_services record for the given catalog service.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/executions",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 45000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"serviceId\": \"{{ _.serviceId }}\"\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_finish_service_execution",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Finish service execution",
+      "description": "Body is optional: omit it entirely to close the execution at the server time.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/executions/{{ _.executionId }}/finish",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 46000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"endedAt\": \"2026-08-24T18:30:00Z\"\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_finalize_service_order",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Finalize service order",
+      "description": "IN_PROGRESS -> COMPLETED. No request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/finalize",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 47000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_deliver_service_order",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Deliver service order",
+      "description": "COMPLETED -> DELIVERED. No request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/deliver",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 48000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_average_execution_time__metrics",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Average execution time (metrics)",
+      "description": "All filters optional. Dates are RFC3339.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/metrics/average-execution-time",
+      "parameters": [
+        {
+          "name": "serviceId",
+          "value": "{{ _.serviceId }}",
+          "disabled": true
+        },
+        {
+          "name": "startDate",
+          "value": "2026-01-01T00:00:00Z",
+          "disabled": true
+        },
+        {
+          "name": "endDate",
+          "value": "2026-12-31T23:59:59Z",
+          "disabled": true
+        }
+      ],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 49000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_register_stock_usage",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Register stock usage",
+      "description": "Consumes product stock against the order.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/stock-movements",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 50000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"items\": [\n    {\n      \"productId\": \"{{ _.productId }}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_list_stock_movements_of_the_order",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "List stock movements of the order",
+      "description": "",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/stock-movements",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 51000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_service_orders_reverse_stock_movement",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "Reverse stock movement",
+      "description": "Gives the consumed quantity back to stock. No request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/stock-movements/{{ _.movementId }}/reversal",
+      "parameters": [],
+      "headers": [],
+      "authentication": {
+        "type": "bearer",
+        "token": "{{ _.token }}",
+        "prefix": "Bearer"
+      },
+      "metaSortKey": 52000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_tracking__customer_facing__track_service_order",
+      "_type": "request",
+      "parentId": "fld_tracking__customer_facing",
+      "name": "Track service order",
+      "description": "Never uses the administrative JWT: it authenticates with the X-Tracking-Token header returned when the order was opened.",
+      "method": "GET",
+      "url": "{{ _.baseUrl }}/api/v1/acompanhamento/{{ _.orderCode }}",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "X-Tracking-Token",
+          "value": "{{ _.trackingToken }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 53000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_tracking__customer_facing__approve_quote",
+      "_type": "request",
+      "parentId": "fld_tracking__customer_facing",
+      "name": "Approve quote",
+      "description": "Customer decision. X-Tracking-Token only, no request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/acompanhamento/{{ _.orderCode }}/orcamento/aprovar",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "X-Tracking-Token",
+          "value": "{{ _.trackingToken }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 54000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    },
+    {
+      "_id": "req_tracking__customer_facing__reject_quote",
+      "_type": "request",
+      "parentId": "fld_tracking__customer_facing",
+      "name": "Reject quote",
+      "description": "Customer decision. X-Tracking-Token only, no request body.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/acompanhamento/{{ _.orderCode }}/orcamento/reprovar",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "X-Tracking-Token",
+          "value": "{{ _.trackingToken }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 55000,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {}
+    }
+  ]
+}

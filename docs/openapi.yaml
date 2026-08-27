@@ -1,22 +1,140 @@
 openapi: 3.0.3
 info:
-  title: automotive-workshop-api — Customer Management
+  title: automotive-workshop-api — Customer & Vehicle Management
   description: >
-    Customer Management endpoints for the automotive workshop API. See
-    specs/customer-management/ for the requirements and design behind this
-    contract. Other domain entities (Vehicle, Product, Service, ServiceOrder,
-    Quote) are documented in docs/entities.md but not yet implemented/exposed
-    via HTTP.
+    Auth, Customer Management, Vehicle Management, Service catalog, Product &
+    Stock Management, Service Order opening/diagnosis/quote/execution, Service
+    Order listing/detail (specs/service-order-query/), and Service Order
+    Tracking (specs/service-order-tracking/) endpoints for the automotive
+    workshop API. See specs/auth/, specs/customer-management/,
+    specs/vehicle-management/, specs/service-catalog/,
+    specs/product-management/, specs/service-order-opening/,
+    specs/service-order-diagnosis-quote/, specs/service-order-quote-decision/,
+    specs/service-order-execution/, specs/service-order-query/, and
+    specs/service-order-tracking/ for the requirements and design behind
+    these contracts. Auth, Vehicle, Service catalog, Product, and Service
+    Order Query/Diagnosis/Quote/Execution routes require a JWT (see the
+    bearerAuth security scheme; POST /api/v1/auth/login itself is the one
+    exception, since it is what issues the token); Customer routes and
+    Service Order creation do not (see
+    specs/customer-management/requirements.md §7.2 and CLAUDE.md §1); Service
+    Order Tracking and the customer-facing quote approve/reject endpoints use
+    neither — they validate their own per-order tracking token instead (see
+    the trackingToken security scheme).
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
     description: Local (docker-compose) or `go run ./cmd/api`
 
 tags:
+  - name: auth
+    description: >
+      Administrative login and session identity (specs/auth/). Issues the
+      JWT every other bearerAuth-protected route requires.
   - name: customers
     description: Create and maintain workshop customers (individuals via CPF, companies via CNPJ).
+  - name: vehicles
+    description: >
+      Create and maintain workshop vehicles, each linked to an existing,
+      active customer. Every endpoint requires a valid JWT.
+  - name: services
+    description: >
+      Maintain the catalog of services and prices quotes are composed from
+      (specs/service-catalog/). Every endpoint requires a valid JWT; deletion
+      is logical (an `active` flag), preserving history for BR5/BR7.
+  - name: products
+    description: >
+      Maintain the catalog of parts (`PART`) and supplies (`SUPPLY`), their
+      stock balance, and stock movement history
+      (specs/product-management/). Every endpoint requires a valid JWT.
+      Route segments are kept in Portuguese (`produtos`/`estoque`/
+      `ajustes`/`movimentacoes`) by the same deliberate exception CLAUDE.md
+      §8 documents for the ServiceOrder status enum — do not translate them.
+  - name: service-orders
+    description: >
+      Open a service order and drive it through its full lifecycle: creation
+      (specs/service-order-opening/), diagnosis and quote composition
+      (specs/service-order-diagnosis-quote/), quote sending
+      (specs/service-order-quote-decision/), execution, finalization, and
+      delivery (specs/service-order-execution/), plus listing/detail
+      (specs/service-order-query/). Order creation is unauthenticated (see
+      CLAUDE.md §1); every other endpoint here requires a valid JWT. The
+      customer-facing quote approval/rejection endpoints live under the
+      `tracking` tag instead, since they authenticate with a tracking token,
+      not a JWT (specs/service-order-quote-decision/).
+  - name: tracking
+    description: >
+      Customer-facing, JWT-free service order tracking (RF12,
+      specs/service-order-tracking/) and quote approval/rejection
+      (specs/service-order-quote-decision/). Authenticates with a per-order
+      tracking token instead of the administrative JWT.
 
 paths:
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Administrative login
+      description: >
+        Issues a JWT for an administrative user (specs/auth/design.md §4).
+        The identifier is e-mail; unknown e-mail and wrong password return
+        the exact same 401 body so a client cannot enumerate users (BR4).
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            examples:
+              admin:
+                summary: Seeded dev admin (docs/seed.sql)
+                value:
+                  email: admin@workshop.local
+                  password: admin123
+      responses:
+        "200":
+          description: A bearer token, valid for the TTL configured via `JWT_TTL` (default 1h).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Malformed JSON body, or a missing email/password (code `INVALID_REQUEST`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: >
+            Unknown e-mail or wrong password (code `UNAUTHORIZED`) —
+            deliberately identical for both cases (BR4).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: Retrieve the authenticated user's own identity
+      operationId: getCurrentUser
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The authenticated administrative user (never includes the password hash).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          description: >
+            Missing, malformed, or expired bearer token (code
+            `UNAUTHORIZED`), or the token's subject no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
   /api/v1/customers:
     post:
       tags: [customers]
@@ -196,12 +314,1533 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 
+  /api/v1/vehicles:
+    post:
+      tags: [vehicles]
+      summary: Register a new vehicle
+      description: >
+        The referenced customerId must belong to an existing, ACTIVE
+        customer. The vehicle always starts ACTIVE.
+      operationId: createVehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVehicleRequest"
+            examples:
+              vehicle:
+                summary: Mercosul-format plate
+                value:
+                  licensePlate: ABC1D23
+                  brand: Fiat
+                  model: Uno
+                  year: 2018
+                  color: White
+                  customerId: a0000000-0000-0000-0000-000000000001
+      responses:
+        "201":
+          description: Vehicle created, always with status ACTIVE.
+          headers:
+            Location:
+              description: URL of the newly created vehicle.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          description: Missing required field, invalid license plate format, or year out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: The referenced customerId does not exist (code `CUSTOMER_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The referenced customer exists but is INACTIVE (code
+            `CUSTOMER_INACTIVE`), or the license plate already belongs to
+            another vehicle (code `DUPLICATE_LICENSE_PLATE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [vehicles]
+      summary: List vehicles (active and inactive)
+      operationId: listVehicles
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of vehicles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/vehicles/{id}:
+    parameters:
+      - $ref: "#/components/parameters/VehicleId"
+    get:
+      tags: [vehicles]
+      summary: Retrieve a vehicle by id
+      operationId: getVehicleById
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [vehicles]
+      summary: Partially update a vehicle
+      description: >
+        Only brand, model, year, and color may be updated; the license plate
+        and the owning customer are immutable after creation and are not
+        accepted by this endpoint. Omitted fields keep their current value.
+      operationId: updateVehicle
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVehicleRequest"
+      responses:
+        "200":
+          description: The updated vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          description: The updated year is out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [vehicles]
+      summary: Logically deactivate a vehicle
+      description: >
+        Soft delete: sets status to INACTIVE. The record is never physically
+        removed and remains fully queryable. Idempotent — deactivating an
+        already-inactive vehicle returns 200 with no change. There is no
+        endpoint to reactivate a vehicle in this feature.
+      operationId: deactivateVehicle
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The now-inactive vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/vehicles/plate/{plate}:
+    get:
+      tags: [vehicles]
+      summary: Retrieve a vehicle by license plate
+      description: The path parameter is normalized (formatting stripped, uppercased) before lookup.
+      operationId: getVehicleByPlate
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: plate
+          in: path
+          required: true
+          description: Legacy (AAA9999) or Mercosul (AAA9A99) plate, formatted or already normalized.
+          schema:
+            type: string
+          example: ABC1D23
+      responses:
+        "200":
+          description: The vehicle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No vehicle with this plate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/vehicles/customer/{customerId}:
+    get:
+      tags: [vehicles]
+      summary: List a customer's vehicles
+      description: >
+        An existing customer with no vehicles returns 200 with an empty data
+        array. An inactive customer's vehicles are still listed — inactivity
+        only affects future service-order eligibility, not visibility.
+      operationId: listVehiclesByCustomer
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of the customer's vehicles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No customer with this id (code `CUSTOMER_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/services:
+    post:
+      tags: [services]
+      summary: Register a new catalog service
+      description: >
+        specs/service-catalog/design.md §D1: `code` is optional — when
+        omitted, the database generates the sequential identifier; when
+        present, a collision with an existing service's code is rejected.
+      operationId: createCatalogService
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCatalogServiceRequest"
+            examples:
+              autoCode:
+                summary: Database-generated code
+                value:
+                  name: Oil Change
+                  description: Engine oil and filter replacement.
+                  price: 120.5
+                  estimated_time: 45
+              explicitCode:
+                summary: Caller-supplied code
+                value:
+                  code: 42
+                  name: Wheel Alignment
+                  description: Four-wheel alignment.
+                  price: 89.9
+      responses:
+        "201":
+          description: The created service, always with active true.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogService"
+        "400":
+          description: >
+            Malformed JSON body (code `INVALID_BODY`), or a missing/invalid
+            field — empty name, negative price, non-positive code or
+            estimated_time (code `VALIDATION_ERROR`, BR1/BR2/BR3/BR4).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "409":
+          description: The supplied code already belongs to another service (code `CODE_ALREADY_EXISTS`, BR2).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [services]
+      summary: List catalog services
+      description: >
+        Ordered by code. Not paginated — the `{"items": [...]}` envelope is
+        used instead of the page/pageSize/total/totalPages shape (see
+        CLAUDE.md §8's "Collection responses" note, which this endpoint
+        first established).
+      operationId: listCatalogServices
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: active
+          in: query
+          description: Filter by active/inactive. Omitted returns both.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Every matching service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogServiceList"
+        "400":
+          description: The `active` filter is not `true`/`false` (code `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/services/{id}:
+    parameters:
+      - $ref: "#/components/parameters/CatalogServiceId"
+    get:
+      tags: [services]
+      summary: Retrieve a catalog service by id
+      operationId: getCatalogServiceById
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogService"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [services]
+      summary: Partially update a catalog service
+      description: >
+        Every field is optional; at least one must be present. Omitted
+        fields keep their current value. Changing a service's price never
+        alters quotes already generated (BR5), since a quote stores its own
+        price snapshot.
+      operationId: updateCatalogService
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCatalogServiceRequest"
+      responses:
+        "200":
+          description: The updated service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogService"
+        "400":
+          description: >
+            Malformed JSON body (code `INVALID_BODY`), or an invalid/empty
+            field, or a request with no updatable field at all (code
+            `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [services]
+      summary: Logically deactivate a catalog service
+      description: >
+        Soft delete: sets active to false, preserving history (BR7). An
+        inactive service must not be used in new quotes (BR6). Idempotent —
+        deactivating an already-inactive service still succeeds.
+      operationId: deactivateCatalogService
+      security: [{ bearerAuth: [] }]
+      responses:
+        "204":
+          description: Deactivated. No response body.
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/produtos:
+    post:
+      tags: [products]
+      summary: Register a new product (part or supply)
+      operationId: createProduct
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductRequest"
+            examples:
+              part:
+                summary: A replacement part
+                value:
+                  name: Filtro de Óleo
+                  description: Filtro de óleo compatível com motores 1.0/1.6.
+                  unitPrice: 35.9
+                  currentStock: 50
+                  type: PART
+      responses:
+        "201":
+          description: The created product, always ACTIVE.
+          headers:
+            Location:
+              description: URL of the newly created product.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: >
+            Malformed JSON body (code `INVALID_BODY`), or a missing/invalid
+            field — empty name, missing/negative unitPrice, missing/negative
+            currentStock, non-positive code, or type not PART/SUPPLY (code
+            `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "409":
+          description: The supplied code already belongs to another product (code `DUPLICATE_CODE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [products]
+      summary: List products (paginated, filterable)
+      operationId: listProducts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: type
+          in: query
+          description: Filter by product type.
+          schema:
+            type: string
+            enum: [PART, SUPPLY]
+        - name: status
+          in: query
+          description: Filter by product status.
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+      responses:
+        "200":
+          description: A page of products.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/produtos/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ProductId"
+    get:
+      tags: [products]
+      summary: Retrieve a product by id
+      operationId: getProductById
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: "{id} is not a valid UUID (code `INVALID_BODY`)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      tags: [products]
+      summary: Partially update a product's cadastral data
+      description: >
+        Name, description, unitPrice, and type may be updated. `currentStock`
+        is deliberately not modifiable through this endpoint (RNF07) — a
+        request that includes it is rejected wholesale, even alongside other,
+        otherwise-valid fields; use POST .../estoque/ajustes instead.
+      operationId: updateProduct
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200":
+          description: The updated product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400":
+          description: >
+            Malformed JSON body, `currentStock` present (code
+            `VALIDATION_ERROR`, RNF07), empty name, negative unitPrice, or
+            type not PART/SUPPLY.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      tags: [products]
+      summary: Logically deactivate a product
+      description: >
+        Soft delete: sets status to INACTIVE. Idempotent. An inactive
+        product must not be used in new quotes or stock adjustments.
+      operationId: deactivateProduct
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The now-inactive product.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/produtos/{id}/estoque/ajustes:
+    post:
+      tags: [products]
+      summary: Register a stock adjustment (entry or exit)
+      description: >
+        Applied atomically at the database level (RNF07): an EXIT is
+        rejected as 409 if it would take `currentStock` negative, closing
+        the race between two concurrent adjustments (RN01). The product must
+        be ACTIVE.
+      operationId: adjustProductStock
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentRequest"
+            examples:
+              entry:
+                summary: Stock entry
+                value:
+                  type: ENTRY
+                  quantity: 10
+                  reason: Ajuste de inventário anual
+      responses:
+        "201":
+          description: The created stock movement record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStockMovement"
+        "400":
+          description: >
+            Malformed JSON body, type not ENTRY/EXIT, non-positive quantity,
+            or empty reason (code `VALIDATION_ERROR`, RN01).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            An EXIT would take `currentStock` negative (code
+            `INSUFFICIENT_STOCK`, RN01), or the product is inactive (code
+            `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/produtos/{id}/estoque:
+    get:
+      tags: [products]
+      summary: Retrieve a product's current stock balance
+      operationId: getProductStockBalance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+      responses:
+        "200":
+          description: The product's stock balance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStockBalance"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/produtos/{id}/movimentacoes:
+    get:
+      tags: [products]
+      summary: List a product's stock movement history (RF10)
+      operationId: listProductStockMovements
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ProductId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of the product's stock movements, most recent first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductStockMovementList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No product with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders:
+    post:
+      tags: [service-orders]
+      summary: Open a new service order
+      description: >
+        Unauthenticated (CLAUDE.md §1, same open decision as Customer
+        Management). Exactly one of customerId/customerDocument and exactly
+        one of vehicleId/licensePlate must be present (specs/service-order-opening/design.md
+        §4.1). Any `status` field sent in the body is ignored — the server
+        is the only author of a new order's status, which always starts
+        RECEIVED (requirements.md §3.6). requestedServiceIds and notes are
+        optional.
+      operationId: createServiceOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceOrderRequest"
+            examples:
+              byId:
+                summary: Customer/vehicle identified by id
+                value:
+                  customerId: a0000000-0000-0000-0000-000000000001
+                  vehicleId: b0000000-0000-0000-0000-000000000001
+                  requestedServiceIds: [d0000000-0000-0000-0000-000000000001]
+                  notes: Customer reported a light engine noise.
+              byDocumentAndPlate:
+                summary: Customer/vehicle identified by document/plate
+                value:
+                  customerDocument: "123.456.789-09"
+                  licensePlate: ABC1D23
+                  requestedServiceIds: []
+                  notes: Routine check.
+      responses:
+        "201":
+          description: >
+            The created order, status RECEIVED. `trackingToken` is the raw
+            customer-tracking token (specs/service-order-tracking/design.md
+            §5) — returned only here, once, and never logged (RNF08).
+          headers:
+            Location:
+              description: URL of the newly created service order.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderCreateResponse"
+        "400":
+          description: >
+            Malformed JSON body (code `INVALID_BODY`), or not exactly one
+            customer/vehicle identifier pair given (code `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: >
+            The referenced customer (code `NOT_FOUND`), vehicle (code
+            `NOT_FOUND`), or a requested service id (code `NOT_FOUND`) does
+            not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The referenced customer is inactive (code `CUSTOMER_INACTIVE`),
+            the referenced vehicle is inactive (code `VEHICLE_INACTIVE`), or
+            the vehicle does not belong to the identified customer (code
+            `VEHICLE_NOT_OWNED_BY_CUSTOMER`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [service-orders]
+      summary: List service orders (paginated, filterable)
+      description: >
+        Most recent orders first (by creation date, order code as a
+        tiebreaker). All filters are optional and combine with AND.
+      operationId: listServiceOrders
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: query
+          description: Exact match on the service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+        - name: status
+          in: query
+          description: Exact match on the service order's status.
+          schema:
+            type: string
+            enum:
+              [
+                RECEIVED,
+                IN_DIAGNOSIS,
+                AWAITING_APPROVAL,
+                IN_PROGRESS,
+                COMPLETED,
+                DELIVERED,
+                CANCELED,
+              ]
+        - name: document
+          in: query
+          description: Customer CPF/CNPJ, formatted or unformatted (normalized before matching).
+          schema:
+            type: string
+          example: "123.456.789-09"
+        - name: licensePlate
+          in: query
+          description: Vehicle license plate, legacy or Mercosul format.
+          schema:
+            type: string
+          example: ABC1D23
+        - name: createdFrom
+          in: query
+          description: Inclusive lower bound on the order's creation date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          description: Inclusive upper bound on the order's creation date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A page of service orders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderList"
+        "400":
+          description: An invalid filter value (e.g. an unknown status, or a non-integer code/malformed date).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/service-orders/{id}:
+    get:
+      tags: [service-orders]
+      summary: Retrieve a service order's full detail, by id or by code
+      description: >
+        {id} accepts either the order's technical id (a UUID) or its
+        sequential code (an integer) — the two value spaces never overlap, so
+        the server tells them apart automatically. Both forms return the same
+        ServiceOrderDetail shape: customer, vehicle, status, notes, the
+        services requested at opening, the composed quote (its item values
+        are the quote's own stored snapshot, never the catalog's current
+        price — absent/null when no quote has been composed yet), and the
+        full status-change history, oldest first. A related customer,
+        vehicle, product, or service that has since become inactive is still
+        shown.
+      operationId: getServiceOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The service order's UUID or its sequential code.
+          schema:
+            type: string
+          examples:
+            byId:
+              summary: By technical id
+              value: "b0000000-0000-0000-0000-000000000001"
+            byCode:
+              summary: By sequential code
+              value: "1"
+      responses:
+        "200":
+          description: The service order's full detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderDetail"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id/code, or {id} is neither a valid
+            UUID nor a valid integer (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/diagnosis:
+    post:
+      tags: [service-orders]
+      summary: Start diagnosis on a service order
+      description: >
+        Transitions the order from RECEIVED to IN_DIAGNOSIS
+        (specs/service-order-diagnosis-quote/requirements.md §3.1). No
+        request body.
+      operationId: startServiceOrderDiagnosis
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+      responses:
+        "200":
+          description: The order's new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderStatusResponse"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service order with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The order is not RECEIVED (code `INVALID_STATUS_TRANSITION`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/quote:
+    parameters:
+      - $ref: "#/components/parameters/ServiceOrderId"
+    put:
+      tags: [service-orders]
+      summary: Compose (or recompose) a service order's quote
+      description: >
+        Replaces the order's quote wholesale with the given items; the
+        total is always computed server-side (RF06) — there is no
+        client-sendable total/totalAmount field. Recomposition is allowed
+        any number of times while the quote is still PENDING and the order
+        has left RECEIVED; each item resolves and snapshots its price from
+        the product/service catalog at compose time
+        (specs/service-order-diagnosis-quote/requirements.md §3.2, §3.9,
+        §3.11, §3.12). This no longer transitions the order's status — only
+        POST .../quote/send does (specs/service-order-quote-decision/).
+      operationId: composeServiceOrderQuote
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComposeQuoteRequest"
+            examples:
+              mixed:
+                summary: One product line, one service line
+                value:
+                  items:
+                    - productId: c0000000-0000-0000-0000-000000000001
+                      quantity: 2
+                    - serviceId: d0000000-0000-0000-0000-000000000001
+                      quantity: 1
+      responses:
+        "200":
+          description: The composed quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderQuote"
+        "400":
+          description: >
+            Malformed JSON body, an item missing exactly one of
+            productId/serviceId (code `VALIDATION_ERROR`), an empty item
+            list (code `VALIDATION_ERROR`, `ErrEmptyQuote`), or a
+            non-positive quantity (code `VALIDATION_ERROR`,
+            `ErrInvalidQuantity`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id (code `NOT_FOUND`), or a
+            referenced product/service does not exist (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            Diagnosis has not started — order still RECEIVED (code
+            `DIAGNOSIS_NOT_STARTED`), the quote has already been decided
+            (code `QUOTE_ALREADY_DECIDED`), or a referenced product is
+            inactive (code `PRODUCT_INACTIVE`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      tags: [service-orders]
+      summary: Retrieve a service order's current quote
+      operationId: getServiceOrderQuote
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The quote.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderQuote"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id (code `NOT_FOUND`), or no quote
+            has been composed yet (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/quote/send:
+    post:
+      tags: [service-orders]
+      summary: Send a service order's composed quote to the customer
+      description: >
+        Only a complete quote (at least one item) can be sent, and only
+        while the order is IN_DIAGNOSIS — sending is what moves it to
+        AWAITING_APPROVAL (specs/service-order-quote-decision/). No
+        request body. Notification to the customer is best-effort: the MVP
+        has no real e-mail integration, and a notification failure never
+        undoes or blocks the already-recorded send.
+      operationId: sendServiceOrderQuote
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+      responses:
+        "200":
+          description: The sent quote (now carrying `sentAt`/`sentVersion`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderQuote"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id (code `NOT_FOUND`), or no quote
+            has been composed yet (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The order is not IN_DIAGNOSIS (code
+            `INVALID_STATUS_TRANSITION`), or the quote has no items (code
+            `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/executions:
+    post:
+      tags: [service-orders]
+      summary: Start a service's execution within a service order
+      description: >
+        The order must already be IN_PROGRESS (an external precondition
+        this feature does not itself produce — see
+        specs/service-order-execution/requirements.md §2.1) and the
+        referenced service must exist in the catalog.
+      operationId: startServiceOrderExecution
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartExecutionRequest"
+            examples:
+              start:
+                value:
+                  serviceId: d0000000-0000-0000-0000-000000000001
+      responses:
+        "201":
+          description: The started execution (endedAt null).
+          headers:
+            Location:
+              description: URL of the newly created execution.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceExecution"
+        "400":
+          description: Malformed JSON body, or missing serviceId (code `VALIDATION_ERROR`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id (code `NOT_FOUND`), or the
+            referenced service does not exist (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/executions/{executionId}/finish:
+    post:
+      tags: [service-orders]
+      summary: Record the end of a previously started service execution
+      description: >
+        endedAt is optional in the request body — an omitted or empty body
+        means "now" (design.md §2.5). The order must still be IN_PROGRESS —
+        a finalized order accepts no more finishes (BR6).
+      operationId: finishServiceOrderExecution
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+        - $ref: "#/components/parameters/ExecutionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinishExecutionRequest"
+      responses:
+        "200":
+          description: The finished execution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceExecution"
+        "400":
+          description: >
+            Malformed JSON body, or endedAt is before the execution's
+            startedAt (code `VALIDATION_ERROR`, BR4).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: >
+            No service order with this id (code `NOT_FOUND`), or no
+            execution with this executionId on this order (code
+            `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`),
+            or the execution was already finished (code
+            `SERVICE_EXECUTION_ALREADY_FINISHED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/finalize:
+    post:
+      tags: [service-orders]
+      summary: Finalize a service order
+      description: >
+        Transitions the order from IN_PROGRESS to COMPLETED once every
+        required execution — one per distinct service line item of its
+        approved quote — has been finished (BR5). No request body.
+      operationId: finalizeServiceOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+      responses:
+        "200":
+          description: The order's new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderStatusResponse"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service order with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The order is not IN_PROGRESS (code `INVALID_STATUS_TRANSITION`),
+            or it has pending, unfinished executions (code
+            `EXECUTIONS_NOT_COMPLETED`, BR5).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/{id}/deliver:
+    post:
+      tags: [service-orders]
+      summary: Mark a service order as delivered to the customer
+      description: >
+        Transitions the order from COMPLETED to DELIVERED (BR7). No request
+        body.
+      operationId: deliverServiceOrder
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ServiceOrderId"
+      responses:
+        "200":
+          description: The order's new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderStatusResponse"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+        "404":
+          description: No service order with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The order is not COMPLETED (code `INVALID_STATUS_TRANSITION`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/service-orders/metrics/average-execution-time:
+    get:
+      tags: [service-orders]
+      summary: Average service execution time, grouped by service
+      description: >
+        specs/service-order-metrics/. Only completed executions (with an
+        endedAt) participate; a still-in-progress execution is excluded, not
+        treated as zero. Duration is reported in minutes
+        (averageDurationMinutes). A service with no completed execution is
+        absent from the result rather than shown with a zero count; no data
+        at all (or a filter matching nothing) returns 200 with an empty
+        `services` array, never an error. All filters are optional and
+        combine with AND.
+      operationId: getAverageExecutionTime
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: serviceId
+          in: query
+          description: Restrict the result to a single service.
+          schema:
+            type: string
+            format: uuid
+        - name: startDate
+          in: query
+          description: Inclusive lower bound on the execution's start date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          description: Inclusive upper bound on the execution's start date/time (RFC3339).
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: One entry per service with at least one completed execution.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AverageExecutionTimeResponse"
+        "400":
+          description: An invalid filter value (malformed serviceId, startDate, or endDate).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
+
+  /api/v1/acompanhamento/{codigo}:
+    get:
+      tags: [tracking]
+      summary: Look up a service order's public tracking view
+      description: >
+        Customer-facing read view (RF12) — never accepts or requires the
+        administrative JWT (specs/service-order-tracking/requirements.md
+        AC10); authenticates with the X-Tracking-Token header instead (see
+        the trackingToken security scheme). The response is a deliberately
+        limited projection, distinct from the administrative
+        ServiceOrderDetail: only the order's code, current status, a partial
+        vehicle identification (license plate, brand, model, year, color —
+        no id/code/status/owning customer), and the milestone trail (event,
+        previous/new status, occurredAt — no free-text description). Customer
+        PII (CPF/CNPJ, phone, e-mail), internal ids, and any other order are
+        never present (AC6-AC9).
+      operationId: getServiceOrderTracking
+      security:
+        - trackingToken: []
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: The service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: The service order's public tracking view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderTracking"
+        "401":
+          description: >
+            The X-Tracking-Token header is missing, malformed, wrong,
+            belongs to a different service order, or has been revoked (code
+            `INVALID_TRACKING_TOKEN`) — all deliberately indistinguishable
+            from each other, so a wrong token never reveals which specific
+            way it was wrong (AC2, AC4, AC5).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: >
+            No service order with this code, or {codigo} is not a valid
+            integer (code `NOT_FOUND`) — checked before the token, so it
+            takes precedence regardless of what token was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/acompanhamento/{codigo}/orcamento/aprovar:
+    post:
+      tags: [tracking]
+      summary: Approve a service order's sent quote (customer-facing)
+      description: >
+        Customer-facing decision endpoint (specs/service-order-quote-decision/)
+        — never accepts or requires the administrative JWT; authenticates
+        with the X-Tracking-Token header instead, same convention as
+        GET /api/v1/acompanhamento/{codigo}. Approving moves the order from
+        AWAITING_APPROVAL to IN_PROGRESS. No request body.
+      operationId: approveServiceOrderQuote
+      security:
+        - trackingToken: []
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: The service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: >
+            The reduced, public decision projection — no internal ids, no
+            item breakdown (same "reduced read projection" principle as
+            ServiceOrderTracking).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderQuoteDecision"
+        "401":
+          description: >
+            The X-Tracking-Token header is missing, malformed, wrong,
+            belongs to a different service order, or has been revoked (code
+            `INVALID_TRACKING_TOKEN`) — all deliberately indistinguishable
+            from each other.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: >
+            No service order with this code (code `NOT_FOUND`) — checked
+            before the token, so it takes precedence regardless of what
+            token was supplied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: >
+            The quote has already been decided — approved or rejected
+            already (code `QUOTE_ALREADY_DECIDED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /api/v1/acompanhamento/{codigo}/orcamento/reprovar:
+    post:
+      tags: [tracking]
+      summary: Reject a service order's sent quote (customer-facing)
+      description: >
+        Same authentication and precedence rules as .../orcamento/aprovar.
+        Rejecting moves the order from AWAITING_APPROVAL to CANCELED —
+        the closing status decided for a rejected quote, since a REJECTED
+        quote can never be altered
+        (specs/service-order-diagnosis-quote/requirements.md §3.9) and the
+        order would otherwise have no way to leave AWAITING_APPROVAL. No
+        request body.
+      operationId: rejectServiceOrderQuote
+      security:
+        - trackingToken: []
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: The service order's sequential code.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: The reduced, public decision projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceOrderQuoteDecision"
+        "401":
+          description: >
+            The X-Tracking-Token header is missing, malformed, wrong,
+            belongs to a different service order, or has been revoked (code
+            `INVALID_TRACKING_TOKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No service order with this code (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The quote has already been decided (code `QUOTE_ALREADY_DECIDED`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Required on every Vehicle Management route, every Service catalog and
+        Product Management route, GET /api/v1/auth/me, and every Service
+        Order route except creation (RNF02) — that includes the Service
+        Order Query routes plus the diagnosis/quote/execution routes added by
+        specs/service-order-diagnosis-quote/,
+        specs/service-order-quote-decision/ (only its send-quote endpoint;
+        approve/reject are customer-facing, see trackingToken), and
+        specs/service-order-execution/. Not required on Customer Management
+        routes (see specs/customer-management/requirements.md §7.2) nor on
+        POST /api/v1/service-orders (CLAUDE.md §1), and not accepted at all
+        by the Service Order Tracking route or the customer-facing quote
+        approve/reject routes (see trackingToken).
+    trackingToken:
+      type: apiKey
+      in: header
+      name: X-Tracking-Token
+      description: >
+        Per-service-order token, issued once as the trackingToken field of
+        POST /api/v1/service-orders's creation response (there is no
+        separate issuance endpoint). Deliberately a distinct header, not
+        Authorization: Bearer, so it can never be confused with the
+        administrative JWT (specs/service-order-tracking/requirements.md §0).
+
   parameters:
     CustomerId:
       name: id
       in: path
       required: true
+      schema:
+        type: string
+        format: uuid
+    VehicleId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CatalogServiceId:
+      name: id
+      in: path
+      required: true
+      description: The catalog service's technical UUID.
+      schema:
+        type: string
+        format: uuid
+    ProductId:
+      name: id
+      in: path
+      required: true
+      description: The product's technical UUID.
+      schema:
+        type: string
+        format: uuid
+    ServiceOrderId:
+      name: id
+      in: path
+      required: true
+      description: >
+        The service order's technical UUID. Unlike
+        GET /api/v1/service-orders/{id}, this parameter never accepts the
+        sequential code — every route that uses it only ever looks the order
+        up by UUID.
+      schema:
+        type: string
+        format: uuid
+    ExecutionId:
+      name: executionId
+      in: path
+      required: true
+      description: The service execution's technical UUID.
       schema:
         type: string
         format: uuid
@@ -315,6 +1954,468 @@ components:
         totalPages:
           type: integer
 
+    CreateVehicleRequest:
+      type: object
+      required: [licensePlate, brand, model, year, color, customerId]
+      properties:
+        licensePlate:
+          type: string
+          description: Legacy (AAA9999) or Mercosul (AAA9A99) format, with or without punctuation.
+          example: ABC1D23
+        brand:
+          type: string
+          example: Fiat
+        model:
+          type: string
+          example: Uno
+        year:
+          type: integer
+          description: Manufacturing year, between 1950 and the current year + 1.
+          example: 2018
+        color:
+          type: string
+          example: White
+        customerId:
+          type: string
+          format: uuid
+          description: Must reference an existing, ACTIVE customer.
+
+    UpdateVehicleRequest:
+      type: object
+      description: >
+        Every field is optional; omitted fields are left unchanged. License
+        plate and customerId are not part of this request's shape — they are
+        immutable after creation.
+      properties:
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+          description: Human-readable sequential identifier.
+        licensePlate:
+          type: string
+          description: Always normalized (uppercase, formatting stripped).
+          example: ABC1D23
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+        customerId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    VehicleList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Vehicle"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    ServiceOrderCustomerSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    ServiceOrderVehicleSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        licensePlate:
+          type: string
+
+    ServiceOrderListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        customer:
+          $ref: "#/components/schemas/ServiceOrderCustomerSummary"
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderVehicleSummary"
+        status:
+          type: string
+          enum:
+            [
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
+            ]
+        openedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ServiceOrderList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderListItem"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    AverageExecutionTimeResponse:
+      type: object
+      properties:
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceMetric"
+
+    ServiceMetric:
+      type: object
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+        serviceCode:
+          type: integer
+          format: int64
+        serviceName:
+          type: string
+        executionCount:
+          type: integer
+        averageDurationMinutes:
+          type: number
+          format: double
+          description: Average execution duration, in minutes.
+
+    ServiceOrderCustomerDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        document:
+          type: string
+        phone:
+          type: string
+
+    ServiceOrderVehicleDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        licensePlate:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    ServiceOrderRequestedService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+
+    ServiceOrderQuoteItem:
+      type: object
+      description: >
+        Description/unitPrice/total are the quote's own stored snapshot from
+        the moment the item was composed, never the catalog's current price
+        (specs/service-order-diagnosis-quote/).
+      properties:
+        productId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        description:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+          format: double
+        total:
+          type: number
+          format: double
+
+    ServiceOrderQuote:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        serviceOrderId:
+          type: string
+          format: uuid
+        totalAmount:
+          type: number
+          format: double
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        version:
+          type: integer
+          description: >
+            Incremented on every (re)composition (specs/service-order-quote-decision/).
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderQuoteItem"
+        generatedAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When this quote was sent to the customer via POST .../quote/send. Absent/null until sent.
+        sentVersion:
+          type: integer
+          nullable: true
+          description: The `version` value that was sent, so a later recomposition can be told apart from what the customer actually saw.
+        respondedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ServiceOrderHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+        event:
+          type: string
+          enum:
+            [
+              creation,
+              diagnosis_started,
+              quote_composed,
+              quote_sent,
+              approval,
+              completion,
+              cancellation,
+              delivery,
+            ]
+        description:
+          type: string
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+
+    ServiceOrderDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        customer:
+          $ref: "#/components/schemas/ServiceOrderCustomerDetail"
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderVehicleDetail"
+        status:
+          type: string
+          enum:
+            [
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
+            ]
+        notes:
+          type: string
+        requestedServices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderRequestedService"
+        quote:
+          allOf:
+            - $ref: "#/components/schemas/ServiceOrderQuote"
+          nullable: true
+          description: Absent/null until a quote has been composed.
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderHistoryEntry"
+        openedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ServiceOrderTrackingVehicle:
+      type: object
+      description: >
+        Deliberately partial — no id, code, status, or owning customer
+        (specs/service-order-tracking/requirements.md AC6).
+      properties:
+        licensePlate:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+        color:
+          type: string
+
+    ServiceOrderTrackingMilestone:
+      type: object
+      description: >
+        A status-change event, without the internal id or free-text
+        description an administrative history entry carries (AC6).
+      properties:
+        event:
+          type: string
+          enum:
+            [
+              creation,
+              diagnosis_started,
+              quote_composed,
+              quote_sent,
+              approval,
+              completion,
+              cancellation,
+              delivery,
+            ]
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    ServiceOrderTracking:
+      type: object
+      description: >
+        The public tracking contract — a distinct type from the
+        administrative ServiceOrderDetail, with no shared fields beyond code
+        and status (AC9). Never contains CPF/CNPJ, phone, e-mail, internal
+        ids, or any other service order (AC7, AC8).
+      properties:
+        code:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum:
+            [
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
+            ]
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderTrackingVehicle"
+        milestones:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderTrackingMilestone"
+
     ErrorEnvelope:
       type: object
       properties:
@@ -323,7 +2424,32 @@ components:
           properties:
             code:
               type: string
-              enum: [INVALID_BODY, VALIDATION_ERROR, NOT_FOUND, DUPLICATE_DOCUMENT, DUPLICATE_EMAIL, INTERNAL_ERROR]
+              enum:
+                [
+                  INVALID_BODY,
+                  VALIDATION_ERROR,
+                  NOT_FOUND,
+                  DUPLICATE_DOCUMENT,
+                  DUPLICATE_EMAIL,
+                  CUSTOMER_NOT_FOUND,
+                  CUSTOMER_INACTIVE,
+                  DUPLICATE_LICENSE_PLATE,
+                  INVALID_TRACKING_TOKEN,
+                  INVALID_REQUEST,
+                  UNAUTHORIZED,
+                  CODE_ALREADY_EXISTS,
+                  DUPLICATE_CODE,
+                  INSUFFICIENT_STOCK,
+                  VEHICLE_INACTIVE,
+                  VEHICLE_NOT_OWNED_BY_CUSTOMER,
+                  INVALID_STATUS_TRANSITION,
+                  DIAGNOSIS_NOT_STARTED,
+                  QUOTE_ALREADY_DECIDED,
+                  PRODUCT_INACTIVE,
+                  SERVICE_EXECUTION_ALREADY_FINISHED,
+                  EXECUTIONS_NOT_COMPLETED,
+                  INTERNAL_ERROR,
+                ]
             message:
               type: string
             details:
@@ -342,3 +2468,462 @@ components:
           details:
             - field: document
               message: "CPF \"12345678900\" has invalid check digits"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: admin@workshop.local
+        password:
+          type: string
+          format: password
+          example: admin123
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: >
+            A signed JWT (HS256). Send it as `Authorization: Bearer
+            <access_token>` on protected routes.
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: Seconds until expiry (`JWT_TTL`, default 3600).
+
+    CurrentUser:
+      type: object
+      description: The authenticated administrative user's public data — never the password hash.
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+
+    CreateCatalogServiceRequest:
+      type: object
+      required: [name, price]
+      properties:
+        code:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional. When omitted, the database generates the sequential code (D1).
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+          description: Required. Must not be negative (BR3).
+        estimated_time:
+          type: integer
+          nullable: true
+          description: Optional, in minutes. When present must be greater than zero (BR4).
+
+    UpdateCatalogServiceRequest:
+      type: object
+      description: Every field is optional; at least one must be present. Omitted fields keep their current value.
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+        estimated_time:
+          type: integer
+
+    CatalogService:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+          format: double
+        estimated_time:
+          type: integer
+          nullable: true
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CatalogServiceList:
+      type: object
+      description: >
+        Not the page/pageSize/total/totalPages envelope other list endpoints
+        use — this listing is not paginated (CLAUDE.md §8).
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogService"
+
+    CreateProductRequest:
+      type: object
+      required: [name, unitPrice, currentStock, type]
+      properties:
+        code:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional. When omitted, the database generates the sequential code.
+        name:
+          type: string
+        description:
+          type: string
+        unitPrice:
+          type: number
+          format: double
+          description: Required. Must not be negative.
+        currentStock:
+          type: integer
+          description: Required. Must not be negative.
+        type:
+          type: string
+          enum: [PART, SUPPLY]
+
+    UpdateProductRequest:
+      type: object
+      description: >
+        Every field is optional; omitted fields keep their current value.
+        `currentStock` is never part of this request's shape — it is
+        immutable through this endpoint (RNF07); use
+        POST .../estoque/ajustes instead.
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        unitPrice:
+          type: number
+          format: double
+        type:
+          type: string
+          enum: [PART, SUPPLY]
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        description:
+          type: string
+        unitPrice:
+          type: number
+          format: double
+        currentStock:
+          type: integer
+        type:
+          type: string
+          enum: [PART, SUPPLY]
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    StockAdjustmentRequest:
+      type: object
+      required: [type, quantity, reason]
+      properties:
+        type:
+          type: string
+          enum: [ENTRY, EXIT]
+        quantity:
+          type: integer
+          description: Must be greater than zero.
+        reason:
+          type: string
+
+    ProductStockBalance:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        currentStock:
+          type: integer
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductStockMovement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [ENTRY, EXIT]
+        quantity:
+          type: integer
+        previousStock:
+          type: integer
+        newStock:
+          type: integer
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ProductStockMovementList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductStockMovement"
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+
+    CreateServiceOrderRequest:
+      type: object
+      description: >
+        Exactly one of customerId/customerDocument and exactly one of
+        vehicleId/licensePlate must be present. Any `status` field is
+        ignored — the server is the only author of a new order's status
+        (requirements.md §3.6/§8).
+      properties:
+        customerId:
+          type: string
+          format: uuid
+        customerDocument:
+          type: string
+          description: CPF or CNPJ, formatted or unformatted.
+        vehicleId:
+          type: string
+          format: uuid
+        licensePlate:
+          type: string
+        requestedServiceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        notes:
+          type: string
+
+    ServiceOrderCreateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        customer:
+          $ref: "#/components/schemas/ServiceOrderCustomerSummary"
+        vehicle:
+          $ref: "#/components/schemas/ServiceOrderVehicleSummary"
+        openedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [RECEIVED]
+          description: Always RECEIVED — this is a newly created order.
+        notes:
+          type: string
+        requestedServices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceOrderRequestedService"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        trackingToken:
+          type: string
+          description: >
+            The raw customer-tracking token for this order (see the
+            trackingToken security scheme). Returned only here, once —
+            never on any other response, and never logged (RNF08).
+
+    ServiceOrderStatusResponse:
+      type: object
+      description: The minimal response for endpoints that only transition an order's status.
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            [
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
+            ]
+
+    ComposeQuoteRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: >
+            Each item must identify exactly one of productId/serviceId.
+            There is deliberately no total/totalAmount field anywhere in
+            this request — the server is the only author of a quote's total
+            (RF06).
+          items:
+            type: object
+            properties:
+              productId:
+                type: string
+                format: uuid
+              serviceId:
+                type: string
+                format: uuid
+              quantity:
+                type: integer
+                description: Must be greater than zero.
+
+    ServiceOrderQuoteDecision:
+      type: object
+      description: >
+        The reduced, public response for the customer-facing quote
+        approve/reject endpoints — no internal ids, no item breakdown, same
+        principle as ServiceOrderTracking.
+      properties:
+        code:
+          type: integer
+          format: int64
+        quoteStatus:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        orderStatus:
+          type: string
+          enum:
+            [
+              RECEIVED,
+              IN_DIAGNOSIS,
+              AWAITING_APPROVAL,
+              IN_PROGRESS,
+              COMPLETED,
+              DELIVERED,
+              CANCELED,
+            ]
+        respondedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    StartExecutionRequest:
+      type: object
+      required: [serviceId]
+      properties:
+        serviceId:
+          type: string
+          format: uuid
+
+    FinishExecutionRequest:
+      type: object
+      description: Entirely optional request body — an omitted/empty body is treated as "no endedAt sent".
+      properties:
+        endedAt:
+          type: string
+          format: date-time
+          description: Optional; an omitted value means "now" (design.md §2.5).
+
+    ServiceExecution:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        serviceOrderId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true

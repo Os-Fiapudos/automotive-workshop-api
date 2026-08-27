@@ -40,11 +40,11 @@ var (
 
 	// ErrInvalidStatusTransition is returned when an operation requires the
 	// order to be in a specific status it currently isn't (e.g. starting
-	// diagnosis on an order that isn't RECEBIDA).
+	// diagnosis on an order that isn't RECEIVED).
 	ErrInvalidStatusTransition = errors.New("invalid service order status transition")
 
 	// ErrDiagnosisNotStarted is returned when composing a quote is attempted
-	// before diagnosis has started (order still RECEBIDA).
+	// before diagnosis has started (order still RECEIVED).
 	ErrDiagnosisNotStarted = errors.New("diagnosis has not started for this service order")
 
 	// ErrQuoteAlreadyDecided is returned when attempting to compose a quote
@@ -69,4 +69,51 @@ var (
 	// ErrProductInactive is returned when a quote item references a product
 	// that exists but is not ACTIVE.
 	ErrProductInactive = errors.New("product is inactive")
+
+	// ErrServiceExecutionNotFound is returned when finishing a service
+	// execution that does not exist for the identified service order
+	// (specs/service-order-execution/).
+	ErrServiceExecutionNotFound = errors.New("service execution not found")
+
+	// ErrServiceExecutionAlreadyFinished is returned when attempting to
+	// finish a service execution that already has an end date.
+	ErrServiceExecutionAlreadyFinished = errors.New("service execution has already been finished")
+
+	// ErrServiceExecutionEndBeforeStart is returned when a service
+	// execution's end date is before its start date (BR4).
+	ErrServiceExecutionEndBeforeStart = errors.New("service execution end date cannot be before its start date")
+
+	// ErrExecutionsNotCompleted is returned when finalizing a service order
+	// whose required executions (one per approved-quote service line item)
+	// are not all complete (BR5).
+	ErrExecutionsNotCompleted = errors.New("service order has pending service executions and cannot be finalized")
+
+	// ErrTrackingTokenInvalid is returned by the customer-facing quote
+	// approve/reject endpoints (specs/service-order-quote-decision/) when the
+	// supplied tracking token is missing, malformed, doesn't match, belongs
+	// to a different order, or has been revoked — mirroring
+	// service-order-tracking's ErrTokenInvalid (all of these are
+	// deliberately indistinguishable from the caller's perspective, 401).
+	ErrTrackingTokenInvalid = errors.New("tracking token is invalid, revoked, or does not match this service order")
+
+	// ErrEmptyStockUsage is returned when a stock usage request has no items
+	// (specs/service-order-stock-usage/).
+	ErrEmptyStockUsage = errors.New("stock usage must include at least one item")
+
+	// ErrInsufficientStock is returned when a usage deduction would take a
+	// product's balance negative.
+	ErrInsufficientStock = errors.New("insufficient stock balance for this product")
+
+	// ErrStockMovementNotFound is returned when the identified stock
+	// movement does not exist for the identified service order.
+	ErrStockMovementNotFound = errors.New("stock movement not found")
+
+	// ErrStockMovementAlreadyReversed is returned when attempting to reverse
+	// a movement that has already been reversed.
+	ErrStockMovementAlreadyReversed = errors.New("stock movement has already been reversed")
+
+	// ErrStockMovementNotReversible is returned when attempting to reverse a
+	// movement that is not an EXIT usage deduction (e.g. an ENTRY reversal
+	// itself).
+	ErrStockMovementNotReversible = errors.New("stock movement is not reversible")
 )

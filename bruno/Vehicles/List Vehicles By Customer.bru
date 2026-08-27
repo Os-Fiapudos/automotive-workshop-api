@@ -1,0 +1,11 @@
+meta {
+  name: List Vehicles By Customer
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/api/v1/vehicles/customer/{{customerId}}
+  body: none
+  auth: inherit
+}

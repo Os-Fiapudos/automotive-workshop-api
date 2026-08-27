@@ -1,0 +1,17 @@
+meta {
+  name: Update Vehicle
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/vehicles/{{vehicleId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "color": "Black"
+  }
+}

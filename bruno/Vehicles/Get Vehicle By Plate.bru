@@ -1,0 +1,11 @@
+meta {
+  name: Get Vehicle By Plate
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v1/vehicles/plate/{{plate}}
+  body: none
+  auth: inherit
+}

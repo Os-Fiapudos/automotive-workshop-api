@@ -2,32 +2,55 @@ package serviceorder
 
 import (
 	"context"
+	"sort"
+	"time"
 
 	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
 // fakeRepository is an in-memory ServiceOrderRepository + serviceOrderLookups
 // used only by the service-level unit tests in this package — no mocking
 // framework, same convention as internal/features/customer/fake_repository_test.go.
 type fakeRepository struct {
-	orders         []*ServiceOrder
-	customers      map[uuid.UUID]*customerRef
-	customersByDoc map[string]*customerRef
-	vehicles       map[uuid.UUID]*vehicleRef
-	services       map[uuid.UUID]*serviceRef
-	products       map[uuid.UUID]*productRef
-	quotes         map[uuid.UUID]*Quote // keyed by service order id
+	orders            []*ServiceOrder
+	customers         map[uuid.UUID]*customerRef
+	customersByDoc    map[string]*customerRef
+	vehicles          map[uuid.UUID]*vehicleRef
+	services          map[uuid.UUID]*serviceRef
+	products          map[uuid.UUID]*productRef
+	quotes            map[uuid.UUID]*Quote                 // keyed by service order id
+	requestedServices map[uuid.UUID][]*serviceRef          // keyed by service order id
+	history           map[uuid.UUID][]*ServiceOrderHistory // keyed by service order id
+	executions        map[uuid.UUID][]*ServiceExecution    // keyed by service order id
+	trackingTokens    map[uuid.UUID]string                 // keyed by service order id, value is the token hash
+	productStock      map[uuid.UUID]int                    // keyed by product id — specs/service-order-stock-usage/
+	movements         []*StockMovement                     // specs/service-order-stock-usage/
 }
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
-		customers:      make(map[uuid.UUID]*customerRef),
-		customersByDoc: make(map[string]*customerRef),
-		vehicles:       make(map[uuid.UUID]*vehicleRef),
-		services:       make(map[uuid.UUID]*serviceRef),
-		products:       make(map[uuid.UUID]*productRef),
-		quotes:         make(map[uuid.UUID]*Quote),
+		customers:         make(map[uuid.UUID]*customerRef),
+		customersByDoc:    make(map[string]*customerRef),
+		vehicles:          make(map[uuid.UUID]*vehicleRef),
+		services:          make(map[uuid.UUID]*serviceRef),
+		products:          make(map[uuid.UUID]*productRef),
+		quotes:            make(map[uuid.UUID]*Quote),
+		requestedServices: make(map[uuid.UUID][]*serviceRef),
+		history:           make(map[uuid.UUID][]*ServiceOrderHistory),
+		executions:        make(map[uuid.UUID][]*ServiceExecution),
+		trackingTokens:    make(map[uuid.UUID]string),
+		productStock:      make(map[uuid.UUID]int),
 	}
+}
+
+// addTrackingToken registers orderID's tracking token hash, so
+// findServiceOrderByCodeWithTrackingToken can validate it — used by
+// quote_service_test.go's ApproveQuote/RejectQuote tests
+// (specs/service-order-quote-decision/).
+func (fake *fakeRepository) addTrackingToken(orderID uuid.UUID, tokenHash string) {
+	fake.trackingTokens[orderID] = tokenHash
 }
 
 func (fake *fakeRepository) addCustomer(ref *customerRef, document string) {
@@ -37,6 +60,13 @@ func (fake *fakeRepository) addCustomer(ref *customerRef, document string) {
 func (fake *fakeRepository) addVehicle(ref *vehicleRef) { fake.vehicles[ref.ID] = ref }
 func (fake *fakeRepository) addService(ref *serviceRef) { fake.services[ref.ID] = ref }
 func (fake *fakeRepository) addProduct(ref *productRef) { fake.products[ref.ID] = ref }
+
+// setProductStock seeds productID's balance for
+// stockusage_service_test.go — separate from addProduct since existing
+// callers (quote_service_test.go) never needed a stock quantity.
+func (fake *fakeRepository) setProductStock(productID uuid.UUID, quantity int) {
+	fake.productStock[productID] = quantity
+}
 
 // addOrder registers an already-built order so quote_service_test.go can
 // exercise StartDiagnosis/ComposeQuote without going through Create.
@@ -53,10 +83,14 @@ func (fake *fakeRepository) seedDecidedQuote(orderID uuid.UUID, status QuoteStat
 	fake.quotes[orderID] = &Quote{ID: uuid.New(), ServiceOrderID: orderID, Status: status}
 }
 
-func (fake *fakeRepository) Create(_ context.Context, order *ServiceOrder) error {
+func (fake *fakeRepository) Create(_ context.Context, order *ServiceOrder) (string, error) {
 	order.Code = int64(len(fake.orders) + 1)
 	fake.orders = append(fake.orders, order)
-	return nil
+	rawToken, err := trackingtoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	return rawToken, nil
 }
 
 func (fake *fakeRepository) findServiceOrderByID(_ context.Context, id uuid.UUID) (*ServiceOrder, error) {
@@ -91,13 +125,52 @@ func (fake *fakeRepository) StartDiagnosis(_ context.Context, order *ServiceOrde
 func (fake *fakeRepository) SaveQuote(_ context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
 	quote := fake.quotes[order.ID]
 	if quote == nil {
-		quote = &Quote{ID: uuid.New(), ServiceOrderID: order.ID}
+		quote = &Quote{ID: uuid.New(), ServiceOrderID: order.ID, Version: 1}
+	} else {
+		quote.Version++
 	}
 	quote.TotalAmount = total
 	quote.Status = QuoteStatusPending
 	quote.Items = items
 	fake.quotes[order.ID] = quote
 	return quote, nil
+}
+
+// SendQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) SendQuote(_ context.Context, _ *ServiceOrder, quote *Quote) (*Quote, error) {
+	now := time.Now().UTC()
+	quote.SentAt = &now
+	sentVersion := quote.Version
+	quote.SentVersion = &sentVersion
+	return quote, nil
+}
+
+// DecideQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) DecideQuote(_ context.Context, _ *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error) {
+	if quote.Status != QuoteStatusPending {
+		return nil, ErrQuoteAlreadyDecided
+	}
+	now := time.Now().UTC()
+	quote.Status = decision
+	quote.RespondedAt = &now
+	return quote, nil
+}
+
+// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) findServiceOrderByCodeWithTrackingToken(_ context.Context, code int64, tokenHash string) (*ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code != code {
+			continue
+		}
+		if fake.trackingTokens[order.ID] != tokenHash {
+			return nil, ErrTrackingTokenInvalid
+		}
+		return order, nil
+	}
+	return nil, ErrServiceOrderNotFound
 }
 
 func (fake *fakeRepository) FindQuoteByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) (*Quote, error) {
@@ -159,4 +232,272 @@ func (fake *fakeRepository) findServicesByIDs(_ context.Context, ids []uuid.UUID
 		}
 	}
 	return refs, nil
+}
+
+// setRequestedServices/addHistory seed the query-only projections
+// findRequestedServices/findHistoryByServiceOrderID read back, used by
+// query_service_test.go (specs/service-order-query/).
+func (fake *fakeRepository) setRequestedServices(orderID uuid.UUID, refs []*serviceRef) {
+	fake.requestedServices[orderID] = refs
+}
+
+func (fake *fakeRepository) addHistory(orderID uuid.UUID, entry *ServiceOrderHistory) {
+	fake.history[orderID] = append(fake.history[orderID], entry)
+}
+
+func (fake *fakeRepository) findServiceOrderByCode(_ context.Context, code int64) (*ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code == code {
+			return order, nil
+		}
+	}
+	return nil, ErrServiceOrderNotFound
+}
+
+func (fake *fakeRepository) findRequestedServices(_ context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error) {
+	return fake.requestedServices[serviceOrderID], nil
+}
+
+func (fake *fakeRepository) findHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error) {
+	return fake.history[serviceOrderID], nil
+}
+
+// ---- specs/service-order-execution/ ----
+
+func (fake *fakeRepository) StartExecution(_ context.Context, execution *ServiceExecution) error {
+	execution.StartedAt = time.Now().UTC()
+	fake.executions[execution.ServiceOrderID] = append(fake.executions[execution.ServiceOrderID], execution)
+	return nil
+}
+
+func (fake *fakeRepository) FinishExecution(_ context.Context, execution *ServiceExecution) error {
+	for _, existing := range fake.executions[execution.ServiceOrderID] {
+		if existing.ID == execution.ID {
+			endedAt := execution.EndedAt
+			if endedAt == nil {
+				now := time.Now().UTC()
+				endedAt = &now
+			}
+			existing.EndedAt = endedAt
+			execution.EndedAt = endedAt
+			return nil
+		}
+	}
+	return ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) FinalizeOrder(_ context.Context, order *ServiceOrder) error {
+	return nil
+}
+
+func (fake *fakeRepository) DeliverOrder(_ context.Context, order *ServiceOrder) error {
+	return nil
+}
+
+func (fake *fakeRepository) findServiceExecutionByID(_ context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error) {
+	for _, execution := range fake.executions[serviceOrderID] {
+		if execution.ID == executionID {
+			return execution, nil
+		}
+	}
+	return nil, ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) findServiceExecutionsByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error) {
+	return fake.executions[serviceOrderID], nil
+}
+
+// findAverageExecutionTimeByService is an in-memory equivalent of
+// PostgresServiceOrderRepository.findAverageExecutionTimeByService, filtering
+// and aggregating the same way the real SQL query does
+// (specs/service-order-metrics/design.md §1.6), for the service-layer unit
+// tests to exercise without a database.
+func (fake *fakeRepository) findAverageExecutionTimeByService(_ context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
+	type accumulator struct {
+		ref   *serviceRef
+		count int
+		total time.Duration
+	}
+	byService := make(map[uuid.UUID]*accumulator)
+
+	for _, executions := range fake.executions {
+		for _, execution := range executions {
+			if execution.EndedAt == nil {
+				continue
+			}
+			if filter.ServiceID != nil && execution.ServiceID != *filter.ServiceID {
+				continue
+			}
+			if filter.StartDate != nil && execution.StartedAt.Before(*filter.StartDate) {
+				continue
+			}
+			if filter.EndDate != nil && execution.StartedAt.After(*filter.EndDate) {
+				continue
+			}
+
+			acc, ok := byService[execution.ServiceID]
+			if !ok {
+				acc = &accumulator{ref: fake.services[execution.ServiceID]}
+				byService[execution.ServiceID] = acc
+			}
+			acc.count++
+			acc.total += execution.EndedAt.Sub(execution.StartedAt)
+		}
+	}
+
+	var metrics []*ServiceMetric
+	for serviceID, acc := range byService {
+		if acc.ref == nil || acc.count == 0 {
+			continue
+		}
+		metrics = append(metrics, &ServiceMetric{
+			ServiceID:              serviceID,
+			ServiceCode:            acc.ref.Code,
+			ServiceName:            acc.ref.Name,
+			ExecutionCount:         acc.count,
+			AverageDurationMinutes: acc.total.Minutes() / float64(acc.count),
+		})
+	}
+	sort.Slice(metrics, func(i, j int) bool { return metrics[i].ServiceName < metrics[j].ServiceName })
+	return metrics, nil
+}
+
+// listServiceOrders is an in-memory equivalent of
+// PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
+// the same way the real SQL query does (design.md §1.3/§1.4), for the
+// service-layer unit tests to exercise without a database.
+func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+	var matched []*ServiceOrderListItem
+	for _, order := range fake.orders {
+		if filter.Code != nil && order.Code != *filter.Code {
+			continue
+		}
+		if filter.Status != nil && string(order.Status) != *filter.Status {
+			continue
+		}
+		customer := fake.customers[order.CustomerID]
+		if filter.CustomerDocument != "" && (customer == nil || customer.Document != filter.CustomerDocument) {
+			continue
+		}
+		vehicle := fake.vehicles[order.VehicleID]
+		if filter.LicensePlate != "" && (vehicle == nil || vehicle.LicensePlate != filter.LicensePlate) {
+			continue
+		}
+		if filter.CreatedFrom != nil && order.CreatedAt.Before(*filter.CreatedFrom) {
+			continue
+		}
+		if filter.CreatedTo != nil && order.CreatedAt.After(*filter.CreatedTo) {
+			continue
+		}
+		matched = append(matched, &ServiceOrderListItem{Order: order, Customer: customer, Vehicle: vehicle})
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		if !matched[i].Order.CreatedAt.Equal(matched[j].Order.CreatedAt) {
+			return matched[i].Order.CreatedAt.After(matched[j].Order.CreatedAt)
+		}
+		return matched[i].Order.Code > matched[j].Order.Code
+	})
+
+	total := len(matched)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return matched[start:end], total, nil
+}
+
+// ---- specs/service-order-stock-usage/ ----
+//
+// Replicates the guarded-update disambiguation
+// PostgresServiceOrderRepository.RegisterStockUsage performs atomically in
+// SQL, so the service-layer unit tests can exercise it without a database
+// (design.md §9).
+
+func (fake *fakeRepository) RegisterStockUsage(_ context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error) {
+	movements := make([]*StockMovement, 0, len(items))
+	for _, item := range items {
+		productID, err := uuid.Parse(item.ProductID)
+		if err != nil {
+			return nil, ErrProductNotFound
+		}
+
+		ref, ok := fake.products[productID]
+		if !ok {
+			return nil, ErrProductNotFound
+		}
+		if !ref.Active {
+			return nil, ErrProductInactive
+		}
+		currentStock := fake.productStock[productID]
+		if currentStock < item.Quantity {
+			return nil, ErrInsufficientStock
+		}
+
+		fake.productStock[productID] = currentStock - item.Quantity
+		movement := &StockMovement{
+			ID:             uuid.New(),
+			ProductID:      productID,
+			ServiceOrderID: &orderID,
+			Type:           StockMovementExit,
+			Quantity:       item.Quantity,
+			PreviousStock:  currentStock,
+			NewStock:       currentStock - item.Quantity,
+			OccurredAt:     time.Now().UTC(),
+		}
+		fake.movements = append(fake.movements, movement)
+		movements = append(movements, movement)
+	}
+	return movements, nil
+}
+
+func (fake *fakeRepository) ReverseStockMovement(_ context.Context, orderID, movementID uuid.UUID) (*StockMovement, error) {
+	var original *StockMovement
+	for _, movement := range fake.movements {
+		if movement.ID == movementID && movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			original = movement
+			break
+		}
+	}
+	if original == nil {
+		return nil, ErrStockMovementNotFound
+	}
+	if original.Type != StockMovementExit {
+		return nil, ErrStockMovementNotReversible
+	}
+	for _, movement := range fake.movements {
+		if movement.ReversedMovementID != nil && *movement.ReversedMovementID == movementID {
+			return nil, ErrStockMovementAlreadyReversed
+		}
+	}
+
+	currentStock := fake.productStock[original.ProductID]
+	fake.productStock[original.ProductID] = currentStock + original.Quantity
+	reversal := &StockMovement{
+		ID:                 uuid.New(),
+		ProductID:          original.ProductID,
+		ServiceOrderID:     &orderID,
+		Type:               StockMovementEntry,
+		Quantity:           original.Quantity,
+		PreviousStock:      currentStock,
+		NewStock:           currentStock + original.Quantity,
+		ReversedMovementID: &movementID,
+		OccurredAt:         time.Now().UTC(),
+	}
+	fake.movements = append(fake.movements, reversal)
+	return reversal, nil
+}
+
+func (fake *fakeRepository) ListStockMovements(_ context.Context, orderID uuid.UUID) ([]*StockMovement, error) {
+	var movements []*StockMovement
+	for _, movement := range fake.movements {
+		if movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			movements = append(movements, movement)
+		}
+	}
+	return movements, nil
 }

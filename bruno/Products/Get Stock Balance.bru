@@ -1,0 +1,11 @@
+meta {
+  name: Get Stock Balance
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/api/v1/produtos/{{productId}}/estoque
+  body: none
+  auth: inherit
+}

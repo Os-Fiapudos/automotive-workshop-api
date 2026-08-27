@@ -36,16 +36,16 @@ API surface conventions as the rest of `internal/features/service-order/`.
 
 ### 1.2 Domain layer
 
-- New `Status` consts: `StatusEmDiagnostico = "EM_DIAGNOSTICO"`,
-  `StatusAguardandoAprovacao = "AGUARDANDO_APROVACAO"` (added next to the existing
-  `StatusRecebida` in `model.go`).
+- New `Status` consts: `StatusInDiagnosis = "IN_DIAGNOSIS"`,
+  `StatusAwaitingApproval = "AWAITING_APPROVAL"` (added next to the existing
+  `StatusReceived` in `model.go`).
 - `ServiceOrder` gains two domain methods (no exported setter for `Status` — same
   invariant as before, transitions only happen through these):
-  - `(*ServiceOrder) startDiagnosis() error` — requires `Status == StatusRecebida`,
-    returns `ErrInvalidStatusTransition` otherwise; sets `Status = StatusEmDiagnostico`.
+  - `(*ServiceOrder) startDiagnosis() error` — requires `Status == StatusReceived`,
+    returns `ErrInvalidStatusTransition` otherwise; sets `Status = StatusInDiagnosis`.
   - `(*ServiceOrder) markAwaitingApproval() error` — requires `Status !=
-    StatusRecebida`, returns `ErrInvalidStatusTransition` otherwise; sets `Status =
-    StatusAguardandoAprovacao` (no-op transition if already there — recomposition case,
+    StatusReceived`, returns `ErrInvalidStatusTransition` otherwise; sets `Status =
+    StatusAwaitingApproval` (no-op transition if already there — recomposition case,
     requirements.md §3.9).
 - New types:
   ```go
@@ -120,7 +120,7 @@ a slightly larger `lookups`/`repository` interface — see §3.2):
      transactionally (§3.3).
 - `ComposeQuote(ctx, serviceOrderID uuid.UUID, inputs []QuoteItemInput) (*Quote, error)`:
   1. Load the order — `ErrServiceOrderNotFound` if missing.
-  2. Reject if `order.Status == StatusRecebida` (`ErrDiagnosisNotStarted`) — requirements.md
+  2. Reject if `order.Status == StatusReceived` (`ErrDiagnosisNotStarted`) — requirements.md
      §3.2.
   3. Load the existing quote for this order, if any (`repository.FindQuoteByServiceOrderID`
      — a quote row always exists once a first composition succeeds, see §3.1's
@@ -174,8 +174,8 @@ Both new writes follow the exact `pool.Begin` / `defer tx.Rollback` / `tx.Commit
 `specs/service-order-opening/design.md` §3.3 established as the project's multi-table
 transaction pattern:
 
-**`StartDiagnosis`**: `UPDATE service_orders SET status = 'EM_DIAGNOSTICO' WHERE id = $1
-AND status = 'RECEBIDA' RETURNING updated_at` (the `AND status = 'RECEBIDA'` guard closes a
+**`StartDiagnosis`**: `UPDATE service_orders SET status = 'IN_DIAGNOSIS' WHERE id = $1
+AND status = 'RECEIVED' RETURNING updated_at` (the `AND status = 'RECEIVED'` guard closes a
 race with a concurrent transition; zero rows affected is treated the same as the
 pre-checked `ErrInvalidStatusTransition`) + insert into `service_order_history`
 (`event = 'diagnosis_started'`).
@@ -185,10 +185,21 @@ UPDATE SET total_amount = EXCLUDED.total_amount, updated_at = now()`, relying on
 existing `UNIQUE (service_order_id)`), deletes all existing rows in `quote_products`/
 `quote_services` for that quote id, re-inserts the new item set (delete-then-insert is
 simpler and safe here — a `PUT` is a full replace, not a diff — and item counts are small),
-`UPDATE service_orders SET status = 'AGUARDANDO_APROVACAO' WHERE id = $1` (only if not
+`UPDATE service_orders SET status = 'AWAITING_APPROVAL' WHERE id = $1` (only if not
 already that status, but idempotent either way), and inserts into `service_order_history`
 (`event = 'quote_composed'`). All in one transaction; any failure rolls back the quote,
 its items, and the order's status transition together.
+
+> **Erratum (`specs/service-order-quote-decision/`)**: the `UPDATE service_orders` statement
+> described above no longer exists. That feature's own requirements attributed the
+> `IN_DIAGNOSIS → AWAITING_APPROVAL` transition to an explicit "send the quote to the
+> customer" step this design did not have, and moved it to a new `SendQuote` repository
+> method instead — see `specs/service-order-quote-decision/design.md` §1.2/§1.5 for the
+> resolution and its traceability. This paragraph is left as originally written, per
+> `specs/README.md`'s "a specification should not be changed just to make the code fit" rule:
+> it was correct for what this feature implemented at the time; the later feature is the one
+> that changed the requirement, and records that change in its own spec rather than rewriting
+> this one.
 
 ### 1.7 API layer
 
@@ -198,8 +209,8 @@ appended to `writeServiceError`:
 | Situation | Status | `error.code` |
 | --- | --- | --- |
 | Service order not found | 404 | `NOT_FOUND` |
-| Invalid status transition (diagnosis on non-RECEBIDA) | 409 | `INVALID_STATUS_TRANSITION` |
-| Diagnosis not started (compose on RECEBIDA) | 409 | `DIAGNOSIS_NOT_STARTED` |
+| Invalid status transition (diagnosis on non-RECEIVED) | 409 | `INVALID_STATUS_TRANSITION` |
+| Diagnosis not started (compose on RECEIVED) | 409 | `DIAGNOSIS_NOT_STARTED` |
 | Quote already decided (APPROVED/REJECTED) | 409 | `QUOTE_ALREADY_DECIDED` |
 | Quote not found (GET before any composition) | 404 | `NOT_FOUND` |
 | Empty item list | 400 | `VALIDATION_ERROR` |
@@ -308,10 +319,10 @@ columns for existing rows so the seed stays internally consistent.
 
 - **Unit tests** (`quote_model_test.go`): `startDiagnosis`/`markAwaitingApproval`
   transition rules (valid/invalid source status, idempotent re-entry into
-  `AGUARDANDO_APROVACAO`); `validateQuoteItems`/`calculateTotal` (empty list, invalid
+  `AWAITING_APPROVAL`); `validateQuoteItems`/`calculateTotal` (empty list, invalid
   quantity, correct sum in cents, no floating-point drift across many items).
 - **Unit tests** (`quote_service_test.go`, extending `fake_repository_test.go`): success
-  path (diagnosis → compose → order shows `AGUARDANDO_APROVACAO`), compose before
+  path (diagnosis → compose → order shows `AWAITING_APPROVAL`), compose before
   diagnosis rejected, compose on unknown order rejected, unknown/inactive product
   rejected, unknown service rejected, empty items rejected, invalid quantity rejected,
   recompose while `PENDING` replaces items and recalculates total, recompose after
@@ -321,8 +332,8 @@ columns for existing rows so the seed stays internally consistent.
   snapshot struct, not a live reference — same reasoning as `customerRef`/`vehicleRef` in
   the existing feature).
 - **Integration tests** (`internal/handlers_test/`, extending the service-order test file
-  or a new `service_order_quote_test.go`): full flow `RECEBIDA` →
-  `POST .../diagnosis` → `EM_DIAGNOSTICO` → `PUT .../quote` → `AGUARDANDO_APROVACAO`,
+  or a new `service_order_quote_test.go`): full flow `RECEIVED` →
+  `POST .../diagnosis` → `IN_DIAGNOSIS` → `PUT .../quote` → `AWAITING_APPROVAL`,
   asserting `GET .../quote` matches; total computed server-side even when the request body
   sends a divergent value (the request DTO doesn't even have a total field to send —
   same enforcement-by-omission approach as `CreateRequest`'s missing `status` field);
@@ -330,7 +341,7 @@ columns for existing rows so the seed stays internally consistent.
   (one per transition) with correct `previous_status`/`new_status`; changing a product's
   price/name after composing a quote does not change the already-persisted item
   (`applied_description`/`applied_unit_price` stay put); rejecting diagnosis-start on a
-  non-`RECEBIDA` order; rejecting composition on a `RECEBIDA` order.
+  non-`RECEIVED` order; rejecting composition on a `RECEIVED` order.
 
 ## 4. Traceability
 

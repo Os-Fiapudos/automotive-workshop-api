@@ -1,0 +1,28 @@
+meta {
+  name: Create Vehicle
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/vehicles
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "licensePlate": "ABC1D23",
+    "brand": "Toyota",
+    "model": "Corolla",
+    "year": 2020,
+    "color": "Silver",
+    "customerId": "{{customerId}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.id) {
+    bru.setEnvVar("vehicleId", res.body.id);
+  }
+}

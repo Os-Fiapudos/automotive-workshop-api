@@ -27,9 +27,15 @@ INSERT INTO customers (id, name, document, document_type, phone, email, status) 
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Vehicles ====
--- status is required as of the Service Order Opening feature — see
--- specs/service-order-opening/. Vehicle 5 is kept INACTIVE to exercise the
--- rejection path (its owner, customer 4, is also INACTIVE).
+-- status is required as of the Vehicle Management feature — see
+-- specs/vehicle-management/. The last vehicle belongs to a customer that is
+-- itself INACTIVE above; that customer's pre-existing vehicle stays exactly
+-- as it is (seed data isn't run through the application's own create-time
+-- "customer must be ACTIVE" check), illustrating that inactivity only blocks
+-- *new* creation, never hides existing history (requirements.md BR8). This
+-- also doubles as fixture data for Service Order Opening (see
+-- specs/service-order-opening/): vehicle 5 being INACTIVE (owned by the
+-- also-INACTIVE customer 4) exercises its rejection path.
 
 INSERT INTO vehicles (id, license_plate, brand, model, year, color, customer_id, status) VALUES
     ('b0000000-0000-0000-0000-000000000001', 'ABC1D23', 'Fiat',       'Uno',    2018, 'White', 'a0000000-0000-0000-0000-000000000001', 'ACTIVE'),
@@ -66,21 +72,21 @@ ON CONFLICT (id) DO NOTHING;
 
 -- ==== Service Orders ====
 -- Covering the main statuses of the lifecycle.
--- NOTE: status values are intentionally kept in Portuguese (RECEBIDA,
--- EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE) —
--- see docs/entities.md for the rationale.
+-- NOTE: status values were renamed from Portuguese to English on 2026-08-26
+-- (RECEBIDA -> RECEIVED, etc.) — see the migration note in docs/schema.sql if
+-- you are re-applying this file to a volume created before that date.
 
 INSERT INTO service_orders (id, customer_id, vehicle_id, opened_at, status, notes) VALUES
-    ('e0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', now() - interval '10 days', 'ENTREGUE',             'Routine oil change. Customer reported a light engine noise.'),
-    ('e0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', now() - interval '5 days',  'EM_EXECUCAO',          'Brake inspection, customer approved the quote.'),
-    ('e0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000003', now() - interval '2 days',  'AGUARDANDO_APROVACAO', 'Diagnostics indicated the timing belt needs replacement.'),
-    ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', now() - interval '1 day',   'EM_DIAGNOSTICO',       'Van with intermittent failure to start.'),
-    ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000005', now(),                       'RECEBIDA',             'Customer brought it in for alignment and balancing.')
+    ('e0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', now() - interval '10 days', 'DELIVERED',             'Routine oil change. Customer reported a light engine noise.'),
+    ('e0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', now() - interval '5 days',  'IN_PROGRESS',          'Brake inspection, customer approved the quote.'),
+    ('e0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000003', now() - interval '2 days',  'AWAITING_APPROVAL', 'Diagnostics indicated the timing belt needs replacement.'),
+    ('e0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', now() - interval '1 day',   'IN_DIAGNOSIS',       'Van with intermittent failure to start.'),
+    ('e0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000005', now(),                       'RECEIVED',             'Customer brought it in for alignment and balancing.')
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Service Order Requested Services ====
 -- Initial demand recorded at order-opening time (see
--- specs/service-order-opening/) — not the priced quote. Order 5 (RECEBIDA)
+-- specs/service-order-opening/) — not the priced quote. Order 5 (RECEIVED)
 -- is the only one still at that stage; earlier orders had their demand
 -- already superseded by a generated quote.
 
@@ -90,15 +96,19 @@ ON CONFLICT DO NOTHING;
 
 -- ==== Quotes ====
 -- 1:1 with service_orders. status/responded_at consistent with the service order status.
+-- sent_at/sent_version (specs/service-order-quote-decision/) are populated for every quote
+-- whose order already reached AWAITING_APPROVAL or beyond, since that transition is only
+-- ever produced by sending the quote; quote 5 stays unsent, consistent with its order still
+-- being RECEIVED.
 
-INSERT INTO quotes (id, service_order_id, total_amount, status, generated_at, responded_at) VALUES
-    ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 84.40,  'APPROVED', now() - interval '10 days', now() - interval '10 days' + interval '2 hours'),
-    ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000002', 279.90, 'APPROVED', now() - interval '5 days',  now() - interval '5 days' + interval '1 hour'),
-    ('f0000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000003', 339.90, 'PENDING',  now() - interval '2 days',  NULL),
-    ('f0000000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000005', 120.00, 'PENDING',  now(),                       NULL)
+INSERT INTO quotes (id, service_order_id, total_amount, status, version, generated_at, sent_at, sent_version, responded_at) VALUES
+    ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 84.40,  'APPROVED', 1, now() - interval '10 days', now() - interval '10 days' + interval '1 hour', 1, now() - interval '10 days' + interval '2 hours'),
+    ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000002', 279.90, 'APPROVED', 1, now() - interval '5 days',  now() - interval '5 days' + interval '30 minutes', 1, now() - interval '5 days' + interval '1 hour'),
+    ('f0000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000003', 339.90, 'PENDING',  1, now() - interval '2 days',  now() - interval '2 days' + interval '1 hour', 1, NULL),
+    ('f0000000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000005', 120.00, 'PENDING',  1, now(),                       NULL, NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
 
--- Service order 4 (EM_DIAGNOSTICO) has no quote generated yet — a realistic scenario.
+-- Service order 4 (IN_DIAGNOSIS) has no quote generated yet — a realistic scenario.
 
 -- ==== Quote items (products) ====
 -- applied_description/applied_total_price are new columns added by
@@ -125,35 +135,40 @@ INSERT INTO quote_services (quote_id, service_id, quantity, applied_description,
 ON CONFLICT DO NOTHING;
 
 -- ==== Service Order History ====
--- Full trail for service order 1 (already ENTREGUE) and partial for service order 2 (EM_EXECUCAO).
+-- Full trail for service order 1 (already DELIVERED) and partial for service order 2 (IN_PROGRESS).
 
 INSERT INTO service_order_history (id, service_order_id, occurred_at, event, description, previous_status, new_status) VALUES
-    ('11100000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', now() - interval '10 days',                    'creation',    'Service order opened for an oil change.',        'RECEBIDA',             'RECEBIDA'),
-    ('11100000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours','approval',    'Customer approved the quote.',                   'AGUARDANDO_APROVACAO', 'EM_EXECUCAO'),
-    ('11100000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000001', now() - interval '9 days',                      'completion',  'Service completed and vehicle delivered.',       'EM_EXECUCAO',          'ENTREGUE'),
-    ('11100000-0000-0000-0000-000000000004', 'e0000000-0000-0000-0000-000000000002', now() - interval '5 days',                      'creation',    'Service order opened for a brake inspection.',   'RECEBIDA',             'RECEBIDA'),
-    ('11100000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000002', now() - interval '5 days' + interval '1 hour',  'approval',    'Customer approved the quote.',                   'AGUARDANDO_APROVACAO', 'EM_EXECUCAO')
+    ('11100000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', now() - interval '10 days',                    'creation',    'Service order opened for an oil change.',        'RECEIVED',             'RECEIVED'),
+    ('11100000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours','approval',    'Customer approved the quote.',                   'AWAITING_APPROVAL', 'IN_PROGRESS'),
+    ('11100000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000001', now() - interval '9 days',                      'completion',  'Service completed and vehicle delivered.',       'IN_PROGRESS',          'DELIVERED'),
+    ('11100000-0000-0000-0000-000000000004', 'e0000000-0000-0000-0000-000000000002', now() - interval '5 days',                      'creation',    'Service order opened for a brake inspection.',   'RECEIVED',             'RECEIVED'),
+    ('11100000-0000-0000-0000-000000000005', 'e0000000-0000-0000-0000-000000000002', now() - interval '5 days' + interval '1 hour',  'approval',    'Customer approved the quote.',                   'AWAITING_APPROVAL', 'IN_PROGRESS')
 ON CONFLICT (id) DO NOTHING;
 
--- ==== Service Execution Audit ====
--- Service order 1 (ENTREGUE): oil change with start and end recorded.
--- Service order 2 (EM_EXECUCAO): brake inspection started, not yet finished.
+-- ==== Service Execution Audit (ServiceExecution — specs/service-order-execution/) ====
+-- One row per execution, started_at/ended_at instead of a start/end event log
+-- (specs/service-order-execution/design.md §1.3).
+-- Service order 1 (DELIVERED): oil change execution, started and finished.
+-- Service order 2 (IN_PROGRESS): brake inspection started, not yet finished.
 
-INSERT INTO audit_services (id, service_order_id, service_id, occurred_at, event) VALUES
-    ('22200000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours', 'start'),
-    ('22200000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours 30 minutes', 'end'),
-    ('22200000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', now() - interval '5 days' + interval '1 hour', 'start')
+INSERT INTO audit_services (id, service_order_id, service_id, started_at, ended_at) VALUES
+    ('22200000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', now() - interval '10 days' + interval '2 hours', now() - interval '10 days' + interval '2 hours 30 minutes'),
+    ('22200000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', now() - interval '5 days' + interval '1 hour', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- ==== Users (administrative) ====
--- Dev-only credentials: admin@workshop.local / admin123.
+-- Dev-only credentials: admin@workshop.local / admin123, and
+-- soat-architecture@workshop.local / soat-architecture (evaluation account,
+-- so a reviewer can log in without creating a user first).
 -- The password is bcrypt-hashed at insert time via pgcrypto's crypt() —
 -- only the hash is stored (BR1/AC5). Never use these credentials outside
 -- local development.
 
 INSERT INTO users (id, name, email, password_hash) VALUES
     ('f0000000-0000-0000-0000-000000000001', 'Workshop Admin', 'admin@workshop.local',
-     crypt('admin123', gen_salt('bf', 10)))
+     crypt('admin123', gen_salt('bf', 10))),
+    ('f0000000-0000-0000-0000-000000000002', 'soat-architecture', 'soat-architecture@workshop.local',
+     crypt('soat-architecture', gen_salt('bf', 10)))
 ON CONFLICT (id) DO NOTHING;
 
 COMMIT;

@@ -12,10 +12,11 @@ orders, generating and approving quotes, and tracking the service order status u
 vehicle is delivered:
 
 ```
-RECEBIDA → EM_DIAGNOSTICO → AGUARDANDO_APROVACAO → EM_EXECUCAO → FINALIZADA → ENTREGUE
+RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED
 ```
 
-> The status values above are intentionally kept in Portuguese — see the note in section 8.
+> The status values above were renamed from Portuguese to English on 2026-08-26 — see the
+> note in section 8.
 
 It also keeps audit trails: history of service order status changes
 (`ServiceOrderHistory`) and start/end records of the execution of each service
@@ -33,7 +34,8 @@ framework) exposes `/health` plus the implemented vertical slices:
   full CRUD + logical deactivation for workshop customers (`/api/v1/customers*`, 6
   endpoints), CPF/CNPJ normalization and check-digit validation (including the
   alphanumeric CNPJ format in effect since July 2026).
-- **servicecatalog** (`internal/features/servicecatalog/`, [specs/service-catalog/](specs/service-catalog/)):
+- **service-catalog** (`internal/features/service-catalog/`, Go package `servicecatalog`,
+  [specs/service-catalog/](specs/service-catalog/)):
   protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
   prices, with an `active` flag and logical deletion.
 
@@ -50,27 +52,39 @@ with no corresponding Go feature yet — `internal/features/user/` (singular, un
 `auth`'s `users` table — an unfortunately similar name, see the note in section 3) remains
 an empty placeholder.
 
-**The customer endpoints are currently unauthenticated** — `cmd/api/main.go` does not wrap
-`customer.RegisterRoutes` in `middleware.RequireAuth`. `specs/auth/design.md` §7 states the
-convention going forward is that every route *not* explicitly listed as public should
-require authentication; whether/when to wrap the customer routes accordingly is an **open
-decision**, not yet made — do not wrap them without confirming first (see section 17).
+**Changed on 2026-08-26**: the customer endpoints, and Service Order Opening's
+`POST /api/v1/service-orders`, are now wrapped in `middleware.RequireAuth` like every other
+protected route, closing the two open decisions this section and section 17 used to record.
+The trigger was a concrete exploit path found during a security review
+([docs/owasp-vulnerability-and-coverage-report.md](docs/owasp-vulnerability-and-coverage-report.md),
+VULN-01/VULN-02): `GET /api/v1/customers/document/{document}` returned a customer's name,
+phone and e-mail to anyone able to produce a valid-looking CPF/CNPJ, with no credential at
+all, and the unauthenticated order-creation route accepted that same CPF/CNPJ (or a license
+plate) as an identifier, so the two combined let an unauthenticated caller confirm a document
+belonged to a registered customer and open orders in their name. Historical notes elsewhere
+in this repo describing these routes as unauthenticated (e.g.
+`specs/customer-management/requirements.md` §7.2, `specs/service-order-opening/requirements.md`)
+are records of the decision as it stood when those specs were written — they are no longer
+the rule, same convention already used for the Go 1.22→1.25 note in section 2.
 
 ## 2. Technology stack
 
-- **Language**: Go 1.22 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  pins `go-version: "1.22"`, so `go.mod` and [Dockerfile](Dockerfile)'s build image
-  (`golang:1.22-alpine`) must stay compatible with that exact version. When adding or
-  upgrading a dependency, check that its own `go` directive (and its transitive
-  dependencies') doesn't exceed 1.22 — `go get`/`go mod tidy` will otherwise silently raise
-  `go.mod`'s `go` line past what CI can build. This has already happened twice (once for
-  `pgx`, once merging in a `rogpeppe/go-internal` transitive bump pulled in by `testify`);
-  both times the fix was pinning the offending module at the newest release that still
-  requires ≤ Go 1.22, not bumping CI/the Dockerfile — see
-  `specs/customer-management/design.md` §0.
+- **Language**: Go 1.25 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.25"`, and [Dockerfile](Dockerfile) builds on `golang:1.25-alpine`.
+  These three must stay in sync; when adding or upgrading a dependency, check that its own
+  `go` directive (and its transitive dependencies') doesn't exceed 1.25.
+  **Changed on 2026-08-24, from 1.22.** The project was pinned to Go 1.22 and several
+  dependencies were deliberately held back to stay under that ceiling. The security analysis
+  in [docs/security-report.md](docs/security-report.md) showed the pin had become the
+  project's largest vulnerability source: 28 reachable vulnerabilities under Go 1.22.12, and
+  it blocked the fix for a High-severity SQL-injection advisory in `pgx`. Raising the line to
+  1.25 took the reachable count to zero. Historical notes about the 1.22 ceiling in
+  `specs/auth/`, `specs/customer-management/`, and `specs/service-catalog/` are records of
+  decisions made at the time — they are no longer the rule.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
-  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, pinned at `v5.7.4` for Go 1.22
-  compatibility), `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
+  see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
+  by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
+  `github.com/golang-jwt/jwt/v5` (JWT, from the auth feature —
   `specs/auth/design.md` §2), `golang.org/x/crypto` (bcrypt, same feature),
   `github.com/google/uuid` (from the Customer Management feature), and
   `github.com/stretchr/testify` (test-only, adopted by Customer Management; the auth
@@ -95,31 +109,31 @@ decision**, not yet made — do not wrap them without confirming first (see sect
 ## 3. Project structure
 
 ```
-cmd/api/main.go            → HTTP entrypoint, wires up the server and registers feature routes
-internal/features/         → one folder per business feature (vertical slice)
-  features/auth/           → implemented slice: handler + service + repository + model
-                              (login, /me; unit-tested)
-  features/customer/       → implemented slice: handler + service + repository + model
-                              (CRUD + deactivation; unit- and integration-tested)
-  features/servicecatalog/ → implemented slice: handler + service + repository + model
-                              (service catalog CRUD over /api/v1/services; unit- and
-                              integration-tested)
-  features/user/           → placeholder slice: only has doc.go, no implementation yet.
-                              NOTE: unrelated to auth's `users` database table — this is a
-                              distinct, not-yet-specified future feature; don't conflate them.
+cmd/api/main.go             → HTTP entrypoint, wires up the server and registers feature routes
+internal/features/          → one folder per business feature (vertical slice)
+  features/auth/            → implemented slice: handler + service + repository + model
+                               (login, /me; unit-tested)
+  features/customer/        → implemented slice: handler + service + repository + model
+                               (CRUD + deactivation; unit- and integration-tested)
+  features/service-catalog/ → implemented slice: handler + service + repository + model
+                               (service catalog CRUD over /api/v1/services; unit- and
+                               integration-tested)
+  features/user/            → placeholder slice: only has doc.go, no implementation yet.
+                               NOTE: unrelated to auth's `users` database table — this is a
+                               distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                              database (pgx pool), token (JWT), middleware (auth),
-                              httpx (JSON writer + error envelope, used by auth),
-                              apierror (JSON error envelope, used by customer and
-                              servicecatalog — see section 8 for why there are currently two
-                              and what that means for new code)
-                              document (CPF/CNPJ), config (env var loading)
-internal/handlers_test/    → handler/integration tests — implemented (auth_test.go,
-                              customer_test.go, servicecatalog_test.go), each skipped
-                              independently when DATABASE_URL is unset
-docs/                      → domain model (entities.md) and PostgreSQL schema
-                              (schema.sql, seed.sql)
-.github/workflows/ci.yml   → CI pipeline
+                               database (pgx pool), token (JWT), middleware (auth),
+                               httpx (JSON writer + error envelope, used by auth),
+                               apierror (JSON error envelope, used by customer and
+                               servicecatalog — see section 8 for why there are currently two
+                               and what that means for new code)
+                               document (CPF/CNPJ), config (env var loading)
+internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
+                               customer_test.go, service_catalog_test.go), each skipped
+                               independently when DATABASE_URL is unset
+docs/                       → domain model (entities.md) and PostgreSQL schema
+                               (schema.sql, seed.sql)
+.github/workflows/ci.yml    → CI pipeline
 Dockerfile, docker-compose.yml, .env.example → containerized local environment
 ```
 
@@ -135,7 +149,7 @@ under `internal/features/<feature>/`, gathering all of that feature's layers
 cross-cutting technical layer (a global `handlers/` package, a global `models/` package,
 etc.). This is the pattern declared in [README.md](README.md), now implemented end to end
 by `internal/features/auth/`, `internal/features/customer/`, and
-`internal/features/servicecatalog/`; `internal/features/user/` remains an unimplemented
+`internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
@@ -172,9 +186,12 @@ docker compose down -v
 docker compose up -d
 ```
 
-Populate the database with sample data ([docs/seed.sql](docs/seed.sql), idempotent via
-`ON CONFLICT DO NOTHING`) — includes one administrative user
-(`admin@workshop.local` / `admin123`, dev-only, bcrypt-hashed at insert time):
+`docs/seed.sql` is mounted as `/docker-entrypoint-initdb.d/02-seed.sql`, so it runs
+automatically after `schema.sql` on the initial creation of the volume. To re-apply it to an
+existing volume (it is idempotent via `ON CONFLICT DO NOTHING`) — it includes two
+administrative users (`admin@workshop.local` / `admin123` and
+`soat-architecture@workshop.local` / `soat-architecture`, both dev/evaluation-only,
+bcrypt-hashed at insert time):
 ```bash
 docker compose cp docs/seed.sql db:/tmp/seed.sql
 docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
@@ -187,9 +204,9 @@ go test ./...
 ```
 This is the command CI runs, and any new feature must keep it passing. It runs the unit
 tests alongside each feature/shared package
-(`internal/features/{auth,customer,servicecatalog}/*_test.go`, `internal/shared/*/*_test.go`)
+(`internal/features/{auth,customer,service-catalog}/*_test.go`, `internal/shared/*/*_test.go`)
 plus the integration tests in `internal/handlers_test/` (`auth_test.go`, `customer_test.go`,
-`servicecatalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
+`service_catalog_test.go`). Each integration test file self-skips (`t.Skip`, not fail) when
 `DATABASE_URL` is unset, so plain `go test ./...` stays green without a database.
 
 To also run the integration tests against the local compose Postgres:
@@ -201,8 +218,16 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
-- No additional linter is configured (no `.golangci.yml`, no `golangci-lint`, no
-  `.editorconfig`). **To be defined**: whether a more complete linter (e.g.
+- `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
+  CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
+  versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
+  [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
+  are recorded in [docs/security-report.md](docs/security-report.md).
+- `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
+  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
+  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+- No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
+  `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
   baseline.
 - Do not run `go build`, `go vet`, and `go test` with flags that suppress errors; CI runs
@@ -215,11 +240,22 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   (`Customer`, `Vehicle`, `ServiceOrder`, `PART`, etc.), mirroring
   [docs/entities.md](docs/entities.md). Keep this naming consistent across Go, the
   database, and documentation — do not translate part of the code back to Portuguese.
-  - **Deliberate exception**: `ServiceOrder.status` values (`RECEBIDA`,
-    `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE`) are
-    kept in Portuguese by explicit product decision. Every other identifier in the domain
-    was translated to English; this single enum's values were not, and must not be silently
-    translated in a future change.
+  - **No exception since 2026-08-26**: `ServiceOrder.status` values used to be the one
+    deliberate carve-out, kept in Portuguese by product decision. They were renamed to
+    English (`RECEBIDA` → `RECEIVED`, `EM_DIAGNOSTICO` → `IN_DIAGNOSIS`,
+    `AGUARDANDO_APROVACAO` → `AWAITING_APPROVAL`, `EM_EXECUCAO` → `IN_PROGRESS`,
+    `FINALIZADA` → `COMPLETED`, `ENTREGUE` → `DELIVERED`, `CANCELADA` → `CANCELED`), so
+    the English convention now holds with no carve-out. This was a breaking API change and
+    a Postgres enum rename — see the migration note in `docs/schema.sql`. Historical notes
+    in `specs/service-order-*/` still quoting the Portuguese values are records of the
+    decision as it stood when they were written, same convention as section 2's Go
+    1.22→1.25 note.
+  - **Still an exception, unrelated to status**: route segments of the product feature
+    (`/api/v1/produtos/...`) and of service-order tracking/quote decision
+    (`/api/v1/acompanhamento/{codigo}`, `orcamento/aprovar|reprovar`) are in Portuguese;
+    every other feature uses English paths. `product.ParseMovementType` also accepts
+    `ENTRADA`/`SAIDA`/`SAÍDA` as input aliases for the canonical `ENTRY`/`EXIT` — input
+    tolerance only, nothing Portuguese is ever stored.
 - **Database** (conventions already in effect in `docs/schema.sql`):
   - `snake_case` for tables and columns.
   - `id UUID` (technical key, `gen_random_uuid()`) as PRIMARY KEY.
@@ -256,10 +292,13 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   `internal/shared/token` issues/verifies tokens, `internal/shared/middleware.RequireAuth`
   protects routes not explicitly listed as public in `cmd/api/main.go`. See
   [specs/auth/design.md](specs/auth/design.md) for the full contract. Role/permission-based
-  authorization (403) is still **to be defined** — not implemented in the MVP. **The
-  Customer Management routes are not currently wrapped in `RequireAuth`** — see section 1's
-  note; this is an open decision, not an oversight to silently fix. The service catalog
-  routes are all wrapped in `RequireAuth`.
+  authorization (403) is still **to be defined** — not implemented in the MVP: a valid token
+  from any user can still reach every protected route regardless of who they are. Every
+  feature's routes are wrapped in `RequireAuth` as of 2026-08-26 (Customer Management and
+  Service Order Opening's creation route were the last two — see section 1's note); the only
+  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login)
+  and Service Order Tracking's own route, which validates its own possession-based tracking
+  token instead of a JWT (RF12).
 - **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
   defined by the service catalog listing), leaving room for pagination metadata later.
   Reuse this shape for new list endpoints instead of returning a bare JSON array.
@@ -365,7 +404,8 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 - The schema is defined in [docs/schema.sql](docs/schema.sql) and applied automatically by
   Postgres only on the **initial creation of the Docker volume**
-  (`docker-entrypoint-initdb.d`). There is no migration tool (e.g. `golang-migrate`,
+  (`docker-entrypoint-initdb.d`, as `01-schema.sql`; [docs/seed.sql](docs/seed.sql) is
+  mounted next to it as `02-seed.sql` and runs right after). There is no migration tool (e.g. `golang-migrate`,
   `goose`) configured in the project today. **To be defined**: incremental migration
   strategy for when the schema needs to evolve after the volume already exists in
   shared/production environments.
@@ -385,10 +425,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 15. Rules specific to working with Go
 
-- Go 1.22, per `go.mod` and CI's pinned `go-version: "1.22"` — do not use syntax/features
-  from newer versions, and check every dependency's own `go` directive stays ≤ 1.22 before
+- Go 1.25, per `go.mod` and CI's pinned `go-version: "1.25"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.25 before
   `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
-  (`golang:1.22-alpine`) in sync with whatever `go.mod` requires.
+  (`golang:1.25-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported
@@ -460,6 +500,8 @@ silently — see section 8 for detail):
    `customer` and `servicecatalog` use `apierror`; `auth` (and
    `middleware.RequireAuth`'s 401) still uses `httpx`, so migrating it would change the
    401/500 bodies of the auth routes — a behavioral change that needs its own decision.
-2. Whether/when the Customer Management routes should be wrapped in
-   `middleware.RequireAuth`, per the "every non-public route requires auth" convention
-   `specs/auth/design.md` §7 sets going forward.
+2. ~~Whether/when the Customer Management routes should be wrapped in
+   `middleware.RequireAuth`~~ — **resolved 2026-08-26**: they are now wrapped, along with
+   Service Order Opening's creation route, per section 1's note. What remains open is
+   role/permission-based authorization (section 13): a valid token still grants access to
+   every protected route regardless of who holds it.

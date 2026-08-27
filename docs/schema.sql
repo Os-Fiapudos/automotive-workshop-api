@@ -31,10 +31,6 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-DO $$ BEGIN
     CREATE TYPE customer_document_type AS ENUM ('CPF', 'CNPJ');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
@@ -42,19 +38,41 @@ DO $$ BEGIN
     CREATE TYPE customer_status AS ENUM ('ACTIVE', 'INACTIVE');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- NOTE: the values of this enum are a deliberate exception to the "everything in
--- English" convention. ServiceOrder.status is kept in Portuguese by explicit
--- product decision (see docs/entities.md) — do not translate these values.
+DO $$ BEGIN
+    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Changed on 2026-08-26: these values used to be kept in Portuguese ('RECEBIDA',
+-- 'EM_DIAGNOSTICO', 'AGUARDANDO_APROVACAO', 'EM_EXECUCAO', 'FINALIZADA', 'ENTREGUE',
+-- 'CANCELADA') as the single deliberate exception to the "everything in English"
+-- convention; the exception was dropped so the whole domain speaks one language
+-- (see docs/entities.md).
+-- This file only runs on the initial creation of the Docker volume, so a database
+-- created before that date still holds the old labels. Migrate it in place with:
+--     ALTER TYPE service_order_status RENAME VALUE 'RECEBIDA' TO 'RECEIVED';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_DIAGNOSTICO' TO 'IN_DIAGNOSIS';
+--     ALTER TYPE service_order_status RENAME VALUE 'AGUARDANDO_APROVACAO' TO 'AWAITING_APPROVAL';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_EXECUCAO' TO 'IN_PROGRESS';
+--     ALTER TYPE service_order_status RENAME VALUE 'FINALIZADA' TO 'COMPLETED';
+--     ALTER TYPE service_order_status RENAME VALUE 'ENTREGUE' TO 'DELIVERED';
+--     ALTER TYPE service_order_status RENAME VALUE 'CANCELADA' TO 'CANCELED';
+-- RENAME VALUE rewrites only the label, preserving every existing row.
 DO $$ BEGIN
     CREATE TYPE service_order_status AS ENUM (
-        'RECEBIDA',
-        'EM_DIAGNOSTICO',
-        'AGUARDANDO_APROVACAO',
-        'EM_EXECUCAO',
-        'FINALIZADA',
-        'ENTREGUE'
+        'RECEIVED',
+        'IN_DIAGNOSIS',
+        'AWAITING_APPROVAL',
+        'IN_PROGRESS',
+        'COMPLETED',
+        'DELIVERED',
+        'CANCELED'
     );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- 'CANCELED' was added by specs/service-order-quote-decision/: a branch from
+-- AWAITING_APPROVAL taken when the customer rejects the quote, since a
+-- REJECTED quote can never be altered (specs/service-order-diagnosis-quote/
+-- requirements.md §3.9) and the order otherwise had no way to leave
+-- AWAITING_APPROVAL.
 
 DO $$ BEGIN
     CREATE TYPE quote_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
@@ -62,19 +80,33 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- 'diagnosis_started' and 'quote_composed' were added by the Service Order
 -- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
+-- 'delivery' was added by the Service Order Execution/Finalization/Delivery feature
+-- (specs/service-order-execution/) for the COMPLETED -> DELIVERED transition; that same
+-- feature reuses 'completion' for IN_PROGRESS -> COMPLETED. 'approval' and
+-- 'cancellation' existed unused until specs/service-order-quote-decision/ became their
+-- first producer: 'approval' for AWAITING_APPROVAL -> IN_PROGRESS (quote approved),
+-- 'cancellation' for AWAITING_APPROVAL -> CANCELED (quote rejected). That same
+-- feature adds 'quote_sent' for IN_DIAGNOSIS -> AWAITING_APPROVAL (quote sent to
+-- the customer).
 DO $$ BEGIN
     CREATE TYPE history_event AS ENUM (
         'creation',
         'diagnosis_started',
         'quote_composed',
+        'quote_sent',
         'approval',
         'completion',
-        'cancellation'
+        'cancellation',
+        'delivery'
     );
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Added by specs/service-order-stock-usage/. Shared by both a product's own
+-- manual stock adjustments (internal/features/product, service_order_id
+-- NULL) and a service order's parts/supplies usage deductions and their
+-- reversals (service_order_id set) — see stock_movements below.
 DO $$ BEGIN
-    CREATE TYPE audit_event AS ENUM ('start', 'end');
+    CREATE TYPE stock_movement_type AS ENUM ('ENTRY', 'EXIT');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ==== Tables ====
@@ -131,7 +163,7 @@ COMMENT ON COLUMN vehicles.model IS 'Vehicle model (e.g. Uno, Gol).';
 COMMENT ON COLUMN vehicles.year IS 'Vehicle manufacturing/model year.';
 COMMENT ON COLUMN vehicles.color IS 'Vehicle predominant color.';
 COMMENT ON COLUMN vehicles.customer_id IS 'Reference to the owning Customer.';
-COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; used by other features (e.g. Service Order Opening) to validate a vehicle before use.';
+COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically. Also consulted by other features (e.g. Service Order Opening) to reject an INACTIVE vehicle before use.';
 COMMENT ON COLUMN vehicles.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN vehicles.updated_at IS 'Record last update date/time, generated automatically.';
 
@@ -197,7 +229,7 @@ CREATE TABLE IF NOT EXISTS service_orders (
     customer_id  UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
     vehicle_id   UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
     opened_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    status       service_order_status NOT NULL DEFAULT 'RECEBIDA',
+    status       service_order_status NOT NULL DEFAULT 'RECEIVED',
     notes        TEXT NOT NULL DEFAULT '',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -209,7 +241,7 @@ COMMENT ON COLUMN service_orders.code IS 'Human-readable/sequential identifier o
 COMMENT ON COLUMN service_orders.customer_id IS 'Reference to the requesting Customer.';
 COMMENT ON COLUMN service_orders.vehicle_id IS 'Reference to the Vehicle being serviced.';
 COMMENT ON COLUMN service_orders.opened_at IS 'Date/time the service order was opened.';
-COMMENT ON COLUMN service_orders.status IS 'RECEBIDA -> EM_DIAGNOSTICO -> AGUARDANDO_APROVACAO -> EM_EXECUCAO -> FINALIZADA -> ENTREGUE. Values intentionally kept in Portuguese (see docs/entities.md).';
+COMMENT ON COLUMN service_orders.status IS 'RECEIVED -> IN_DIAGNOSIS -> AWAITING_APPROVAL -> IN_PROGRESS -> COMPLETED -> DELIVERED; AWAITING_APPROVAL branches to CANCELED when the customer rejects the quote (see docs/entities.md).';
 COMMENT ON COLUMN service_orders.notes IS 'Free-form notes about the service (e.g. customer report, vehicle condition).';
 COMMENT ON COLUMN service_orders.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN service_orders.updated_at IS 'Record last update date/time, generated automatically.';
@@ -241,10 +273,15 @@ CREATE TABLE IF NOT EXISTS quotes (
     service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
     total_amount      NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
     status            quote_status NOT NULL DEFAULT 'PENDING',
+    version           INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     generated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at           TIMESTAMPTZ,
+    sent_version      INTEGER,
     responded_at      TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (sent_at IS NULL OR sent_at >= generated_at),
+    CHECK (responded_at IS NULL OR sent_at IS NULL OR responded_at >= sent_at),
     CHECK (responded_at IS NULL OR responded_at >= generated_at)
 );
 
@@ -254,7 +291,10 @@ COMMENT ON COLUMN quotes.code IS 'Human-readable/sequential identifier of the qu
 COMMENT ON COLUMN quotes.service_order_id IS 'Reference to the ServiceOrder this quote belongs to.';
 COMMENT ON COLUMN quotes.total_amount IS 'Total quote amount (sum of products and services).';
 COMMENT ON COLUMN quotes.status IS 'Quote status: PENDING (awaiting customer response), APPROVED (customer accepted) or REJECTED (customer declined).';
-COMMENT ON COLUMN quotes.generated_at IS 'Date/time the quote was generated and sent to the customer.';
+COMMENT ON COLUMN quotes.version IS 'Incremented every time the quote is (re)composed (specs/service-order-diagnosis-quote/); sent_version records which version was actually sent to the customer.';
+COMMENT ON COLUMN quotes.generated_at IS 'Date/time the quote was first generated (composed).';
+COMMENT ON COLUMN quotes.sent_at IS 'Date/time the quote was sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
+COMMENT ON COLUMN quotes.sent_version IS 'The value of version that was actually sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
 COMMENT ON COLUMN quotes.responded_at IS 'Date/time the customer responded (approved/rejected). Optional, filled only after a response.';
 COMMENT ON COLUMN quotes.created_at IS 'Record creation date/time, generated automatically.';
 COMMENT ON COLUMN quotes.updated_at IS 'Record last update date/time, generated automatically.';
@@ -321,22 +361,79 @@ COMMENT ON COLUMN service_order_history.description IS 'Details of what happened
 COMMENT ON COLUMN service_order_history.previous_status IS 'Service order status immediately before the event.';
 COMMENT ON COLUMN service_order_history.new_status IS 'Service order status immediately after the event.';
 
--- ---- AuditServices ----
+-- ---- ServiceOrderTrackingToken ----
+-- Grants a customer read-only access to their own service order's tracking
+-- view without the administrative JWT (specs/service-order-tracking/). One
+-- token is auto-generated per service order at creation time
+-- (service_order_id UNIQUE); only its hash is ever stored.
+
+CREATE TABLE IF NOT EXISTS service_order_tracking_tokens (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
+    token_hash        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at        TIMESTAMPTZ
+);
+
+COMMENT ON TABLE service_order_tracking_tokens IS 'Grants a customer read-only tracking access to their own service order, without the administrative JWT.';
+COMMENT ON COLUMN service_order_tracking_tokens.id IS 'Technical identifier of the token record.';
+COMMENT ON COLUMN service_order_tracking_tokens.service_order_id IS 'Reference to the ServiceOrder this token grants access to. One token per order.';
+COMMENT ON COLUMN service_order_tracking_tokens.token_hash IS 'SHA-256 hash of the token. The raw token is returned to the caller once, at issuance, and never persisted.';
+COMMENT ON COLUMN service_order_tracking_tokens.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN service_order_tracking_tokens.revoked_at IS 'Date/time the token was revoked. NULL while active.';
+
+-- ---- AuditServices (ServiceExecution in Go — specs/service-order-execution/) ----
+-- One row per execution of a service within a service order, not an event log: started_at
+-- is set when execution begins, ended_at stays NULL until it finishes. Restructured from an
+-- earlier start/end event-log shape (specs/service-order-execution/design.md 1.3) before any
+-- Go feature ever implemented this table, so no data migration was needed.
 
 CREATE TABLE IF NOT EXISTS audit_services (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
     service_id        UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
-    occurred_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    event             audit_event NOT NULL
+    started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at          TIMESTAMPTZ
 );
 
-COMMENT ON TABLE audit_services IS 'Start and end of the execution of each service within a service order, for time/productivity tracking.';
-COMMENT ON COLUMN audit_services.id IS 'Technical identifier of the audit record.';
+COMMENT ON TABLE audit_services IS 'One row per execution of a service within a service order (started_at/ended_at), for time/productivity tracking.';
+COMMENT ON COLUMN audit_services.id IS 'Technical identifier of the execution record.';
 COMMENT ON COLUMN audit_services.service_order_id IS 'Reference to the ServiceOrder in progress.';
 COMMENT ON COLUMN audit_services.service_id IS 'Reference to the Service being executed.';
-COMMENT ON COLUMN audit_services.occurred_at IS 'Date/time the event was recorded.';
-COMMENT ON COLUMN audit_services.event IS 'Event milestone: start (execution started) or end (execution finished).';
+COMMENT ON COLUMN audit_services.started_at IS 'Date/time the execution started.';
+COMMENT ON COLUMN audit_services.ended_at IS 'Date/time the execution finished. NULL while still in progress.';
+
+-- ---- StockMovement ----
+-- Ledger of every stock balance change (specs/service-order-stock-usage/design.md §0):
+-- both a product's own manual ENTRY/EXIT adjustment (internal/features/product,
+-- service_order_id NULL) and a service order's parts/supplies usage EXIT (and its
+-- ENTRY reversal), service_order_id set. Written from each feature's own SQL — no
+-- Go-level import between the product and service-order packages (CLAUDE.md §9.2).
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id            UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    service_order_id      UUID REFERENCES service_orders (id) ON DELETE CASCADE,
+    type                  stock_movement_type NOT NULL,
+    quantity              INTEGER NOT NULL CHECK (quantity > 0),
+    previous_stock        INTEGER NOT NULL,
+    new_stock             INTEGER NOT NULL,
+    reason                TEXT,
+    reversed_movement_id  UUID REFERENCES stock_movements (id) ON DELETE RESTRICT,
+    occurred_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE stock_movements IS 'Ledger of every stock balance change: manual product adjustments and service-order usage deductions/reversals.';
+COMMENT ON COLUMN stock_movements.id IS 'Technical identifier of the movement record.';
+COMMENT ON COLUMN stock_movements.product_id IS 'Reference to the Product whose balance changed.';
+COMMENT ON COLUMN stock_movements.service_order_id IS 'Reference to the ServiceOrder this movement was deducted for/restored to, when applicable. NULL for a manual product adjustment. ON DELETE CASCADE, matching audit_services/service_order_history — deleting an order removes its own audit trail.';
+COMMENT ON COLUMN stock_movements.type IS 'ENTRY (adds to stock) or EXIT (removes from stock).';
+COMMENT ON COLUMN stock_movements.quantity IS 'Absolute quantity moved. Always positive; direction is given by type.';
+COMMENT ON COLUMN stock_movements.previous_stock IS 'Product current_stock immediately before this movement.';
+COMMENT ON COLUMN stock_movements.new_stock IS 'Product current_stock immediately after this movement.';
+COMMENT ON COLUMN stock_movements.reason IS 'Free-form justification, required for a manual product adjustment. NULL for a service-order usage/reversal movement, whose service_order_id already explains it.';
+COMMENT ON COLUMN stock_movements.reversed_movement_id IS 'For a reversal ENTRY, the original EXIT movement it undoes. NULL for every other movement. A movement is reversed at most once (enforced at the application layer).';
+COMMENT ON COLUMN stock_movements.occurred_at IS 'Date/time the movement occurred.';
 
 -- =============================================================================
 -- ==== Indexes ====
@@ -369,7 +466,15 @@ CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON ser
 CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);
--- quotes.service_order_id already has a unique index (UNIQUE above creates one).
+CREATE INDEX IF NOT EXISTS ix_stock_movements_product_id ON stock_movements (product_id);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_service_order_id ON stock_movements (service_order_id);
+-- quotes.service_order_id and service_order_tracking_tokens.service_order_id already have
+-- unique indexes (UNIQUE above creates one for each).
+
+-- Lookup key for GET /api/v1/acompanhamento/{codigo} (validator hashes the
+-- incoming token, then matches it here).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_service_order_tracking_tokens_token_hash
+    ON service_order_tracking_tokens (token_hash);
 
 -- ---- Frequent workshop queries ----
 
@@ -382,7 +487,7 @@ CREATE INDEX IF NOT EXISTS ix_service_orders_customer_opened
 -- ignoring service orders already completed/delivered (most of the history).
 CREATE INDEX IF NOT EXISTS ix_service_orders_status_active
     ON service_orders (status, opened_at DESC)
-    WHERE status NOT IN ('FINALIZADA', 'ENTREGUE');
+    WHERE status NOT IN ('COMPLETED', 'DELIVERED');
 
 -- Filter by product type (PART/SUPPLY) on catalog/stock screens.
 CREATE INDEX IF NOT EXISTS ix_products_type ON products (type);
@@ -402,7 +507,7 @@ CREATE INDEX IF NOT EXISTS ix_quotes_status_pending
 
 -- Service execution audit by service order.
 CREATE INDEX IF NOT EXISTS ix_audit_services_order_service
-    ON audit_services (service_order_id, service_id, occurred_at);
+    ON audit_services (service_order_id, service_id, started_at);
 
 -- ---- Text search (optional) ----
 -- Requires the pg_trgm extension (commented out at the top of the file).

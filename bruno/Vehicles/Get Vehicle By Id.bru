@@ -1,0 +1,11 @@
+meta {
+  name: Get Vehicle By Id
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v1/vehicles/{{vehicleId}}
+  body: none
+  auth: inherit
+}

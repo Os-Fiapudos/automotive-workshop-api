@@ -1,0 +1,28 @@
+meta {
+  name: Register Stock Usage
+  type: http
+  seq: 15
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "items": [
+      {
+        "productId": "{{productId}}",
+        "quantity": 1
+      }
+    ]
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.items && res.body.items.length > 0) {
+    bru.setEnvVar("movementId", res.body.items[0].id);
+  }
+}
