@@ -1,1613 +1,1593 @@
 {
-  "info": {
-    "name": "automotive-workshop-api",
-    "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for protected routes.\n- Customers and POST /api/v1/service-orders are currently unauthenticated (open decision, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "auth": {
-    "type": "bearer",
-    "bearer": [
-      {
-        "key": "token",
-        "value": "{{token}}",
-        "type": "string"
-      }
-    ]
-  },
-  "item": [
-    {
-      "name": "Health",
-      "item": [
-        {
-          "name": "Health check",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/health",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "health"
-              ]
-            },
-            "description": "Public liveness probe. Returns {\"status\":\"ok\"}.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Auth",
-      "item": [
-        {
-          "name": "Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "auth",
-                "login"
-              ]
-            },
-            "description": "Public. Credentials come from docs/seed.sql (dev only). The test script stores access_token in the {{token}} variable used by every protected request.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@workshop.local\",\n  \"password\": \"admin123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.access_token) { pm.collectionVariables.set(\"token\", body.access_token); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Me",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/auth/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "auth",
-                "me"
-              ]
-            },
-            "description": "Protected. Returns the authenticated administrative user."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Customers",
-      "item": [
-        {
-          "name": "Create customer",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers"
-              ]
-            },
-            "description": "Currently unauthenticated (open decision, CLAUDE.md section 1). document accepts CPF or CNPJ, with or without punctuation. Use fictitious data only.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Maria Silva\",\n  \"document\": \"11144477735\",\n  \"phone\": \"11999998888\",\n  \"email\": \"maria.silva@example.com\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"customerId\", body.id); }",
-                  "if (body.document) { pm.collectionVariables.set(\"customerDocument\", body.document); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List customers",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            },
-            "description": "Paginated. pageSize is capped at 100; invalid values fall back to the defaults.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Get customer by id",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers",
-                "{{customerId}}"
-              ]
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Get customer by document",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers/document/{{customerDocument}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers",
-                "document",
-                "{{customerDocument}}"
-              ]
-            },
-            "description": "Lookup by normalized CPF/CNPJ.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Update customer",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers",
-                "{{customerId}}"
-              ]
-            },
-            "description": "Partial update: send only the fields to change (name, document, phone, email).",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Maria Silva Souza\",\n  \"phone\": \"11988887777\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Deactivate customer",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "customers",
-                "{{customerId}}"
-              ]
-            },
-            "description": "Logical deactivation (status INACTIVE), not a physical delete.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Service catalog",
-      "item": [
-        {
-          "name": "Create service",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/services",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "services"
-              ]
-            },
-            "description": "estimated_time is in minutes. code is optional (auto-generated when omitted).",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Troca de oleo\",\n  \"description\": \"Troca de oleo e filtro\",\n  \"price\": 189.9,\n  \"estimated_time\": 60\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"serviceId\", body.id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List services",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/services",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "services"
-              ],
-              "query": [
-                {
-                  "key": "active",
-                  "value": "true",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Returns {\"items\":[...]}. Optional active=true|false filter."
-          },
-          "response": []
-        },
-        {
-          "name": "Get service",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "services",
-                "{{serviceId}}"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Update service",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "services",
-                "{{serviceId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"price\": 209.9,\n  \"estimated_time\": 75\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Delete service",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "services",
-                "{{serviceId}}"
-              ]
-            },
-            "description": "Logical deletion (active = false)."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Products",
-      "item": [
-        {
-          "name": "Create product",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos"
-              ]
-            },
-            "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted). Routes are in Portuguese (/produtos) by design.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Filtro de oleo\",\n  \"description\": \"Filtro de oleo motor 1.0\",\n  \"unitPrice\": 45.5,\n  \"currentStock\": 20,\n  \"type\": \"PART\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"productId\", body.id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List products",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                },
-                {
-                  "key": "type",
-                  "value": "PART",
-                  "disabled": true
-                },
-                {
-                  "key": "status",
-                  "value": "ACTIVE",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Optional filters: type (PART|SUPPLY), status (ACTIVE|INACTIVE)."
-          },
-          "response": []
-        },
-        {
-          "name": "Get product",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Update product",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"unitPrice\": 49.9,\n  \"description\": \"Filtro de oleo motor 1.0 - revisado\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Deactivate product",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}"
-              ]
-            },
-            "description": "Logical deactivation (status INACTIVE)."
-          },
-          "response": []
-        },
-        {
-          "name": "Adjust stock",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque/ajustes",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}",
-                "estoque",
-                "ajustes"
-              ]
-            },
-            "description": "type accepts ENTRY/ENTRADA/IN or EXIT/SAIDA/OUT.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"ENTRY\",\n  \"quantity\": 10,\n  \"reason\": \"Reposicao de estoque\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Get stock balance",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}",
-                "estoque"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "List stock movements",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/movimentacoes?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "produtos",
-                "{{productId}}",
-                "movimentacoes"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Vehicles",
-      "item": [
-        {
-          "name": "Create vehicle",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles"
-              ]
-            },
-            "description": "customerId must reference an existing, active customer.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"licensePlate\": \"ABC1D23\",\n  \"brand\": \"Volkswagen\",\n  \"model\": \"Gol\",\n  \"year\": 2020,\n  \"color\": \"Prata\",\n  \"customerId\": \"{{customerId}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"vehicleId\", body.id); }",
-                  "if (body.licensePlate) { pm.collectionVariables.set(\"licensePlate\", body.licensePlate); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List vehicles",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Get vehicle by plate",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles/plate/{{licensePlate}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles",
-                "plate",
-                "{{licensePlate}}"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "List vehicles by customer",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles/customer/{{customerId}}?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles",
-                "customer",
-                "{{customerId}}"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                }
-              ]
-            },
-            "description": "Customer-scoped listing. The path is /vehicles/customer/{customerId} (not /customers/{id}/vehicles) to avoid an ambiguous ServeMux pattern - see specs/vehicle-management/design.md section 1.5."
-          },
-          "response": []
-        },
-        {
-          "name": "Get vehicle by id",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles",
-                "{{vehicleId}}"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Update vehicle",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles",
-                "{{vehicleId}}"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"color\": \"Preto\",\n  \"year\": 2021\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Deactivate vehicle",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "vehicles",
-                "{{vehicleId}}"
-              ]
-            },
-            "description": "Logical deactivation (status INACTIVE)."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Service orders",
-      "item": [
-        {
-          "name": "Open service order",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders"
-              ]
-            },
-            "description": "Currently unauthenticated (same open decision as Customers). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"requestedServiceIds\": [\n    \"{{serviceId}}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"serviceOrderId\", body.id); }",
-                  "if (body.code) { pm.collectionVariables.set(\"orderCode\", String(body.code)); }",
-                  "if (body.trackingToken) { pm.collectionVariables.set(\"trackingToken\", body.trackingToken); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Start diagnosis",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/diagnosis",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "diagnosis"
-              ]
-            },
-            "description": "RECEBIDA -> EM_DIAGNOSTICO. No request body."
-          },
-          "response": []
-        },
-        {
-          "name": "Compose quote",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "quote"
-              ]
-            },
-            "description": "Each item carries either serviceId or productId, never both.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"items\": [\n    {\n      \"serviceId\": \"{{serviceId}}\",\n      \"quantity\": 1\n    },\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Get quote",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "quote"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Send quote to customer",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote/send",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "quote",
-                "send"
-              ]
-            },
-            "description": "Mechanic action. Moves the order to AGUARDANDO_APROVACAO. No request body."
-          },
-          "response": []
-        },
-        {
-          "name": "List service orders",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders?page=1&pageSize=20",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "disabled": false
-                },
-                {
-                  "key": "pageSize",
-                  "value": "20",
-                  "disabled": false
-                },
-                {
-                  "key": "code",
-                  "value": "1",
-                  "disabled": true
-                },
-                {
-                  "key": "status",
-                  "value": "EM_EXECUCAO",
-                  "disabled": true
-                },
-                {
-                  "key": "document",
-                  "value": "11144477735",
-                  "disabled": true
-                },
-                {
-                  "key": "licensePlate",
-                  "value": "ABC1D23",
-                  "disabled": true
-                },
-                {
-                  "key": "createdFrom",
-                  "value": "2026-01-01T00:00:00Z",
-                  "disabled": true
-                },
-                {
-                  "key": "createdTo",
-                  "value": "2026-12-31T23:59:59Z",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "status is one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE. createdFrom/createdTo are RFC3339."
-          },
-          "response": []
-        },
-        {
-          "name": "Get service order",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}"
-              ]
-            },
-            "description": "The path parameter accepts either the UUID or the sequential code."
-          },
-          "response": []
-        },
-        {
-          "name": "Start service execution",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "executions"
-              ]
-            },
-            "description": "Opens an audit_services record for the given catalog service.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"serviceId\": \"{{serviceId}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "if (body.id) { pm.collectionVariables.set(\"executionId\", body.id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Finish service execution",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions/{{executionId}}/finish",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "executions",
-                "{{executionId}}",
-                "finish"
-              ]
-            },
-            "description": "Body is optional: omit it entirely to close the execution at the server time.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"endedAt\": \"2026-08-24T18:30:00Z\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Finalize service order",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/finalize",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "finalize"
-              ]
-            },
-            "description": "EM_EXECUCAO -> FINALIZADA. No request body."
-          },
-          "response": []
-        },
-        {
-          "name": "Deliver service order",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/deliver",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "deliver"
-              ]
-            },
-            "description": "FINALIZADA -> ENTREGUE. No request body."
-          },
-          "response": []
-        },
-        {
-          "name": "Average execution time (metrics)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/metrics/average-execution-time",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "metrics",
-                "average-execution-time"
-              ],
-              "query": [
-                {
-                  "key": "serviceId",
-                  "value": "{{serviceId}}",
-                  "disabled": true
-                },
-                {
-                  "key": "startDate",
-                  "value": "2026-01-01T00:00:00Z",
-                  "disabled": true
-                },
-                {
-                  "key": "endDate",
-                  "value": "2026-12-31T23:59:59Z",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "All filters optional. Dates are RFC3339."
-          },
-          "response": []
-        },
-        {
-          "name": "Register stock usage",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "stock-movements"
-              ]
-            },
-            "description": "Consumes product stock against the order.",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "const body = pm.response.json();",
-                  "const first = Array.isArray(body.items) ? body.items[0] : null;",
-                  "if (first && first.id) { pm.collectionVariables.set(\"movementId\", first.id); }"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List stock movements of the order",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "stock-movements"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Reverse stock movement",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements/{{movementId}}/reversal",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "service-orders",
-                "{{serviceOrderId}}",
-                "stock-movements",
-                "{{movementId}}",
-                "reversal"
-              ]
-            },
-            "description": "Gives the consumed quantity back to stock. No request body."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Tracking (customer-facing)",
-      "item": [
-        {
-          "name": "Track service order",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Tracking-Token",
-                "value": "{{trackingToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "acompanhamento",
-                "{{orderCode}}"
-              ]
-            },
-            "description": "Never uses the administrative JWT: it authenticates with the X-Tracking-Token header returned when the order was opened.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Approve quote",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tracking-Token",
-                "value": "{{trackingToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}/orcamento/aprovar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "acompanhamento",
-                "{{orderCode}}",
-                "orcamento",
-                "aprovar"
-              ]
-            },
-            "description": "Customer decision. X-Tracking-Token only, no request body.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Reject quote",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Tracking-Token",
-                "value": "{{trackingToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}/orcamento/reprovar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "acompanhamento",
-                "{{orderCode}}",
-                "orcamento",
-                "reprovar"
-              ]
-            },
-            "description": "Customer decision. X-Tracking-Token only, no request body.",
-            "auth": {
-              "type": "noauth"
-            }
-          },
-          "response": []
-        }
-      ]
-    }
-  ],
-  "variable": [
-    {
-      "key": "baseUrl",
-      "value": "http://localhost:8080",
-      "type": "string"
-    },
-    {
-      "key": "token",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "customerId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "customerDocument",
-      "value": "11144477735",
-      "type": "string"
-    },
-    {
-      "key": "vehicleId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "licensePlate",
-      "value": "ABC1D23",
-      "type": "string"
-    },
-    {
-      "key": "serviceId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "productId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "serviceOrderId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "orderCode",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "executionId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "movementId",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "trackingToken",
-      "value": "",
-      "type": "string"
-    }
-  ]
+	"info": {
+		"name": "automotive-workshop-api",
+		"description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for protected routes.\n- Customers and POST /api/v1/service-orders are currently unauthenticated (open decision, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"health"
+							]
+						},
+						"description": "Public liveness probe. Returns {\"status\":\"ok\"}.",
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"login"
+							]
+						},
+						"description": "Public. Credentials come from docs/seed.sql (dev only). The test script stores access_token in the {{token}} variable used by every protected request.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@workshop.local\",\n  \"password\": \"admin123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.access_token) { pm.collectionVariables.set(\"token\", body.access_token); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Me",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/auth/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"auth",
+								"me"
+							]
+						},
+						"description": "Protected. Returns the authenticated administrative user."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Customers",
+			"item": [
+				{
+					"name": "Create customer",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers"
+							]
+						},
+						"description": "Requires a valid JWT (customer routes were wrapped in requireAuth on 2026-08-26, closing VULN-01 \u2014 see CLAUDE.md section 1). document accepts CPF or CNPJ, with or without punctuation. Use fictitious data only.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Maria Silva\",\n  \"document\": \"11144477735\",\n  \"phone\": \"11999998888\",\n  \"email\": \"maria.silva@example.com\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"customerId\", body.id); }",
+									"if (body.document) { pm.collectionVariables.set(\"customerDocument\", body.document); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "List customers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								}
+							]
+						},
+						"description": "Requires a valid JWT (CLAUDE.md section 1)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get customer by id",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers",
+								"{{customerId}}"
+							]
+						},
+						"description": "Requires a valid JWT (CLAUDE.md section 1)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get customer by document",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers/document/{{customerDocument}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers",
+								"document",
+								"{{customerDocument}}"
+							]
+						},
+						"description": "Requires a valid JWT (CLAUDE.md section 1) \u2014 this route used to be the unauthenticated leak described as VULN-01 in docs/owasp-vulnerability-and-coverage-report.md; it is now protected."
+					},
+					"response": []
+				},
+				{
+					"name": "Update customer",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers",
+								"{{customerId}}"
+							]
+						},
+						"description": "Requires a valid JWT (CLAUDE.md section 1).",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Maria Silva Souza\",\n  \"phone\": \"11988887777\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate customer",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/customers/{{customerId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"customers",
+								"{{customerId}}"
+							]
+						},
+						"description": "Requires a valid JWT (CLAUDE.md section 1)."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Service catalog",
+			"item": [
+				{
+					"name": "Create service",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							]
+						},
+						"description": "estimated_time is in minutes. code is optional (auto-generated when omitted).",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Troca de oleo\",\n  \"description\": \"Troca de oleo e filtro\",\n  \"price\": 189.9,\n  \"estimated_time\": 60\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"serviceId\", body.id); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "List services",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services"
+							],
+							"query": [
+								{
+									"key": "active",
+									"value": "true",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Returns {\"items\":[...]}. Optional active=true|false filter."
+					},
+					"response": []
+				},
+				{
+					"name": "Get service",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update service",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"price\": 209.9,\n  \"estimated_time\": 75\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete service",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/services/{{serviceId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"services",
+								"{{serviceId}}"
+							]
+						},
+						"description": "Logical deletion (active = false)."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Products",
+			"item": [
+				{
+					"name": "Create product",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos"
+							]
+						},
+						"description": "type is PART or SUPPLY. code is optional (auto-generated when omitted). Routes are in Portuguese (/produtos) by design.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Filtro de oleo\",\n  \"description\": \"Filtro de oleo motor 1.0\",\n  \"unitPrice\": 45.5,\n  \"currentStock\": 20,\n  \"type\": \"PART\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"productId\", body.id); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "List products",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								},
+								{
+									"key": "type",
+									"value": "PART",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "ACTIVE",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Optional filters: type (PART|SUPPLY), status (ACTIVE|INACTIVE)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get product",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update product",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"unitPrice\": 49.9,\n  \"description\": \"Filtro de oleo motor 1.0 - revisado\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate product",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}"
+							]
+						},
+						"description": "Logical deactivation (status INACTIVE)."
+					},
+					"response": []
+				},
+				{
+					"name": "Adjust stock",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque/ajustes",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}",
+								"estoque",
+								"ajustes"
+							]
+						},
+						"description": "type accepts ENTRY/ENTRADA/IN or EXIT/SAIDA/OUT.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"type\": \"ENTRY\",\n  \"quantity\": 10,\n  \"reason\": \"Reposicao de estoque\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get stock balance",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/estoque",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}",
+								"estoque"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List stock movements",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/produtos/{{productId}}/movimentacoes?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"produtos",
+								"{{productId}}",
+								"movimentacoes"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Vehicles",
+			"item": [
+				{
+					"name": "Create vehicle",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles"
+							]
+						},
+						"description": "customerId must reference an existing, active customer.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"licensePlate\": \"ABC1D23\",\n  \"brand\": \"Volkswagen\",\n  \"model\": \"Gol\",\n  \"year\": 2020,\n  \"color\": \"Prata\",\n  \"customerId\": \"{{customerId}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"vehicleId\", body.id); }",
+									"if (body.licensePlate) { pm.collectionVariables.set(\"licensePlate\", body.licensePlate); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "List vehicles",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get vehicle by plate",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles/plate/{{licensePlate}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles",
+								"plate",
+								"{{licensePlate}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "List vehicles by customer",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles/customer/{{customerId}}?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles",
+								"customer",
+								"{{customerId}}"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								}
+							]
+						},
+						"description": "Customer-scoped listing. The path is /vehicles/customer/{customerId} (not /customers/{id}/vehicles) to avoid an ambiguous ServeMux pattern - see specs/vehicle-management/design.md section 1.5."
+					},
+					"response": []
+				},
+				{
+					"name": "Get vehicle by id",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles",
+								"{{vehicleId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update vehicle",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles",
+								"{{vehicleId}}"
+							]
+						},
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"color\": \"Preto\",\n  \"year\": 2021\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Deactivate vehicle",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/vehicles/{{vehicleId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"vehicles",
+								"{{vehicleId}}"
+							]
+						},
+						"description": "Logical deactivation (status INACTIVE)."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Service orders",
+			"item": [
+				{
+					"name": "Open service order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders"
+							]
+						},
+						"description": "Requires a valid JWT (this route was wrapped in requireAuth on 2026-08-26, closing VULN-02 \u2014 see CLAUDE.md section 1). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"requestedServiceIds\": [\n    \"{{serviceId}}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"serviceOrderId\", body.id); }",
+									"if (body.code) { pm.collectionVariables.set(\"orderCode\", String(body.code)); }",
+									"if (body.trackingToken) { pm.collectionVariables.set(\"trackingToken\", body.trackingToken); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Start diagnosis",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/diagnosis",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"diagnosis"
+							]
+						},
+						"description": "RECEBIDA -> EM_DIAGNOSTICO. No request body."
+					},
+					"response": []
+				},
+				{
+					"name": "Compose quote",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"quote"
+							]
+						},
+						"description": "Each item carries either serviceId or productId, never both.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"items\": [\n    {\n      \"serviceId\": \"{{serviceId}}\",\n      \"quantity\": 1\n    },\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get quote",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"quote"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Send quote to customer",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote/send",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"quote",
+								"send"
+							]
+						},
+						"description": "Mechanic action. Moves the order to AGUARDANDO_APROVACAO. No request body."
+					},
+					"response": []
+				},
+				{
+					"name": "List service orders",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders?page=1&pageSize=20",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "pageSize",
+									"value": "20",
+									"disabled": false
+								},
+								{
+									"key": "code",
+									"value": "1",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "EM_EXECUCAO",
+									"disabled": true
+								},
+								{
+									"key": "document",
+									"value": "11144477735",
+									"disabled": true
+								},
+								{
+									"key": "licensePlate",
+									"value": "ABC1D23",
+									"disabled": true
+								},
+								{
+									"key": "createdFrom",
+									"value": "2026-01-01T00:00:00Z",
+									"disabled": true
+								},
+								{
+									"key": "createdTo",
+									"value": "2026-12-31T23:59:59Z",
+									"disabled": true
+								}
+							]
+						},
+						"description": "status is one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE. createdFrom/createdTo are RFC3339."
+					},
+					"response": []
+				},
+				{
+					"name": "Get service order",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}"
+							]
+						},
+						"description": "The path parameter accepts either the UUID or the sequential code."
+					},
+					"response": []
+				},
+				{
+					"name": "Start service execution",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"executions"
+							]
+						},
+						"description": "Opens an audit_services record for the given catalog service.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"serviceId\": \"{{serviceId}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"if (body.id) { pm.collectionVariables.set(\"executionId\", body.id); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "Register stock usage",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"stock-movements"
+							]
+						},
+						"description": "Consumes product stock against the order.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const body = pm.response.json();",
+									"const first = Array.isArray(body.items) ? body.items[0] : null;",
+									"if (first && first.id) { pm.collectionVariables.set(\"movementId\", first.id); }"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "List stock movements of the order",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"stock-movements"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Reverse stock movement",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/stock-movements/{{movementId}}/reversal",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"stock-movements",
+								"{{movementId}}",
+								"reversal"
+							]
+						},
+						"description": "Gives the consumed quantity back to stock. No request body."
+					},
+					"response": []
+				},
+				{
+					"name": "Finish service execution",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/executions/{{executionId}}/finish",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"executions",
+								"{{executionId}}",
+								"finish"
+							]
+						},
+						"description": "Body is optional: omit it entirely to close the execution at the server time.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"endedAt\": \"2026-08-24T18:30:00Z\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Finalize service order",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/finalize",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"finalize"
+							]
+						},
+						"description": "Moves the order out of EM_EXECUCAO into FINALIZADA. Run this AFTER any stock usage you need (Register stock usage requires EM_EXECUCAO and will 409 INVALID_STATUS_TRANSITION once the order is finalized \u2014 stock cannot be registered against a finalized order)."
+					},
+					"response": []
+				},
+				{
+					"name": "Deliver service order",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/deliver",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"{{serviceOrderId}}",
+								"deliver"
+							]
+						},
+						"description": "FINALIZADA -> ENTREGUE. No request body."
+					},
+					"response": []
+				},
+				{
+					"name": "Average execution time (metrics)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/service-orders/metrics/average-execution-time",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"service-orders",
+								"metrics",
+								"average-execution-time"
+							],
+							"query": [
+								{
+									"key": "serviceId",
+									"value": "{{serviceId}}",
+									"disabled": true
+								},
+								{
+									"key": "startDate",
+									"value": "2026-01-01T00:00:00Z",
+									"disabled": true
+								},
+								{
+									"key": "endDate",
+									"value": "2026-12-31T23:59:59Z",
+									"disabled": true
+								}
+							]
+						},
+						"description": "All filters optional. Dates are RFC3339."
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Tracking (customer-facing)",
+			"item": [
+				{
+					"name": "Track service order",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Tracking-Token",
+								"value": "{{trackingToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"acompanhamento",
+								"{{orderCode}}"
+							]
+						},
+						"description": "Never uses the administrative JWT: it authenticates with the X-Tracking-Token header returned when the order was opened.",
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Approve quote",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tracking-Token",
+								"value": "{{trackingToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}/orcamento/aprovar",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"acompanhamento",
+								"{{orderCode}}",
+								"orcamento",
+								"aprovar"
+							]
+						},
+						"description": "Customer decision. X-Tracking-Token only, no request body.",
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Reject quote",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Tracking-Token",
+								"value": "{{trackingToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/v1/acompanhamento/{{orderCode}}/orcamento/reprovar",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"v1",
+								"acompanhamento",
+								"{{orderCode}}",
+								"orcamento",
+								"reprovar"
+							]
+						},
+						"description": "Customer decision. X-Tracking-Token only, no request body.",
+						"auth": {
+							"type": "noauth"
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "customerId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "customerDocument",
+			"value": "11144477735",
+			"type": "string"
+		},
+		{
+			"key": "vehicleId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "licensePlate",
+			"value": "ABC1D23",
+			"type": "string"
+		},
+		{
+			"key": "serviceId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "productId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "serviceOrderId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "orderCode",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "executionId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "movementId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "trackingToken",
+			"value": "",
+			"type": "string"
+		}
+	]
 }
