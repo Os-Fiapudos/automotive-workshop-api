@@ -34,7 +34,7 @@ func (fake *fakeRepository) seed(code int64, rawToken string, revoked bool) {
 		revoked:   revoked,
 		read: &trackingRead{
 			Code:   code,
-			Status: "RECEBIDA",
+			Status: "RECEIVED",
 			Vehicle: trackingVehicle{
 				LicensePlate: "ABC1D23",
 				Brand:        "Fiat",
@@ -43,7 +43,7 @@ func (fake *fakeRepository) seed(code int64, rawToken string, revoked bool) {
 				Color:        "White",
 			},
 			Milestones: []trackingMilestone{
-				{Event: "creation", PreviousStatus: "RECEBIDA", NewStatus: "RECEBIDA", OccurredAt: time.Now()},
+				{Event: "creation", PreviousStatus: "RECEIVED", NewStatus: "RECEIVED", OccurredAt: time.Now()},
 			},
 		},
 	}

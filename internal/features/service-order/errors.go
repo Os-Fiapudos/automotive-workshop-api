@@ -40,11 +40,11 @@ var (
 
 	// ErrInvalidStatusTransition is returned when an operation requires the
 	// order to be in a specific status it currently isn't (e.g. starting
-	// diagnosis on an order that isn't RECEBIDA).
+	// diagnosis on an order that isn't RECEIVED).
 	ErrInvalidStatusTransition = errors.New("invalid service order status transition")
 
 	// ErrDiagnosisNotStarted is returned when composing a quote is attempted
-	// before diagnosis has started (order still RECEBIDA).
+	// before diagnosis has started (order still RECEIVED).
 	ErrDiagnosisNotStarted = errors.New("diagnosis has not started for this service order")
 
 	// ErrQuoteAlreadyDecided is returned when attempting to compose a quote

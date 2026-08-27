@@ -13,7 +13,7 @@ import (
 func TestStartExecutionSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -26,7 +26,7 @@ func TestStartExecutionSuccess(t *testing.T) {
 }
 
 // TestStartExecutionRejectsWithoutApproval covers BR2 ("execução não pode
-// ser iniciada sem orçamento aprovado") via its EM_EXECUCAO proxy
+// ser iniciada sem orçamento aprovado") via its IN_PROGRESS proxy
 // (requirements.md §2.1).
 func TestStartExecutionRejectsWithoutApproval(t *testing.T) {
 	repo := newFakeRepository()
@@ -34,7 +34,7 @@ func TestStartExecutionRejectsWithoutApproval(t *testing.T) {
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
-	for _, status := range []Status{StatusRecebida, StatusEmDiagnostico, StatusAguardandoAprovacao, StatusFinalizada, StatusEntregue} {
+	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusCompleted, StatusDelivered} {
 		order := seedOrder(repo, status)
 		_, err := service.StartExecution(context.Background(), order.ID, serviceID)
 		require.Error(t, err)
@@ -45,7 +45,7 @@ func TestStartExecutionRejectsWithoutApproval(t *testing.T) {
 func TestStartExecutionRejectsUnknownService(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 
 	_, err := service.StartExecution(context.Background(), order.ID, uuid.New())
 	require.Error(t, err)
@@ -55,7 +55,7 @@ func TestStartExecutionRejectsUnknownService(t *testing.T) {
 func TestFinishExecutionSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -71,7 +71,7 @@ func TestFinishExecutionSuccess(t *testing.T) {
 func TestFinishExecutionRejectsEndBeforeStart(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -87,7 +87,7 @@ func TestFinishExecutionRejectsEndBeforeStart(t *testing.T) {
 func TestFinishExecutionRejectsUnknownExecution(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 
 	_, err := service.FinishExecution(context.Background(), order.ID, uuid.New(), nil)
 	require.Error(t, err)
@@ -99,14 +99,14 @@ func TestFinishExecutionRejectsUnknownExecution(t *testing.T) {
 func TestFinishExecutionRejectsAfterFinalized(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
 
-	order.Status = StatusFinalizada
+	order.Status = StatusCompleted
 
 	_, err = service.FinishExecution(context.Background(), order.ID, execution.ID, nil)
 	require.Error(t, err)
@@ -116,17 +116,17 @@ func TestFinishExecutionRejectsAfterFinalized(t *testing.T) {
 func TestFinalizeOrderSuccessWithoutQuote(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 
 	finalized, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusFinalizada, finalized.Status)
+	assert.Equal(t, StatusCompleted, finalized.Status)
 }
 
-func TestFinalizeOrderRejectsNonEmExecucao(t *testing.T) {
+func TestFinalizeOrderRejectsNonInProgress(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusAguardandoAprovacao)
+	order := seedOrder(repo, StatusAwaitingApproval)
 
 	_, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.Error(t, err)
@@ -138,7 +138,7 @@ func TestFinalizeOrderRejectsNonEmExecucao(t *testing.T) {
 func TestFinalizeOrderRequiresCompletedExecutions(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 	repo.quotes[order.ID] = &Quote{
@@ -164,23 +164,23 @@ func TestFinalizeOrderRequiresCompletedExecutions(t *testing.T) {
 
 	finalized, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusFinalizada, finalized.Status)
+	assert.Equal(t, StatusCompleted, finalized.Status)
 }
 
 func TestDeliverOrderSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusFinalizada)
+	order := seedOrder(repo, StatusCompleted)
 
 	delivered, err := service.DeliverOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusEntregue, delivered.Status)
+	assert.Equal(t, StatusDelivered, delivered.Status)
 }
 
-func TestDeliverOrderRejectsNonFinalizada(t *testing.T) {
+func TestDeliverOrderRejectsNonCompleted(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusEmExecucao)
+	order := seedOrder(repo, StatusInProgress)
 
 	_, err := service.DeliverOrder(context.Background(), order.ID)
 	require.Error(t, err)

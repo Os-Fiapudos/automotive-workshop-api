@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewServiceOrderStartsRecebida(t *testing.T) {
+func TestNewServiceOrderStartsReceived(t *testing.T) {
 	customerID := uuid.New()
 	vehicleID := uuid.New()
 	serviceID := uuid.New()
@@ -16,7 +16,7 @@ func TestNewServiceOrderStartsRecebida(t *testing.T) {
 	order, err := NewServiceOrder(customerID, vehicleID, "Customer reported a noise.", []uuid.UUID{serviceID})
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusRecebida, order.Status)
+	assert.Equal(t, StatusReceived, order.Status)
 	assert.Equal(t, customerID, order.CustomerID)
 	assert.Equal(t, vehicleID, order.VehicleID)
 	assert.Equal(t, []uuid.UUID{serviceID}, order.RequestedServiceIDs)
@@ -25,7 +25,7 @@ func TestNewServiceOrderStartsRecebida(t *testing.T) {
 func TestNewServiceOrderAllowsNoRequestedServices(t *testing.T) {
 	order, err := NewServiceOrder(uuid.New(), uuid.New(), "", nil)
 	require.NoError(t, err)
-	assert.Equal(t, StatusRecebida, order.Status)
+	assert.Equal(t, StatusReceived, order.Status)
 	assert.Empty(t, order.RequestedServiceIDs)
 }
 

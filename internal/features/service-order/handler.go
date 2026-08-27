@@ -284,7 +284,7 @@ func parseListFilter(r *http.Request) (ListFilter, []apierror.Detail) {
 
 	if raw := strings.TrimSpace(query.Get("status")); raw != "" {
 		if !isKnownStatus(raw) {
-			details = append(details, apierror.Detail{Field: "status", Message: "must be one of RECEBIDA, EM_DIAGNOSTICO, AGUARDANDO_APROVACAO, EM_EXECUCAO, FINALIZADA, ENTREGUE"})
+			details = append(details, apierror.Detail{Field: "status", Message: "must be one of RECEIVED, IN_DIAGNOSIS, AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED"})
 		} else {
 			filter.Status = &raw
 		}
