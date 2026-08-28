@@ -1,4 +1,4 @@
-﻿{
+{
   "info": {
     "name": "automotive-workshop-api",
     "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for every route, including Customers and POST /api/v1/service-orders (wrapped in requireAuth on 2026-08-26, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",

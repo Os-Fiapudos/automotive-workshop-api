@@ -1,4 +1,4 @@
-﻿# Design Specification: Product & Stock Management
+# Design Specification: Product & Stock Management
 
 ## 1. Architecture Overview
 Vertical slice architecture located at `internal/features/product/`.
