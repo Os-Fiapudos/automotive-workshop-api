@@ -81,7 +81,7 @@ GET    /api/v1/produtos/{id}/movimentacoes
 ```
 
 ```
-POST   /api/v1/service-orders                                     (unauthenticated)
+POST   /api/v1/service-orders
 GET    /api/v1/service-orders
 GET    /api/v1/service-orders/{id}                                 (id or sequential code)
 GET    /api/v1/service-orders/metrics/average-execution-time
@@ -104,8 +104,8 @@ POST   /api/v1/acompanhamento/{codigo}/orcamento/aprovar            (unauthentic
 POST   /api/v1/acompanhamento/{codigo}/orcamento/reprovar           (unauthenticated, tracking token)
 ```
 
-Except for the routes marked otherwise above (login itself, Customer Management, service order
-creation, and the customer-facing `/acompanhamento` tracking routes), every route requires a
+Except for the routes marked otherwise above (login itself, and the customer-facing
+`/acompanhamento` tracking routes), every route requires a
 JWT (`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
 [specs/auth/](specs/auth/) and [specs/vehicle-management/](specs/vehicle-management/) for the
 authentication contract, and `docs/openapi.yaml`'s `bearerAuth`/`trackingToken` security
