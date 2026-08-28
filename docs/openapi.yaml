@@ -12,15 +12,14 @@ info:
     specs/service-order-diagnosis-quote/, specs/service-order-quote-decision/,
     specs/service-order-execution/, specs/service-order-query/, and
     specs/service-order-tracking/ for the requirements and design behind
-    these contracts. Auth, Vehicle, Service catalog, Product, and Service
-    Order Query/Diagnosis/Quote/Execution routes require a JWT (see the
-    bearerAuth security scheme; POST /api/v1/auth/login itself is the one
-    exception, since it is what issues the token); Customer routes and
-    Service Order creation do not (see
-    specs/customer-management/requirements.md Â§7.2 and CLAUDE.md Â§1); Service
-    Order Tracking and the customer-facing quote approve/reject endpoints use
-    neither â€” they validate their own per-order tracking token instead (see
-    the trackingToken security scheme).
+    these contracts. Every route requires a JWT (see the bearerAuth security
+    scheme) except POST /api/v1/auth/login itself (since it is what issues
+    the token) and Service Order Tracking plus the customer-facing quote
+    approve/reject endpoints, which validate their own per-order tracking
+    token instead (see the trackingToken security scheme). Customer routes
+    and Service Order creation were wrapped in bearerAuth on 2026-08-26,
+    closing the open decision recorded in
+    specs/customer-management/requirements.md §7.2 and CLAUDE.md §1.
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
@@ -57,8 +56,9 @@ tags:
       (specs/service-order-diagnosis-quote/), quote sending
       (specs/service-order-quote-decision/), execution, finalization, and
       delivery (specs/service-order-execution/), plus listing/detail
-      (specs/service-order-query/). Order creation is unauthenticated (see
-      CLAUDE.md Â§1); every other endpoint here requires a valid JWT. The
+      (specs/service-order-query/). Every endpoint here requires a valid JWT
+      (order creation was wrapped in bearerAuth on 2026-08-26, see
+      CLAUDE.md §1). The
       customer-facing quote approval/rejection endpoints live under the
       `tracking` tag instead, since they authenticate with a tracking token,
       not a JWT (specs/service-order-quote-decision/).
@@ -140,6 +140,7 @@ paths:
       tags: [customers]
       summary: Register a new customer
       operationId: createCustomer
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -178,6 +179,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "409":
           description: >
             The document already belongs to another customer (code `DUPLICATE_DOCUMENT`),
@@ -190,6 +193,7 @@ paths:
       tags: [customers]
       summary: List customers (active and inactive)
       operationId: listCustomers
+      security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
@@ -200,6 +204,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerList"
+        "401":
+          description: Missing, malformed, or expired bearer token.
 
   /api/v1/customers/{id}:
     parameters:
@@ -208,6 +214,7 @@ paths:
       tags: [customers]
       summary: Retrieve a customer by id
       operationId: getCustomerById
+      security: [{ bearerAuth: [] }]
       responses:
         "200":
           description: The customer.
@@ -215,6 +222,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "404":
           description: No customer with this id.
           content:
@@ -229,6 +238,7 @@ paths:
         fields keep their current value. If `document` is present, it is
         normalized, re-validated, and re-checked for uniqueness.
       operationId: updateCustomer
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -248,6 +258,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "404":
           description: No customer with this id.
           content:
@@ -272,6 +284,7 @@ paths:
         already-inactive customer returns 200 with no change. There is no
         endpoint to reactivate a customer in this feature.
       operationId: deactivateCustomer
+      security: [{ bearerAuth: [] }]
       responses:
         "200":
           description: The now-inactive customer.
@@ -279,6 +292,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "404":
           description: No customer with this id.
           content:
@@ -292,6 +307,7 @@ paths:
       summary: Retrieve a customer by document (CPF/CNPJ)
       description: The path parameter is normalized (punctuation stripped) before lookup.
       operationId: getCustomerByDocument
+      security: [{ bearerAuth: [] }]
       parameters:
         - name: document
           in: path
@@ -307,6 +323,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Customer"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "404":
           description: No customer with this document.
           content:
@@ -1002,14 +1020,15 @@ paths:
       tags: [service-orders]
       summary: Open a new service order
       description: >
-        Unauthenticated (CLAUDE.md Â§1, same open decision as Customer
-        Management). Exactly one of customerId/customerDocument and exactly
+        Requires a valid JWT (wrapped in bearerAuth on 2026-08-26, CLAUDE.md
+        §1). Exactly one of customerId/customerDocument and exactly
         one of vehicleId/licensePlate must be present (specs/service-order-opening/design.md
         Â§4.1). Any `status` field sent in the body is ignored â€” the server
         is the only author of a new order's status, which always starts
         RECEIVED (requirements.md Â§3.6). requestedServiceIds and notes are
         optional.
       operationId: createServiceOrder
+      security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
@@ -1054,6 +1073,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing, malformed, or expired bearer token.
         "404":
           description: >
             The referenced customer (code `NOT_FOUND`), vehicle (code

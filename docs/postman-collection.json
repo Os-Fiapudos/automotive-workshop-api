@@ -1,7 +1,7 @@
 ﻿{
   "info": {
     "name": "automotive-workshop-api",
-    "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for protected routes.\n- Customers and POST /api/v1/service-orders are currently unauthenticated (open decision, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
+    "description": "Manual test collection for automotive-workshop-api, generated from the routes registered in cmd/api/main.go and each feature's RegisterRoutes.\n\nGetting started:\n1. Bring the stack up (docker compose up -d) and load docs/seed.sql.\n2. Run Auth > Login: the test script stores access_token in {{token}}, used by every protected request.\n3. Run the create requests in order (Customer > Vehicle > Service > Product > Service order); each stores the returned id in a collection variable consumed by the following ones.\n\nAuthentication:\n- Bearer JWT for every route, including Customers and POST /api/v1/service-orders (wrapped in requireAuth on 2026-08-26, CLAUDE.md section 1).\n- The /acompanhamento routes deliberately use the X-Tracking-Token header instead of the JWT.\n\nThe sample payloads use fictitious data. Do not store real customer data, real documents, or production credentials in this file.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -141,7 +141,7 @@
                 "customers"
               ]
             },
-            "description": "Currently unauthenticated (open decision, CLAUDE.md section 1). document accepts CPF or CNPJ, with or without punctuation. Use fictitious data only.",
+            "description": "Requires a valid JWT (customer routes were wrapped in requireAuth on 2026-08-26, closing VULN-01 — see CLAUDE.md section 1). document accepts CPF or CNPJ, with or without punctuation. Use fictitious data only.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Maria Silva\",\n  \"document\": \"11144477735\",\n  \"phone\": \"11999998888\",\n  \"email\": \"maria.silva@example.com\"\n}",
@@ -150,9 +150,6 @@
                   "language": "json"
                 }
               }
-            },
-            "auth": {
-              "type": "noauth"
             }
           },
           "response": [],
@@ -198,10 +195,7 @@
                 }
               ]
             },
-            "description": "Paginated. pageSize is capped at 100; invalid values fall back to the defaults.",
-            "auth": {
-              "type": "noauth"
-            }
+            "description": "Requires a valid JWT (CLAUDE.md section 1). Paginated. pageSize is capped at 100; invalid values fall back to the defaults."
           },
           "response": []
         },
@@ -222,9 +216,7 @@
                 "{{customerId}}"
               ]
             },
-            "auth": {
-              "type": "noauth"
-            }
+            "description": "Requires a valid JWT (CLAUDE.md section 1)."
           },
           "response": []
         },
@@ -246,10 +238,7 @@
                 "{{customerDocument}}"
               ]
             },
-            "description": "Lookup by normalized CPF/CNPJ.",
-            "auth": {
-              "type": "noauth"
-            }
+            "description": "Requires a valid JWT (CLAUDE.md section 1) — this route used to be the unauthenticated leak described as VULN-01 in docs/owasp-vulnerability-and-coverage-report.md; it is now protected. Lookup by normalized CPF/CNPJ."
           },
           "response": []
         },
@@ -275,7 +264,7 @@
                 "{{customerId}}"
               ]
             },
-            "description": "Partial update: send only the fields to change (name, document, phone, email).",
+            "description": "Requires a valid JWT (CLAUDE.md section 1). Partial update: send only the fields to change (name, document, phone, email).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Maria Silva Souza\",\n  \"phone\": \"11988887777\"\n}",
@@ -284,9 +273,6 @@
                   "language": "json"
                 }
               }
-            },
-            "auth": {
-              "type": "noauth"
             }
           },
           "response": []
@@ -308,10 +294,7 @@
                 "{{customerId}}"
               ]
             },
-            "description": "Logical deactivation (status INACTIVE), not a physical delete.",
-            "auth": {
-              "type": "noauth"
-            }
+            "description": "Requires a valid JWT (CLAUDE.md section 1). Logical deactivation (status INACTIVE), not a physical delete."
           },
           "response": []
         }
@@ -966,7 +949,7 @@
                 "service-orders"
               ]
             },
-            "description": "Currently unauthenticated (same open decision as Customers). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
+            "description": "Requires a valid JWT (this route was wrapped in requireAuth on 2026-08-26, closing VULN-02 — see CLAUDE.md section 1). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"requestedServiceIds\": [\n    \"{{serviceId}}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}",
@@ -975,9 +958,6 @@
                   "language": "json"
                 }
               }
-            },
-            "auth": {
-              "type": "noauth"
             }
           },
           "response": [],
