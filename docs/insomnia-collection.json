@@ -1,4 +1,4 @@
-{
+﻿{
   "_type": "export",
   "__export_format": 4,
   "__export_date": "2026-08-24T00:00:00.000Z",
@@ -480,9 +480,9 @@
       "_type": "request",
       "parentId": "fld_products",
       "name": "Create product",
-      "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted). Routes are in Portuguese (/produtos) by design.",
+      "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted).",
       "method": "POST",
-      "url": "{{ _.baseUrl }}/api/v1/produtos",
+      "url": "{{ _.baseUrl }}/api/v1/products",
       "parameters": [],
       "headers": [
         {
@@ -511,7 +511,7 @@
       "name": "List products",
       "description": "Optional filters: type (PART|SUPPLY), status (ACTIVE|INACTIVE).",
       "method": "GET",
-      "url": "{{ _.baseUrl }}/api/v1/produtos",
+      "url": "{{ _.baseUrl }}/api/v1/products",
       "parameters": [
         {
           "name": "page",
@@ -553,7 +553,7 @@
       "name": "Get product",
       "description": "",
       "method": "GET",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}",
       "parameters": [],
       "headers": [],
       "authentication": {
@@ -574,7 +574,7 @@
       "name": "Update product",
       "description": "",
       "method": "PATCH",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}",
       "parameters": [],
       "headers": [
         {
@@ -603,7 +603,7 @@
       "name": "Deactivate product",
       "description": "Logical deactivation (status INACTIVE).",
       "method": "DELETE",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}",
       "parameters": [],
       "headers": [],
       "authentication": {
@@ -624,7 +624,7 @@
       "name": "Adjust stock",
       "description": "type accepts ENTRY/ENTRADA/IN or EXIT/SAIDA/OUT.",
       "method": "POST",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/estoque/ajustes",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}/stock/adjustments",
       "parameters": [],
       "headers": [
         {
@@ -653,7 +653,7 @@
       "name": "Get stock balance",
       "description": "",
       "method": "GET",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/estoque",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}/stock",
       "parameters": [],
       "headers": [],
       "authentication": {
@@ -674,7 +674,7 @@
       "name": "List stock movements",
       "description": "",
       "method": "GET",
-      "url": "{{ _.baseUrl }}/api/v1/produtos/{{ _.productId }}/movimentacoes",
+      "url": "{{ _.baseUrl }}/api/v1/products/{{ _.productId }}/movements",
       "parameters": [
         {
           "name": "page",

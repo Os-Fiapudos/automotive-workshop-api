@@ -250,12 +250,18 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
     in `specs/service-order-*/` still quoting the Portuguese values are records of the
     decision as it stood when they were written, same convention as section 2's Go
     1.22→1.25 note.
-  - **Still an exception, unrelated to status**: route segments of the product feature
-    (`/api/v1/produtos/...`) and of service-order tracking/quote decision
-    (`/api/v1/acompanhamento/{codigo}`, `orcamento/aprovar|reprovar`) are in Portuguese;
-    every other feature uses English paths. `product.ParseMovementType` also accepts
-    `ENTRADA`/`SAIDA`/`SAÍDA` as input aliases for the canonical `ENTRY`/`EXIT` — input
-    tolerance only, nothing Portuguese is ever stored.
+  - **Changed on 2026-08-27**: the product feature's route segments were renamed from
+    Portuguese to English — `/api/v1/produtos` → `/api/v1/products`,
+    `.../estoque/ajustes` → `.../stock/adjustments`, `.../estoque` → `.../stock`,
+    `.../movimentacoes` → `.../movements` — closing that exception. `product.ParseMovementType`
+    still accepts `ENTRADA`/`SAIDA`/`SAÍDA` as input aliases for the canonical
+    `ENTRY`/`EXIT` — input tolerance only, nothing Portuguese is ever stored.
+  - **Still an exception**: route segments of service-order tracking/quote decision
+    (`/api/v1/acompanhamento/{codigo}`, `orcamento/aprovar|reprovar`) remain in Portuguese;
+    every other feature, including product as of the above change, uses English paths.
+    Historical notes in `specs/product-management/` and `specs/service-order-stock-usage/`
+    still quoting the old `/produtos` paths are records of the decision as it stood when
+    they were written, same convention as section 2's Go 1.22→1.25 note.
 - **Database** (conventions already in effect in `docs/schema.sql`):
   - `snake_case` for tables and columns.
   - `id UUID` (technical key, `gen_random_uuid()`) as PRIMARY KEY.

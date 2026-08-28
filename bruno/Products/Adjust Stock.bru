@@ -1,11 +1,11 @@
-meta {
+﻿meta {
   name: Adjust Stock
   type: http
   seq: 6
 }
 
 post {
-  url: {{baseUrl}}/api/v1/produtos/{{productId}}/estoque/ajustes
+  url: {{baseUrl}}/api/v1/products/{{productId}}/stock/adjustments
   body: json
   auth: inherit
 }
