@@ -1,11 +1,11 @@
-# 🚗 Automotive Workshop API
+# Automotive Workshop API
 
 > **Tech Challenge — Fase 1 | Pós-Tech FIAP (Software Architecture)**  
 > REST API robusta para gerenciamento completo do ciclo de atendimento em uma oficina mecânica: cadastro de clientes e veículos, catálogo de serviços, controle de peças/insumos com estoque, abertura de Ordens de Serviço (OS), diagnóstico, composição e aprovação de orçamentos, execução de serviços com auditoria, baixa de peças, acompanhamento público pelo cliente e métricas operacionais.
 
 ---
 
-## 👥 Integrantes do Grupo
+## Integrantes do Grupo
 
 - **Jean Ferreira dos Santos Cruz Junior** — RM376169
 - **João Victor dos Santos Cerqueira** — RM376742
@@ -15,22 +15,22 @@
 
 ---
 
-## 📌 Sumário
+## Sumário
 
-1. [Visão Geral do Projeto](#-visão-geral-do-projeto)
-2. [Ciclo de Vida da Ordem de Serviço](#-ciclo-de-vida-da-ordem-de-serviço)
-3. [Arquitetura e Padrões](#-arquitetura-e-padrões)
-4. [Tecnologias, Bibliotecas e Dependências](#-tecnologias-bibliotecas-e-dependências)
-5. [Como Rodar o Projeto com Docker (Passo a Passo)](#-como-rodar-o-projeto-com-docker-passo-a-passo)
-6. [Credenciais de Teste e Dados Iniciais (Seed)](#-credenciais-de-teste-e-dados-iniciais-seed)
-7. [Documentação dos Endpoints da API](#-documentação-dos-endpoints-da-api)
-8. [Coleções para Testes (Bruno, Postman e Insomnia)](#-coleções-para-testes-bruno-postman-e-insomnia)
-9. [Testes Automatizados, Cobertura e Segurança](#-testes-automatizados-cobertura-e-segurança)
-10. [Estrutura de Pastas do Projeto](#-estrutura-de-pastas-do-projeto)
+1. [Visão Geral do Projeto](#visão-geral-do-projeto)
+2. [Ciclo de Vida da Ordem de Serviço](#ciclo-de-vida-da-ordem-de-serviço)
+3. [Arquitetura e Padrões](#arquitetura-e-padrões)
+4. [Tecnologias, Bibliotecas e Dependências](#tecnologias-bibliotecas-e-dependências)
+5. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
+6. [Credenciais de Teste e Dados Iniciais (Seed)](#credenciais-de-teste-e-dados-iniciais-seed)
+7. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
+8. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
+9. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
+10. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
 
 ---
 
-## 🎯 Visão Geral do Projeto
+## Visão Geral do Projeto
 
 A **Automotive Workshop API** foi desenvolvida para solucionar os principais desafios operacionais de oficinas mecânicas: desorganização no fluxo de atendimento, falta de rastreabilidade do status dos veículos, controle inadequado de peças e insumos em estoque, perda de histórico de orçamentos e dificuldade de comunicação com o cliente.
 
@@ -45,7 +45,7 @@ A **Automotive Workshop API** foi desenvolvida para solucionar os principais des
 
 ---
 
-## 🔄 Ciclo de Vida da Ordem de Serviço
+## Ciclo de Vida da Ordem de Serviço
 
 Toda Ordem de Serviço transita rigorosamente pelos seguintes estados:
 
@@ -83,7 +83,7 @@ Toda Ordem de Serviço transita rigorosamente pelos seguintes estados:
 
 ---
 
-## 🏗 Arquitetura e Padrões
+## Arquitetura e Padrões
 
 O projeto foi construído seguindo os princípios de **Vertical Slice Architecture** (monólito modular orientado a funcionalidades):
 
@@ -94,7 +94,7 @@ O projeto foi construído seguindo os princípios de **Vertical Slice Architectu
 
 ---
 
-## 🧰 Tecnologias, Bibliotecas e Dependências
+## Tecnologias, Bibliotecas e Dependências
 
 A aplicação foi projetada com foco em alta performance, baixo acoplamento e dependências externas mínimas e deliberadas:
 
@@ -114,7 +114,7 @@ A aplicação foi projetada com foco em alta performance, baixo acoplamento e de
 
 ---
 
-## 🚀 Como Rodar o Projeto com Docker (Passo a Passo)
+## Como Rodar o Projeto com Docker (Passo a Passo)
 
 ### Pré-requisitos
 - [Docker](https://docs.docker.com/get-docker/) instalado e em execução.
@@ -193,7 +193,7 @@ curl http://localhost:8080/health
 
 ---
 
-### 🌐 URLs e Acessos Disponíveis
+### URLs e Acessos Disponíveis
 
 | Serviço | URL de Acesso | Descrição |
 | :--- | :--- | :--- |
@@ -204,7 +204,7 @@ curl http://localhost:8080/health
 
 ---
 
-### 🛠 Comandos Úteis do Makefile e Docker
+### Comandos Úteis do Makefile e Docker
 
 | Ação | Comando com Makefile | Comando equivalente com Docker Compose |
 | :--- | :--- | :--- |
@@ -219,7 +219,7 @@ curl http://localhost:8080/health
 
 ---
 
-## 🔑 Credenciais de Teste e Dados Iniciais (Seed)
+## Credenciais de Teste e Dados Iniciais (Seed)
 
 O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](docs/seed.sql)) contendo clientes, veículos, produtos, serviços, ordens de serviço e usuários administrativos:
 
@@ -230,95 +230,95 @@ O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](do
 
 ---
 
-## 📖 Documentação dos Endpoints da API
+## Documentação dos Endpoints da API
 
 A API possui **47 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
 
 ### Modelos de Autenticação:
-- 🔒 **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
-- 🎟️ **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
-- 🟢 **`Pública`**: Rotas abertas sem necessidade de credenciais.
+- **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
+- **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
+- **`Pública`**: Rotas abertas sem necessidade de credenciais.
 
 ---
 
 ### 1. Saúde e Autenticação
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `GET` | `/health` | 🟢 Pública | Verificação de liveness e status da API. |
-| `POST` | `/api/v1/auth/login` | 🟢 Pública | Autentica usuário administrativo e retorna o token JWT. |
-| `GET` | `/api/v1/auth/me` | 🔒 JWT | Retorna os dados do usuário autenticado. |
+| `GET` | `/health` | Pública | Verificação de liveness e status da API. |
+| `POST` | `/api/v1/auth/login` | Pública | Autentica usuário administrativo e retorna o token JWT. |
+| `GET` | `/api/v1/auth/me` | JWT | Retorna os dados do usuário autenticado. |
 
 ### 2. Gestão de Clientes (`/customers`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/customers` | 🔒 JWT | Cadastra um novo cliente (CPF ou CNPJ validado). |
-| `GET` | `/api/v1/customers` | 🔒 JWT | Lista clientes de forma paginada (`page`, `pageSize`). |
-| `GET` | `/api/v1/customers/{id}` | 🔒 JWT | Busca cliente por UUID. |
-| `GET` | `/api/v1/customers/document/{document}` | 🔒 JWT | Busca cliente por CPF ou CNPJ normalizado. |
-| `PATCH` | `/api/v1/customers/{id}` | 🔒 JWT | Atualiza dados cadastrais de um cliente. |
-| `DELETE` | `/api/v1/customers/{id}` | 🔒 JWT | Inativação lógica do cliente (`status = INACTIVE`). |
+| `POST` | `/api/v1/customers` | JWT | Cadastra um novo cliente (CPF ou CNPJ validado). |
+| `GET` | `/api/v1/customers` | JWT | Lista clientes de forma paginada (`page`, `pageSize`). |
+| `GET` | `/api/v1/customers/{id}` | JWT | Busca cliente por UUID. |
+| `GET` | `/api/v1/customers/document/{document}` | JWT | Busca cliente por CPF ou CNPJ normalizado. |
+| `PATCH` | `/api/v1/customers/{id}` | JWT | Atualiza dados cadastrais de um cliente. |
+| `DELETE` | `/api/v1/customers/{id}` | JWT | Inativação lógica do cliente (`status = INACTIVE`). |
 
 ### 3. Gestão de Veículos (`/vehicles`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/vehicles` | 🔒 JWT | Cadastra veículo vinculado a um cliente ativo (placa antiga ou Mercosul). |
-| `GET` | `/api/v1/vehicles` | 🔒 JWT | Lista veículos de forma paginada. |
-| `GET` | `/api/v1/vehicles/{id}` | 🔒 JWT | Busca veículo por UUID. |
-| `GET` | `/api/v1/vehicles/plate/{plate}` | 🔒 JWT | Busca veículo por placa normalizada. |
-| `GET` | `/api/v1/vehicles/customer/{customerId}` | 🔒 JWT | Lista veículos vinculados a um cliente específico. |
-| `PATCH` | `/api/v1/vehicles/{id}` | 🔒 JWT | Atualiza marca, modelo, ano ou cor do veículo. |
-| `DELETE` | `/api/v1/vehicles/{id}` | 🔒 JWT | Inativação lógica do veículo (`status = INACTIVE`). |
+| `POST` | `/api/v1/vehicles` | JWT | Cadastra veículo vinculado a um cliente ativo (placa antiga ou Mercosul). |
+| `GET` | `/api/v1/vehicles` | JWT | Lista veículos de forma paginada. |
+| `GET` | `/api/v1/vehicles/{id}` | JWT | Busca veículo por UUID. |
+| `GET` | `/api/v1/vehicles/plate/{plate}` | JWT | Busca veículo por placa normalizada. |
+| `GET` | `/api/v1/vehicles/customer/{customerId}` | JWT | Lista veículos vinculados a um cliente específico. |
+| `PATCH` | `/api/v1/vehicles/{id}` | JWT | Atualiza marca, modelo, ano ou cor do veículo. |
+| `DELETE` | `/api/v1/vehicles/{id}` | JWT | Inativação lógica do veículo (`status = INACTIVE`). |
 
 ### 4. Catálogo de Serviços (`/services`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/services` | 🔒 JWT | Cria um serviço no catálogo (preço obrigatório, tempo estimado opcional). |
-| `GET` | `/api/v1/services` | 🔒 JWT | Lista serviços ativos (suporta filtro `?active=true/false`). |
-| `GET` | `/api/v1/services/{id}` | 🔒 JWT | Busca serviço por UUID. |
-| `PATCH` | `/api/v1/services/{id}` | 🔒 JWT | Atualiza preço, descrição, nome ou tempo estimado. |
-| `DELETE` | `/api/v1/services/{id}` | 🔒 JWT | Inativação lógica do serviço (`active = false`). |
+| `POST` | `/api/v1/services` | JWT | Cria um serviço no catálogo (preço obrigatório, tempo estimado opcional). |
+| `GET` | `/api/v1/services` | JWT | Lista serviços ativos (suporta filtro `?active=true/false`). |
+| `GET` | `/api/v1/services/{id}` | JWT | Busca serviço por UUID. |
+| `PATCH` | `/api/v1/services/{id}` | JWT | Atualiza preço, descrição, nome ou tempo estimado. |
+| `DELETE` | `/api/v1/services/{id}` | JWT | Inativação lógica do serviço (`active = false`). |
 
 ### 5. Catálogo de Produtos e Estoque (`/products`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/products` | 🔒 JWT | Cadastra peça (`PART`) ou insumo (`SUPPLY`). |
-| `GET` | `/api/v1/products` | 🔒 JWT | Lista produtos com filtros (`page`, `pageSize`, `type`, `status`). |
-| `GET` | `/api/v1/products/{id}` | 🔒 JWT | Busca produto por UUID. |
-| `PATCH` | `/api/v1/products/{id}` | 🔒 JWT | Atualiza dados cadastrais e preço do produto. |
-| `DELETE` | `/api/v1/products/{id}` | 🔒 JWT | Inativação lógica do produto (`status = INACTIVE`). |
-| `POST` | `/api/v1/products/{id}/stock/adjustments` | 🔒 JWT | Realiza ajuste manual de estoque (`ENTRY`, `EXIT`, `LOSS`) com auditoria. |
-| `GET` | `/api/v1/products/{id}/stock` | 🔒 JWT | Consulta saldo atual de estoque do produto. |
-| `GET` | `/api/v1/products/{id}/movements` | 🔒 JWT | Lista o histórico de movimentações de estoque do produto. |
+| `POST` | `/api/v1/products` | JWT | Cadastra peça (`PART`) ou insumo (`SUPPLY`). |
+| `GET` | `/api/v1/products` | JWT | Lista produtos com filtros (`page`, `pageSize`, `type`, `status`). |
+| `GET` | `/api/v1/products/{id}` | JWT | Busca produto por UUID. |
+| `PATCH` | `/api/v1/products/{id}` | JWT | Atualiza dados cadastrais e preço do produto. |
+| `DELETE` | `/api/v1/products/{id}` | JWT | Inativação lógica do produto (`status = INACTIVE`). |
+| `POST` | `/api/v1/products/{id}/stock/adjustments` | JWT | Realiza ajuste manual de estoque (`ENTRY`, `EXIT`, `LOSS`) com auditoria. |
+| `GET` | `/api/v1/products/{id}/stock` | JWT | Consulta saldo atual de estoque do produto. |
+| `GET` | `/api/v1/products/{id}/movements` | JWT | Lista o histórico de movimentações de estoque do produto. |
 
 ### 6. Ordens de Serviço — Ciclo de Atendimento (`/service-orders`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/service-orders` | 🔒 JWT | Abre uma nova OS com status `RECEIVED` e emite o `trackingToken`. |
-| `GET` | `/api/v1/service-orders` | 🔒 JWT | Lista OSs com filtros avançados (`code`, `status`, `document`, `licensePlate`, período). |
-| `GET` | `/api/v1/service-orders/{id}` | 🔒 JWT | Detalha a OS completa (aceita UUID ou código sequencial numérico). |
-| `POST` | `/api/v1/service-orders/{id}/diagnosis` | 🔒 JWT | Inicia o diagnóstico da OS (`RECEIVED → IN_DIAGNOSIS`). |
-| `PUT` | `/api/v1/service-orders/{id}/quote` | 🔒 JWT | Compõe/versiona o orçamento com itens de produtos e serviços. |
-| `GET` | `/api/v1/service-orders/{id}/quote` | 🔒 JWT | Consulta o orçamento vinculado à OS. |
-| `POST` | `/api/v1/service-orders/{id}/quote/send` | 🔒 JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
-| `POST` | `/api/v1/service-orders/{id}/executions` | 🔒 JWT | Registra o início de execução de um serviço específico da OS. |
-| `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | 🔒 JWT | Registra a conclusão da execução do serviço. |
-| `POST` | `/api/v1/service-orders/{id}/finalize` | 🔒 JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |
-| `POST` | `/api/v1/service-orders/{id}/deliver` | 🔒 JWT | Registra a entrega do veículo ao cliente (`COMPLETED → DELIVERED`). |
-| `POST` | `/api/v1/service-orders/{id}/stock-movements` | 🔒 JWT | Dá baixa no estoque de peças/insumos consumidos na OS. |
-| `GET` | `/api/v1/service-orders/{id}/stock-movements` | 🔒 JWT | Lista as peças e movimentações de estoque vinculadas à OS. |
-| `POST` | `/api/v1/service-orders/{id}/stock-movements/{movementId}/reversal` | 🔒 JWT | Estorna uma movimentação de estoque da OS, restaurando o saldo. |
-| `GET` | `/api/v1/service-orders/metrics/average-execution-time` | 🔒 JWT | Retorna a métrica de tempo médio de execução agrupado por serviço. |
+| `POST` | `/api/v1/service-orders` | JWT | Abre uma nova OS com status `RECEIVED` e emite o `trackingToken`. |
+| `GET` | `/api/v1/service-orders` | JWT | Lista OSs com filtros avançados (`code`, `status`, `document`, `licensePlate`, período). |
+| `GET` | `/api/v1/service-orders/{id}` | JWT | Detalha a OS completa (aceita UUID ou código sequencial numérico). |
+| `POST` | `/api/v1/service-orders/{id}/diagnosis` | JWT | Inicia o diagnóstico da OS (`RECEIVED → IN_DIAGNOSIS`). |
+| `PUT` | `/api/v1/service-orders/{id}/quote` | JWT | Compõe/versiona o orçamento com itens de produtos e serviços. |
+| `GET` | `/api/v1/service-orders/{id}/quote` | JWT | Consulta o orçamento vinculado à OS. |
+| `POST` | `/api/v1/service-orders/{id}/quote/send` | JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
+| `POST` | `/api/v1/service-orders/{id}/executions` | JWT | Registra o início de execução de um serviço específico da OS. |
+| `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | JWT | Registra a conclusão da execução do serviço. |
+| `POST` | `/api/v1/service-orders/{id}/finalize` | JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |
+| `POST` | `/api/v1/service-orders/{id}/deliver` | JWT | Registra a entrega do veículo ao cliente (`COMPLETED → DELIVERED`). |
+| `POST` | `/api/v1/service-orders/{id}/stock-movements` | JWT | Dá baixa no estoque de peças/insumos consumidos na OS. |
+| `GET` | `/api/v1/service-orders/{id}/stock-movements` | JWT | Lista as peças e movimentações de estoque vinculadas à OS. |
+| `POST` | `/api/v1/service-orders/{id}/stock-movements/{movementId}/reversal` | JWT | Estorna uma movimentação de estoque da OS, restaurando o saldo. |
+| `GET` | `/api/v1/service-orders/metrics/average-execution-time` | JWT | Retorna a métrica de tempo médio de execução agrupado por serviço. |
 
 ### 7. Acompanhamento Público e Decisão pelo Cliente (`/acompanhamento`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `GET` | `/api/v1/acompanhamento/{codigo}` | 🎟️ Token | Consulta pública reduzida da OS (não expõe PII nem dados internos). |
-| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/aprovar` | 🎟️ Token | Cliente aprova o orçamento (`AWAITING_APPROVAL → IN_PROGRESS`). |
-| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/reprovar` | 🎟️ Token | Cliente reprova o orçamento (`AWAITING_APPROVAL → CANCELED`). |
+| `GET` | `/api/v1/acompanhamento/{codigo}` | Token | Consulta pública reduzida da OS (não expõe PII nem dados internos). |
+| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/aprovar` | Token | Cliente aprova o orçamento (`AWAITING_APPROVAL → IN_PROGRESS`). |
+| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/reprovar` | Token | Cliente reprova o orçamento (`AWAITING_APPROVAL → CANCELED`). |
 
 ---
 
-## 📬 Coleções para Testes (Bruno, Postman e Insomnia)
+## Coleções para Testes (Bruno, Postman e Insomnia)
 
 O projeto disponibiliza coleções completas e pré-configuradas para todas as 47 rotas, com encadeamento automático de variáveis:
 
@@ -326,7 +326,7 @@ O projeto disponibiliza coleções completas e pré-configuradas para todas as 4
 2. **Postman**: Importe o arquivo [`docs/postman-collection.json`](docs/postman-collection.json).
 3. **Insomnia**: Importe o arquivo [`docs/insomnia-collection.json`](docs/insomnia-collection.json).
 
-### 💡 Fluxo de Execução Encadeado (sem copiar e colar IDs):
+### Fluxo de Execução Encadeado (sem copiar e colar IDs):
 1. Execute **`Auth -> Login`**: o script armazena o JWT na variável `token`.
 2. Execute **`Customers -> Create Customer`**: salva `customerId` e `document`.
 3. Execute **`Vehicles -> Create Vehicle`**: salva `vehicleId` e `plate`.
@@ -336,7 +336,7 @@ O projeto disponibiliza coleções completas e pré-configuradas para todas as 4
 
 ---
 
-## 🧪 Testes Automatizados, Cobertura e Segurança
+## Testes Automatizados, Cobertura e Segurança
 
 ### Executar Testes Unitários e de Integração
 Os testes de integração conectam-se ao PostgreSQL real e se auto-ignoram caso o banco não esteja disponível, mantendo o comando `go test ./...` sempre verde:
@@ -366,7 +366,7 @@ Executa `govulncheck` e `gosec` fixados em versões sem poluir o `go.mod`:
 
 ---
 
-## 📁 Estrutura de Pastas do Projeto
+## Estrutura de Pastas do Projeto
 
 ```text
 automotive-workshop-api/

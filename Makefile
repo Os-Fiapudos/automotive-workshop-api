@@ -72,7 +72,7 @@ help: ## Mostra esta ajuda
 setup: ## Cria .env a partir de .env.example (não sobrescreve se já existe)
 	@if [ ! -f $(ENV_FILE) ]; then \
 		cp .env.example $(ENV_FILE); \
-		echo "✓ Arquivo $(ENV_FILE) criado a partir de .env.example"; \
+		echo "Arquivo $(ENV_FILE) criado a partir de .env.example"; \
 		echo "  Edite JWT_SECRET em $(ENV_FILE) antes de usar em produção!"; \
 	else \
 		echo "• $(ENV_FILE) já existe — nada a fazer."; \
@@ -84,7 +84,7 @@ setup: ## Cria .env a partir de .env.example (não sobrescreve se já existe)
 start: setup ## Sobe todos os serviços com Docker Compose
 	$(COMPOSE) up -d
 	@echo ''
-	@echo '✓ Todos os serviços estão rodando!'
+	@echo 'Todos os serviços estão rodando!'
 	@echo '  API:   http://localhost:$(API_PORT)'
 	@echo '  Adminer: http://localhost:$(shell grep -E '^ADMINER_PORT=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 8081)'
 	@echo '  Swagger: http://localhost:$(shell grep -E '^SWAGGER_UI_PORT=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 8082)'
@@ -93,7 +93,7 @@ start: setup ## Sobe todos os serviços com Docker Compose
 start-db: setup ## Sobe apenas o banco Postgres via Docker
 	$(COMPOSE) up -d db
 	@echo ''
-	@echo '✓ Postgres rodando em localhost:$(DB_PORT)'
+	@echo 'Postgres rodando em localhost:$(DB_PORT)'
 	@echo '  DATABASE_URL=$(DATABASE_URL)'
 
 .PHONY: logs
@@ -103,24 +103,24 @@ logs: ## Mostra logs dos containers
 .PHONY: stop
 stop: ## Para todos os serviços (mantém volumes)
 	$(COMPOSE) stop
-	@echo '✓ Serviços parados.'
+	@echo 'Serviços parados.'
 
 .PHONY: down
 down: ## Para e remove containers (mantém volumes)
 	$(COMPOSE) down
-	@echo '✓ Containers removidos.'
+	@echo 'Containers removidos.'
 
 .PHONY: clean
 clean: ## Para e remove containers + volumes (APAGA DADOS)
 	$(COMPOSE) down -v
-	@echo '✓ Containers e volumes removidos — dados apagados.'
+	@echo 'Containers e volumes removidos — dados apagados.'
 
 .PHONY: reset
 reset: setup clean start ## Recria banco do zero (apaga dados) + popula com seed
 	@sleep 3
 	$(MAKE) seed
 	@echo ''
-	@echo '✓ Reset completo! Banco recriado e populado com dados de exemplo.'
+	@echo 'Reset completo! Banco recriado e populado com dados de exemplo.'
 	@echo '  Usuário admin: admin@workshop.local / admin123'
 	@echo '  Faça login com: make login'
 
@@ -144,7 +144,7 @@ seed: ## Aplica dados de exemplo (seed.sql) no banco via Docker
 	@echo 'Copiando seed.sql para o container...'
 	$(COMPOSE) cp docs/seed.sql db:/tmp/seed.sql
 	$(COMPOSE) exec -T db psql -U $(DB_USER) -d $(DB_NAME) -f /tmp/seed.sql
-	@echo '✓ Seed aplicado com sucesso!'
+	@echo 'Seed aplicado com sucesso!'
 	@echo '  Usuário admin: admin@workshop.local / admin123'
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
@@ -187,4 +187,4 @@ schema: ## Recria o esquema do banco (apaga e recria tudo via schema.sql)
 	@echo 'ATENÇÃO: Isso vai apagar TODOS os dados existentes!'
 	$(COMPOSE) exec -T db psql -U $(DB_USER) -d $(DB_NAME) -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
 	$(COMPOSE) exec -T db psql -U $(DB_USER) -d $(DB_NAME) -f /docker-entrypoint-initdb.d/01-schema.sql
-	@echo '✓ Schema recriado a partir de docs/schema.sql'
+	@echo 'Schema recriado a partir de docs/schema.sql'
