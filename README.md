@@ -1,385 +1,409 @@
-# automotive-workshop-api
+# 🚗 Automotive Workshop API
 
-REST API for managing an automotive workshop's full service flow: registering customers and
-their vehicles, maintaining a catalog of products (parts/supplies) and services, opening
-service orders, running diagnosis and quote approval, tracking execution, and delivering the
-vehicle. A service order moves through
-`RECEIVED → IN_DIAGNOSIS → AWAITING_APPROVAL → IN_PROGRESS → COMPLETED → DELIVERED`,
-with a full audit trail of status changes and per-service execution timestamps kept
-alongside it.
+> **Tech Challenge — Fase 1 | Pós-Tech FIAP (Software Architecture)**  
+> REST API robusta para gerenciamento completo do ciclo de atendimento em uma oficina mecânica: cadastro de clientes e veículos, catálogo de serviços, controle de peças/insumos com estoque, abertura de Ordens de Serviço (OS), diagnóstico, composição e aprovação de orçamentos, execução de serviços com auditoria, baixa de peças, acompanhamento público pelo cliente e métricas operacionais.
 
+---
+
+## 👥 Integrantes do Grupo
+
+- **Jean Ferreira dos Santos Cruz Junior** — RM376169
+- **João Victor dos Santos Cerqueira** — RM376742
+- **Giovane Kenuy Soares Colognesi Rubira Cardona** — RM376443
+- **Augusto José Rizzi** — RM376822
+- **Lucas Guimarães Fabris** — RM376444
+
+---
+
+## 📌 Sumário
+
+1. [Visão Geral do Projeto](#-visão-geral-do-projeto)
+2. [Ciclo de Vida da Ordem de Serviço](#-ciclo-de-vida-da-ordem-de-serviço)
+3. [Arquitetura e Padrões](#-arquitetura-e-padrões)
+4. [Tecnologias, Bibliotecas e Dependências](#-tecnologias-bibliotecas-e-dependências)
+5. [Como Rodar o Projeto com Docker (Passo a Passo)](#-como-rodar-o-projeto-com-docker-passo-a-passo)
+6. [Credenciais de Teste e Dados Iniciais (Seed)](#-credenciais-de-teste-e-dados-iniciais-seed)
+7. [Documentação dos Endpoints da API](#-documentação-dos-endpoints-da-api)
+8. [Coleções para Testes (Bruno, Postman e Insomnia)](#-coleções-para-testes-bruno-postman-e-insomnia)
+9. [Testes Automatizados, Cobertura e Segurança](#-testes-automatizados-cobertura-e-segurança)
+10. [Estrutura de Pastas do Projeto](#-estrutura-de-pastas-do-projeto)
+
+---
+
+## 🎯 Visão Geral do Projeto
+
+A **Automotive Workshop API** foi desenvolvida para solucionar os principais desafios operacionais de oficinas mecânicas: desorganização no fluxo de atendimento, falta de rastreabilidade do status dos veículos, controle inadequado de peças e insumos em estoque, perda de histórico de orçamentos e dificuldade de comunicação com o cliente.
+
+### Principais Capacidades da Aplicação:
+- **Gestão de Clientes**: Suporte a Pessoa Física (CPF) e Pessoa Jurídica (CNPJ, incluindo o formato alfanumérico em vigor desde 2026), com validação rigorosa de dígitos verificadores e inativação lógica.
+- **Gestão de Veículos**: Vínculo obrigatório com cliente ativo, suporte a placas no padrão antigo e padrão Mercosul.
+- **Catálogo de Serviços e Produtos**: Cadastro de serviços (com preço e tempo estimado) e produtos (`PART` - peças de reposição ou `SUPPLY` - insumos consumíveis) com saldo de estoque e inativação lógica.
+- **Gestão de Estoque com Auditoria**: Ledger imutável de movimentações de estoque (`ENTRY`, `EXIT`, `LOSS`, `REVERSAL`), permitindo ajustes manuais, baixa automática vinculada à OS e estorno rastreável com atualização atômica de saldo.
+- **Ciclo Completo de Ordem de Serviço (OS)**: Abertura, início de diagnóstico, composição de orçamento com fotografia congelada de preços/descrições, envio de orçamento ao cliente, aprovação ou reprovação, início e conclusão de execuções de serviços individuais, finalização e entrega.
+- **Portal de Acompanhamento Público Seguro**: O cliente pode consultar o status do seu veículo e aprovar/reprovar o orçamento através de uma projeção de dados segura, sem necessidade de login administrativo, utilizando um token exclusivo da OS (`X-Tracking-Token`) sem expor dados sensíveis (PII).
+- **Métricas Operacionais**: Cálculo do tempo médio de execução por serviço com suporte a filtros de período.
+
+---
+
+## 🔄 Ciclo de Vida da Ordem de Serviço
+
+Toda Ordem de Serviço transita rigorosamente pelos seguintes estados:
+
+```
+                  ┌─────────────────┐
+                  │    RECEIVED     │ (Veículo recebido na oficina)
+                  └────────┬────────┘
+                           │ Iniciar Diagnóstico
+                           ▼
+                  ┌─────────────────┐
+                  │  IN_DIAGNOSIS   │ (Em diagnóstico e composição do orçamento)
+                  └────────┬────────┘
+                           │ Enviar Orçamento
+                           ▼
+                  ┌─────────────────┐
+                  │AWAITING_APPROVAL│ (Aguardando decisão do cliente)
+                  └────┬───────┬────┘
+      Cliente Aprova   │       │   Cliente Reprova
+    ┌──────────────────┘       └──────────────────┐
+    ▼                                             ▼
+┌───────────────┐                         ┌───────────────┐
+│  IN_PROGRESS  │ (Serviços em execução)  │   CANCELED    │ (OS cancelada)
+└───────┬───────┘                         └───────────────┘
+        │ Todas execuções concluídas + Finalização
+        ▼
+┌───────────────┐
+│   COMPLETED   │ (Serviços finalizados)
+└───────┬───────┘
+        │ Entrega do Veículo
+        ▼
+┌───────────────┐
+│   DELIVERED   │ (Veículo entregue ao cliente)
+└───────────────┘
+```
+
+---
+
+## 🏗 Arquitetura e Padrões
+
+O projeto foi construído seguindo os princípios de **Vertical Slice Architecture** (monólito modular orientado a funcionalidades):
+
+- **Fatias Verticais Independentes (`internal/features/`)**: Cada funcionalidade de negócio (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order`, `service-order-tracking`) encapsula suas próprias camadas de **Handler (HTTP)**, **Service (Regras de Domínio/Aplicação)**, **Repository (Acesso a Dados SQL)** e **Models/DTOs**.
+- **Desacoplamento entre Features**: Uma feature nunca importa diretamente outra feature. Quando é necessária comunicação ou validação cruzada (ex: criação de veículo validando se o cliente existe e está ativo), é utilizada a técnica de **Dependency Inversion** com *Adapters* definidos no ponto de composição (`cmd/api/main.go`).
+- **Núcleo Compartilhado (`internal/shared/`)**: Reservado estritamente para utilitários agnósticos de domínio: pool de conexões com o PostgreSQL, middlewares de autenticação, validação algorítmica de documentos, emissão/verificação de tokens e tratamento padronizado de erros.
+- **Composition Root Limpo (`cmd/api/main.go`)**: Responsável unicamente por ler configurações, abrir conexões, instanciar as dependências, montar os adaptadores e registrar as rotas no multiplexador HTTP nativo.
+
+---
+
+## 🧰 Tecnologias, Bibliotecas e Dependências
+
+A aplicação foi projetada com foco em alta performance, baixo acoplamento e dependências externas mínimas e deliberadas:
+
+| Tecnologia / Dependência | Versão | Finalidade e Justificativa |
+| :--- | :---: | :--- |
+| **Go** | `1.25` | Linguagem compilada com excelente performance, tipagem estática e segurança de memória. |
+| **`net/http` (stdlib)** | Nativo | Roteamento HTTP nativo utilizando as melhorias de padrões por método do Go (`http.ServeMux`), dispensando frameworks externos como Gin ou Fiber. |
+| **PostgreSQL** | `16` | Banco de dados relacional robusto com uso de UUID nativo (`pgcrypto`), ENUMs nativos, índices otimizados e transações ACID. |
+| **`github.com/jackc/pgx/v5`** | `v5.10.0` | Driver e pool de conexões (`pgxpool`) de alta performance para PostgreSQL em Go, sem overhead de ORMs pesados. |
+| **`github.com/golang-jwt/jwt/v5`** | `v5.2.2` | Geração, assinatura criptográfica (HS256) e validação de tokens JWT para autenticação administrativa. |
+| **`golang.org/x/crypto/bcrypt`** | `v0.55.0` | Hashing unidirecional com *salt* automático para armazenamento seguro de senhas no banco. |
+| **`github.com/google/uuid`** | `v1.6.0` | Manipulação e validação segura de identificadores únicos universais (UUID v4). |
+| **`github.com/stretchr/testify`** | `v1.11.1` | Biblioteca de asserções fluídas (`assert`, `require`) para garantir legibilidade nos testes unitários e de integração. |
+| **`gosec`** | `v2.28.0` | Scanner SAST (Static Application Security Testing) para análise de segurança e boas práticas no código Go. |
+| **`govulncheck`** | `v1.7.0` | Ferramenta oficial do time do Go para detecção de vulnerabilidades conhecidas em dependências e stdlib. |
+| **Docker & Docker Compose** | — | Conteinerização completa da aplicação, banco de dados, cliente web do banco (Adminer) e documentação interativa (Swagger UI). |
+
+---
+
+## 🚀 Como Rodar o Projeto com Docker (Passo a Passo)
+
+### Pré-requisitos
+- [Docker](https://docs.docker.com/get-docker/) instalado e em execução.
+- [Docker Compose](https://docs.docker.com/compose/install/) (ou plugin `docker compose` v2).
+- [Git](https://git-scm.com/) para clonar o repositório.
+- *(Opcional)* `make` para executar comandos simplificados via Makefile.
+
+---
+
+### Passo 1: Clonar o Repositório
 ```bash
-export DATABASE_URL=postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable
-go run ./cmd/api
+git clone https://github.com/Os-Fiapudos/automotive-workshop-api.git
+cd automotive-workshop-api
 ```
 
-(`DATABASE_URL` is required — the API refuses to start without it. Bring up Postgres first,
-e.g. with `docker compose up -d db`, or run everything via Docker Compose as below.)
+---
 
-## Stack
-
-**Go REST API** — Go API with the standard cmd/ + internal/ layout (handlers/models/services).
-Database access uses `pgx v5`; tests use the stdlib `testing` package plus `testify`
-(`require`/`assert`) for assertions.
-
-## Architecture
-
-**Vertical Slice (Feature-based)** — Organized by functionality; each feature gathers its own
-layers (handler, service, repository, model) in `internal/features/<feature>/`. See
-[specs/architecture.md](specs/architecture.md) for the current, code-observed architecture.
-Each implemented feature has its own requirements/design/tasks under `specs/`: `auth`,
-`customer-management`, `service-catalog`, `vehicle-management`, `product-management`, and the
-service order flow split into `service-order-opening`, `service-order-diagnosis-quote`,
-`service-order-quote-decision`, `service-order-execution`, `service-order-stock-usage`,
-`service-order-query`, `service-order-metrics`, and `service-order-tracking`.
-
-## API
-
-Every implemented endpoint is documented in [docs/openapi.yaml](docs/openapi.yaml):
-
-```
-GET    /health                                                     (public health check)
-```
-
-```
-POST   /api/v1/auth/login
-GET    /api/v1/auth/me
-```
-
-```
-POST   /api/v1/customers
-GET    /api/v1/customers
-GET    /api/v1/customers/{id}
-GET    /api/v1/customers/document/{document}
-PATCH  /api/v1/customers/{id}
-DELETE /api/v1/customers/{id}   (logical deactivation, not a physical delete)
-```
-
-```
-POST   /api/v1/vehicles
-GET    /api/v1/vehicles
-GET    /api/v1/vehicles/{id}
-GET    /api/v1/vehicles/plate/{plate}
-GET    /api/v1/vehicles/customer/{customerId}
-PATCH  /api/v1/vehicles/{id}    (brand, model, year, color only)
-DELETE /api/v1/vehicles/{id}    (logical deactivation, not a physical delete)
-```
-
-```
-POST   /api/v1/services
-GET    /api/v1/services
-GET    /api/v1/services/{id}
-PATCH  /api/v1/services/{id}
-DELETE /api/v1/services/{id}    (logical deactivation, not a physical delete)
-```
-
-```
-POST   /api/v1/products
-GET    /api/v1/products
-GET    /api/v1/products/{id}
-PATCH  /api/v1/products/{id}
-DELETE /api/v1/products/{id}    (logical deactivation, not a physical delete)
-POST   /api/v1/products/{id}/stock/adjustments
-GET    /api/v1/products/{id}/stock
-GET    /api/v1/products/{id}/movements
-```
-
-```
-POST   /api/v1/service-orders
-GET    /api/v1/service-orders
-GET    /api/v1/service-orders/{id}                                 (id or sequential code)
-GET    /api/v1/service-orders/metrics/average-execution-time
-POST   /api/v1/service-orders/{id}/diagnosis
-PUT    /api/v1/service-orders/{id}/quote
-GET    /api/v1/service-orders/{id}/quote
-POST   /api/v1/service-orders/{id}/quote/send
-POST   /api/v1/service-orders/{id}/executions
-POST   /api/v1/service-orders/{id}/executions/{executionId}/finish
-POST   /api/v1/service-orders/{id}/finalize
-POST   /api/v1/service-orders/{id}/deliver
-POST   /api/v1/service-orders/{id}/stock-movements
-GET    /api/v1/service-orders/{id}/stock-movements
-POST   /api/v1/service-orders/{id}/stock-movements/{movementId}/reversal
-```
-
-```
-GET    /api/v1/acompanhamento/{codigo}                             (unauthenticated, tracking token)
-POST   /api/v1/acompanhamento/{codigo}/orcamento/aprovar            (unauthenticated, tracking token)
-POST   /api/v1/acompanhamento/{codigo}/orcamento/reprovar           (unauthenticated, tracking token)
-```
-
-Except for the routes marked otherwise above (login itself, and the customer-facing
-`/acompanhamento` tracking routes), every route requires a
-JWT (`Authorization: Bearer <token>`, obtained from `POST /api/v1/auth/login`) — see
-[specs/auth/](specs/auth/) and [specs/vehicle-management/](specs/vehicle-management/) for the
-authentication contract, and `docs/openapi.yaml`'s `bearerAuth`/`trackingToken` security
-schemes for the exact per-endpoint requirement.
-
-### API documentation (Swagger)
-
-[docs/openapi.yaml](docs/openapi.yaml) is the OpenAPI 3.0 contract for every implemented
-endpoint. Browse it as Swagger UI locally via the `swagger-ui` service started by Docker
-Compose below:
-
-- **Swagger UI**: http://localhost:8082
-
-### Postman / Insomnia collection
-
-[docs/postman-collection.json](docs/postman-collection.json) (Postman v2.1) and
-[docs/insomnia-collection.json](docs/insomnia-collection.json) (Insomnia v4) cover all 47
-registered routes, grouped by feature. Postman: *Import* the JSON file. Insomnia: *Import
-from File* (Insomnia also imports the Postman file directly).
-
-Run `Auth -> Login` first: its test script stores the JWT in the `token` variable used by
-every protected request. The create requests likewise store the returned `id` into
-`customerId`, `vehicleId`, `serviceId`, `productId`, `serviceOrderId`, `orderCode`, and
-`trackingToken`, so running a folder top to bottom chains without manual copying. Point
-`baseUrl` at the environment under test (defaults to `http://localhost:8080`).
-
-The payloads are fictitious samples - do not commit real customer data or production
-credentials into these files.
-
-## Database
-
-The data model is documented in [docs/entities.md](docs/entities.md) and the corresponding PostgreSQL schema (tables, enums, indexes, and comments) in [docs/schema.sql](docs/schema.sql).
-
-Bring up the database (Postgres + Adminer + API) with Docker Compose:
+### Passo 2: Configurar o Arquivo de Variáveis de Ambiente
+Copie o arquivo de exemplo `.env.example` para `.env`:
 
 ```bash
 cp .env.example .env
+```
+
+> **Nota de Configuração**: O arquivo `.env` já vem pré-configurado com portas e credenciais funcionais para desenvolvimento:
+> - `POSTGRES_USER=workshop`
+> - `POSTGRES_PASSWORD=workshop`
+> - `POSTGRES_DB=automotive_workshop`
+> - `POSTGRES_PORT=5432`
+> - `API_PORT=8080`
+> - `ADMINER_PORT=8081`
+> - `SWAGGER_UI_PORT=8082`
+> - `JWT_SECRET=change-me-dev-only-please-generate-a-real-random-value`
+> - `JWT_TTL=1h`
+
+---
+
+### Passo 3: Iniciar os Containers
+
+Execute o comando do Docker Compose para construir a imagem da API e subir todos os serviços em segundo plano:
+
+```bash
 docker compose up -d
 ```
 
-- **Postgres**: `localhost:5432` (credentials in `.env`), with `docs/schema.sql` applied automatically on first startup.
-- **Adminer**: http://localhost:8081 — system `PostgreSQL`, server `db`, user/password/database as in `.env`.
-- **API**: http://localhost:8080/health
-- **Swagger UI**: http://localhost:8082
-
-### Migrations
-
-There is no separate migration tool (e.g. `golang-migrate`, `goose`) in this project today.
-[docs/schema.sql](docs/schema.sql) is the single source of truth for the database schema, and
-Postgres applies it automatically — via `docker-entrypoint-initdb.d` — only on the **initial
-creation** of the `db_data` volume. To apply a schema change (a new/edited table, column, or
-enum in `schema.sql`), recreate the volume so it re-runs the init script from scratch:
-
+*Ou utilizando o Makefile:*
 ```bash
-docker compose down -v
-docker compose up -d
+make start
 ```
 
-This discards any data in the local Postgres volume; reload sample data afterwards with the
-seed command below if needed.
+O Docker iniciará 4 serviços automaticamente:
+1. **`db`** (PostgreSQL 16): Aplica os scripts de schema (`docs/schema.sql`) e carga inicial (`docs/seed.sql`) na inicialização do volume.
+2. **`api`** (Go 1.25): Constrói e inicializa a API na porta `8080` assim que o banco estiver saudável (`healthcheck`).
+3. **`swagger-ui`**: Interface interativa com a documentação OpenAPI 3.0 na porta `8082`.
+4. **`adminer`**: Interface web para navegação e consultas no PostgreSQL na porta `8081`.
 
-### Sample data (seed)
+---
 
-[docs/seed.sql](docs/seed.sql) populates the database with customers, vehicles, products, services, and service orders covering the main statuses of the flow. It uses fixed IDs with `ON CONFLICT DO NOTHING`, so it can be re-run without duplicating data.
+### Passo 4: Verificar a Execução dos Serviços
 
-It is mounted as `/docker-entrypoint-initdb.d/02-seed.sql` and therefore **runs automatically right after `schema.sql`** on the initial creation of the Postgres volume — a fresh `docker compose up -d` already has the sample data and the administrative users below, with no extra step:
-
-| Email | Password |
-| --- | --- |
-| `admin@workshop.local` | `admin123` |
-| `soat-architecture@workshop.local` | `soat-architecture` |
-
-Both are dev/evaluation-only credentials — never use them outside a local environment.
-
-To re-apply it to a volume that already exists, copy the file into the container before running (avoids UTF-8 encoding issues that occur when using pipe/redirection from stdin on PowerShell):
+Confira se todos os containers estão saudáveis:
 
 ```bash
-docker compose cp docs/seed.sql db:/tmp/seed.sql
-docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
+docker compose ps
 ```
 
-Works the same way on PowerShell, Bash, Git Bash, macOS, and Linux.
-
-## Tests
+Teste o endpoint de verificação de saúde da API:
 
 ```bash
-go test ./...
+curl http://localhost:8080/health
+```
+**Resposta esperada:**
+```json
+{"status":"ok"}
 ```
 
-Unit tests run alongside each feature/shared package (`internal/features/*/*_test.go`,
-`internal/shared/*/*_test.go`) with no external dependency. Integration tests in
-`internal/handlers_test/` (one file per feature: `auth_test.go`, `customer_test.go`,
-`vehicle_test.go`, `product_test.go`, `service_catalog_test.go`, `service_order_test.go`,
-`service_order_quote_decision_test.go`, `service_order_metrics_test.go`,
-`service_order_tracking_test.go`, `sensitive_data_test.go`) connect to a real Postgres via
-`DATABASE_URL` (defaulting to the local docker-compose credentials) and **skip
-themselves** — they don't fail — when that database isn't reachable, so `go test ./...`
-passes either way.
+---
 
-To actually exercise them, the database needs **both** `docs/schema.sql` and
-`docs/seed.sql` applied — the seed is not optional here, because it creates the
-administrative user the authentication tests log in as (schema alone produces 74
-failures):
+### 🌐 URLs e Acessos Disponíveis
+
+| Serviço | URL de Acesso | Descrição |
+| :--- | :--- | :--- |
+| **API REST** | `http://localhost:8080` | Ponto de entrada da API. |
+| **Swagger UI** | `http://localhost:8082` | Documentação interativa completa (OpenAPI 3.0). |
+| **Adminer (DB Web)** | `http://localhost:8081` | Gerenciador do Postgres (Servidor: `db`, Usuário: `workshop`, Senha: `workshop`, Base: `automotive_workshop`). |
+| **Postgres Database** | `localhost:5432` | Conexão direta com o banco de dados. |
+
+---
+
+### 🛠 Comandos Úteis do Makefile e Docker
+
+| Ação | Comando com Makefile | Comando equivalente com Docker Compose |
+| :--- | :--- | :--- |
+| **Subir tudo** | `make start` | `docker compose up -d` |
+| **Ver logs da API e serviços** | `make logs` | `docker compose logs -f` |
+| **Parar os containers** | `make stop` | `docker compose stop` |
+| **Derrubar containers** | `make down` | `docker compose down` |
+| **Resetar banco do zero (apaga dados + reseed)** | `make reset` | `docker compose down -v && docker compose up -d` |
+| **Reaplicar dados de seed** | `make seed` | `docker compose cp docs/seed.sql db:/tmp/seed.sql && docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql` |
+| **Testar login via curl** | `make login` | *(via curl no endpoint `/api/v1/auth/login`)* |
+| **Abrir terminal psql no banco** | `make psql` | `docker compose exec db psql -U workshop -d automotive_workshop` |
+
+---
+
+## 🔑 Credenciais de Teste e Dados Iniciais (Seed)
+
+O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](docs/seed.sql)) contendo clientes, veículos, produtos, serviços, ordens de serviço e usuários administrativos:
+
+| Usuário / E-mail | Senha | Perfil |
+| :--- | :--- | :--- |
+| `admin@workshop.local` | `admin123` | Administrador da Oficina |
+| `soat-architecture@workshop.local` | `soat-architecture` | Administrador / Avaliação SOAT |
+
+---
+
+## 📖 Documentação dos Endpoints da API
+
+A API possui **47 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
+
+### Modelos de Autenticação:
+- 🔒 **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
+- 🎟️ **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
+- 🟢 **`Pública`**: Rotas abertas sem necessidade de credenciais.
+
+---
+
+### 1. Saúde e Autenticação
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/health` | 🟢 Pública | Verificação de liveness e status da API. |
+| `POST` | `/api/v1/auth/login` | 🟢 Pública | Autentica usuário administrativo e retorna o token JWT. |
+| `GET` | `/api/v1/auth/me` | 🔒 JWT | Retorna os dados do usuário autenticado. |
+
+### 2. Gestão de Clientes (`/customers`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `POST` | `/api/v1/customers` | 🔒 JWT | Cadastra um novo cliente (CPF ou CNPJ validado). |
+| `GET` | `/api/v1/customers` | 🔒 JWT | Lista clientes de forma paginada (`page`, `pageSize`). |
+| `GET` | `/api/v1/customers/{id}` | 🔒 JWT | Busca cliente por UUID. |
+| `GET` | `/api/v1/customers/document/{document}` | 🔒 JWT | Busca cliente por CPF ou CNPJ normalizado. |
+| `PATCH` | `/api/v1/customers/{id}` | 🔒 JWT | Atualiza dados cadastrais de um cliente. |
+| `DELETE` | `/api/v1/customers/{id}` | 🔒 JWT | Inativação lógica do cliente (`status = INACTIVE`). |
+
+### 3. Gestão de Veículos (`/vehicles`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `POST` | `/api/v1/vehicles` | 🔒 JWT | Cadastra veículo vinculado a um cliente ativo (placa antiga ou Mercosul). |
+| `GET` | `/api/v1/vehicles` | 🔒 JWT | Lista veículos de forma paginada. |
+| `GET` | `/api/v1/vehicles/{id}` | 🔒 JWT | Busca veículo por UUID. |
+| `GET` | `/api/v1/vehicles/plate/{plate}` | 🔒 JWT | Busca veículo por placa normalizada. |
+| `GET` | `/api/v1/vehicles/customer/{customerId}` | 🔒 JWT | Lista veículos vinculados a um cliente específico. |
+| `PATCH` | `/api/v1/vehicles/{id}` | 🔒 JWT | Atualiza marca, modelo, ano ou cor do veículo. |
+| `DELETE` | `/api/v1/vehicles/{id}` | 🔒 JWT | Inativação lógica do veículo (`status = INACTIVE`). |
+
+### 4. Catálogo de Serviços (`/services`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `POST` | `/api/v1/services` | 🔒 JWT | Cria um serviço no catálogo (preço obrigatório, tempo estimado opcional). |
+| `GET` | `/api/v1/services` | 🔒 JWT | Lista serviços ativos (suporta filtro `?active=true/false`). |
+| `GET` | `/api/v1/services/{id}` | 🔒 JWT | Busca serviço por UUID. |
+| `PATCH` | `/api/v1/services/{id}` | 🔒 JWT | Atualiza preço, descrição, nome ou tempo estimado. |
+| `DELETE` | `/api/v1/services/{id}` | 🔒 JWT | Inativação lógica do serviço (`active = false`). |
+
+### 5. Catálogo de Produtos e Estoque (`/products`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `POST` | `/api/v1/products` | 🔒 JWT | Cadastra peça (`PART`) ou insumo (`SUPPLY`). |
+| `GET` | `/api/v1/products` | 🔒 JWT | Lista produtos com filtros (`page`, `pageSize`, `type`, `status`). |
+| `GET` | `/api/v1/products/{id}` | 🔒 JWT | Busca produto por UUID. |
+| `PATCH` | `/api/v1/products/{id}` | 🔒 JWT | Atualiza dados cadastrais e preço do produto. |
+| `DELETE` | `/api/v1/products/{id}` | 🔒 JWT | Inativação lógica do produto (`status = INACTIVE`). |
+| `POST` | `/api/v1/products/{id}/stock/adjustments` | 🔒 JWT | Realiza ajuste manual de estoque (`ENTRY`, `EXIT`, `LOSS`) com auditoria. |
+| `GET` | `/api/v1/products/{id}/stock` | 🔒 JWT | Consulta saldo atual de estoque do produto. |
+| `GET` | `/api/v1/products/{id}/movements` | 🔒 JWT | Lista o histórico de movimentações de estoque do produto. |
+
+### 6. Ordens de Serviço — Ciclo de Atendimento (`/service-orders`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `POST` | `/api/v1/service-orders` | 🔒 JWT | Abre uma nova OS com status `RECEIVED` e emite o `trackingToken`. |
+| `GET` | `/api/v1/service-orders` | 🔒 JWT | Lista OSs com filtros avançados (`code`, `status`, `document`, `licensePlate`, período). |
+| `GET` | `/api/v1/service-orders/{id}` | 🔒 JWT | Detalha a OS completa (aceita UUID ou código sequencial numérico). |
+| `POST` | `/api/v1/service-orders/{id}/diagnosis` | 🔒 JWT | Inicia o diagnóstico da OS (`RECEIVED → IN_DIAGNOSIS`). |
+| `PUT` | `/api/v1/service-orders/{id}/quote` | 🔒 JWT | Compõe/versiona o orçamento com itens de produtos e serviços. |
+| `GET` | `/api/v1/service-orders/{id}/quote` | 🔒 JWT | Consulta o orçamento vinculado à OS. |
+| `POST` | `/api/v1/service-orders/{id}/quote/send` | 🔒 JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
+| `POST` | `/api/v1/service-orders/{id}/executions` | 🔒 JWT | Registra o início de execução de um serviço específico da OS. |
+| `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | 🔒 JWT | Registra a conclusão da execução do serviço. |
+| `POST` | `/api/v1/service-orders/{id}/finalize` | 🔒 JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |
+| `POST` | `/api/v1/service-orders/{id}/deliver` | 🔒 JWT | Registra a entrega do veículo ao cliente (`COMPLETED → DELIVERED`). |
+| `POST` | `/api/v1/service-orders/{id}/stock-movements` | 🔒 JWT | Dá baixa no estoque de peças/insumos consumidos na OS. |
+| `GET` | `/api/v1/service-orders/{id}/stock-movements` | 🔒 JWT | Lista as peças e movimentações de estoque vinculadas à OS. |
+| `POST` | `/api/v1/service-orders/{id}/stock-movements/{movementId}/reversal` | 🔒 JWT | Estorna uma movimentação de estoque da OS, restaurando o saldo. |
+| `GET` | `/api/v1/service-orders/metrics/average-execution-time` | 🔒 JWT | Retorna a métrica de tempo médio de execução agrupado por serviço. |
+
+### 7. Acompanhamento Público e Decisão pelo Cliente (`/acompanhamento`)
+| Método | Endpoint | Proteção | Descrição |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/api/v1/acompanhamento/{codigo}` | 🎟️ Token | Consulta pública reduzida da OS (não expõe PII nem dados internos). |
+| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/aprovar` | 🎟️ Token | Cliente aprova o orçamento (`AWAITING_APPROVAL → IN_PROGRESS`). |
+| `POST` | `/api/v1/acompanhamento/{codigo}/orcamento/reprovar` | 🎟️ Token | Cliente reprova o orçamento (`AWAITING_APPROVAL → CANCELED`). |
+
+---
+
+## 📬 Coleções para Testes (Bruno, Postman e Insomnia)
+
+O projeto disponibiliza coleções completas e pré-configuradas para todas as 47 rotas, com encadeamento automático de variáveis:
+
+1. **Bruno (Recomendado)**: Localizado na pasta [`bruno/`](bruno). Abra o diretório diretamente no aplicativo Bruno. Selecione o ambiente `Local`.
+2. **Postman**: Importe o arquivo [`docs/postman-collection.json`](docs/postman-collection.json).
+3. **Insomnia**: Importe o arquivo [`docs/insomnia-collection.json`](docs/insomnia-collection.json).
+
+### 💡 Fluxo de Execução Encadeado (sem copiar e colar IDs):
+1. Execute **`Auth -> Login`**: o script armazena o JWT na variável `token`.
+2. Execute **`Customers -> Create Customer`**: salva `customerId` e `document`.
+3. Execute **`Vehicles -> Create Vehicle`**: salva `vehicleId` e `plate`.
+4. Execute **`Services -> Create Service`** e **`Products -> Create Product`**: salvam `serviceId` e `productId`.
+5. Execute **`Service Orders -> Create Service Order`**: salva `serviceOrderId`, `trackingCode` e `trackingToken`.
+6. Prossiga pelo fluxo de diagnóstico, orçamento, aprovação e execução.
+
+---
+
+## 🧪 Testes Automatizados, Cobertura e Segurança
+
+### Executar Testes Unitários e de Integração
+Os testes de integração conectam-se ao PostgreSQL real e se auto-ignoram caso o banco não esteja disponível, mantendo o comando `go test ./...` sempre verde:
 
 ```bash
-docker compose up -d db
-docker compose cp docs/schema.sql db:/tmp/schema.sql
-docker compose cp docs/seed.sql   db:/tmp/seed.sql
-docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/schema.sql
-docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
-
-export DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable'
-export JWT_SECRET=dev-secret
-go test ./...
+# Roda toda a suíte de testes (com Docker rodando)
+DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' JWT_SECRET=dev-secret go test ./...
+```
+*Ou via Makefile:*
+```bash
+make test
 ```
 
-### Coverage
+### Validação de Cobertura de Código (RNF06 - Mínimo 80%)
+O script [`scripts/coverage.sh`](scripts/coverage.sh) afere a cobertura por pacote e aplica o *gate* estrito de 80% nos domínios críticos (`service-order`, `product`, `service-order-tracking`):
 
 ```bash
-scripts/coverage.sh                    # measure, print the table, fail below 80%
-COVERAGE_HTML=1 scripts/coverage.sh    # also write coverage/coverage.html
+DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' JWT_SECRET=dev-secret ./scripts/coverage.sh
 ```
 
-Enforces RNF06: at least 80% statement coverage on the critical domains
-(`service-order`, `product`, `service-order-tracking`), and prints every other package for
-information. Requires the same `DATABASE_URL` and `JWT_SECRET` as the integration tests and
-**refuses to run without them** — coverage measured over skipped tests would report roughly
-a third of the real figure. CI runs it on every push
-([.github/workflows/ci.yml](.github/workflows/ci.yml), job `coverage`).
-
-### Security scan
+### Análise Estática e Varredura de Segurança (SAST / Vulnerabilidades)
+Executa `govulncheck` e `gosec` fixados em versões sem poluir o `go.mod`:
 
 ```bash
-scripts/security-scan.sh
+./scripts/security-scan.sh
 ```
 
-Runs `govulncheck` (dependency and standard-library vulnerabilities) and `gosec` (SAST),
-both pinned to exact versions and executed via `go run <module>@<version>`, so nothing is
-added to `go.mod`. Output lands in `security/` (git-ignored) and is published as a CI
-artifact by the `security` job. The findings, their severity, and what was fixed are in
-[docs/security-report.md](docs/security-report.md).
+---
 
-## Project structure
+## 📁 Estrutura de Pastas do Projeto
 
-```mermaid
-flowchart TD
-  n0["automotive-workshop-api/"]
-  n1["cmd/"]
-  n0 --> n1
-  n2["api/"]
-  n1 --> n2
-  n3("main.go")
-  n2 --> n3
-  n4["internal/"]
-  n0 --> n4
-  n5["features/"]
-  n4 --> n5
-  n6["user/"]
-  n5 --> n6
-  n7("doc.go — placeholder, unimplemented")
-  n6 --> n7
-  n50["auth/"]
-  n5 --> n50
-  n51("model.go, dto.go, repository.go, service.go, handler.go, doc.go")
-  n50 --> n51
-  n30["customer/"]
-  n5 --> n30
-  n31("model.go, dto.go, repository.go, service.go, handler.go, errors.go, doc.go")
-  n30 --> n31
-  n52["service-catalog/"]
-  n5 --> n52
-  n53("model.go, dto.go, repository.go, service.go, handler.go, doc.go")
-  n52 --> n53
-  n40["vehicle/"]
-  n5 --> n40
-  n41("model.go, plate.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
-  n40 --> n41
-  n54["product/"]
-  n5 --> n54
-  n55("model.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
-  n54 --> n55
-  n56["service-order/"]
-  n5 --> n56
-  n57("model.go + execution_*.go, quote_*.go, query_*.go, metrics_*.go, stockusage_*.go, handler.go, doc.go")
-  n56 --> n57
-  n58["service-order-tracking/"]
-  n5 --> n58
-  n59("model.go, dto.go, repository.go, service.go, handler.go, httpsupport.go, errors.go, doc.go")
-  n58 --> n59
-  n8("doc.go")
-  n5 --> n8
-  n9["shared/"]
-  n4 --> n9
-  n32["document/"]
-  n9 --> n32
-  n33("document.go, cpf.go, cnpj.go, doc.go")
-  n32 --> n33
-  n34["apierror/"]
-  n9 --> n34
-  n60["httpx/"]
-  n9 --> n60
-  n35["config/"]
-  n9 --> n35
-  n36["database/"]
-  n9 --> n36
-  n61["token/"]
-  n9 --> n61
-  n62["middleware/"]
-  n9 --> n62
-  n63["trackingtoken/"]
-  n9 --> n63
-  n10("doc.go")
-  n9 --> n10
-  n11["handlers_test/"]
-  n4 --> n11
-  n12("auth_test.go, customer_test.go, vehicle_test.go, product_test.go, service_catalog_test.go, service_order_test.go, service_order_quote_decision_test.go, service_order_metrics_test.go, service_order_tracking_test.go")
-  n11 --> n12
-  n21["docs/"]
-  n0 --> n21
-  n22("entities.md")
-  n21 --> n22
-  n23("schema.sql")
-  n21 --> n23
-  n26("seed.sql")
-  n21 --> n26
-  n37("openapi.yaml")
-  n21 --> n37
-  n27["specs/"]
-  n0 --> n27
-  n28("README.md")
-  n27 --> n28
-  n29("architecture.md")
-  n27 --> n29
-  n64["auth/"]
-  n27 --> n64
-  n38["customer-management/"]
-  n27 --> n38
-  n65["service-catalog/"]
-  n27 --> n65
-  n42["vehicle-management/"]
-  n27 --> n42
-  n66["product-management/"]
-  n27 --> n66
-  n67["service-order-opening/, service-order-diagnosis-quote/, service-order-quote-decision/, service-order-execution/, service-order-stock-usage/, service-order-query/, service-order-metrics/, service-order-tracking/"]
-  n27 --> n67
-  n39("each: requirements.md, design.md, tasks.md")
-  n38 --> n39
-  n64 --> n39
-  n65 --> n39
-  n42 --> n39
-  n66 --> n39
-  n67 --> n39
-  n13("go.mod")
-  n0 --> n13
-  n14(".gitignore")
-  n0 --> n14
-  n24(".env.example")
-  n0 --> n24
-  n15("README.md")
-  n0 --> n15
-  n16("Dockerfile")
-  n0 --> n16
-  n25("docker-compose.yml")
-  n0 --> n25
-  n17[".github/"]
-  n0 --> n17
-  n18["workflows/"]
-  n17 --> n18
-  n19("ci.yml")
-  n18 --> n19
-  n20("LICENSE")
-  n0 --> n20
+```text
+automotive-workshop-api/
+├── cmd/
+│   └── api/
+│       └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
+├── internal/
+│   ├── features/                   # Fatias verticais (Vertical Slice Architecture)
+│   │   ├── auth/                   # Autenticação administrativa e login JWT
+│   │   ├── customer/               # Gestão de clientes (PF/PJ)
+│   │   ├── vehicle/                # Gestão de veículos
+│   │   ├── service-catalog/        # Catálogo de serviços
+│   │   ├── product/                # Catálogo de produtos e movimentação de estoque
+│   │   ├── service-order/          # Ciclo de vida da OS, orçamentos, execução e métricas
+│   │   └── service-order-tracking/ # Acompanhamento público do cliente
+│   ├── shared/                     # Código utilitário transversal e infraestrutura
+│   │   ├── apierror/               # Tratamento de erro padronizado (RFC 7807)
+│   │   ├── config/                 # Carregamento de variáveis de ambiente
+│   │   ├── database/               # Pool de conexões PostgreSQL (pgxpool)
+│   │   ├── document/               # Validadores algorítmicos de CPF e CNPJ
+│   │   ├── middleware/             # Middleware de autenticação JWT
+│   │   ├── token/                  # Gerenciador de emissão e verificação de JWT
+│   │   └── trackingtoken/          # Gerador e hash de token de rastreamento
+│   └── handlers_test/              # Testes de integração HTTP ponta a ponta
+├── bruno/                          # Coleção de requisições para o cliente Bruno
+├── docs/                           # Documentação arquitetural, OpenAPI, Postman e Schemas SQL
+│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (47 rotas)
+│   ├── schema.sql                  # Schema DDL completo do PostgreSQL
+│   ├── seed.sql                    # Dados de carga inicial para desenvolvimento e testes
+│   ├── postman-collection.json     # Coleção Postman v2.1
+│   └── insomnia-collection.json    # Coleção Insomnia v4
+├── scripts/                        # Scripts de automação de cobertura e segurança
+│   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
+│   └── security-scan.sh            # Varredura com gosec e govulncheck
+├── .env.example                    # Modelo de configuração de ambiente
+├── docker-compose.yml              # Orquestração local (API + Postgres + Swagger + Adminer)
+├── Dockerfile                      # Build multistage da API em Go
+├── Makefile                        # Atalhos de comandos para desenvolvimento
+└── go.mod                          # Módulo Go e dependências
 ```
