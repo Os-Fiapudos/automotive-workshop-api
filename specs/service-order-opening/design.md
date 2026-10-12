@@ -385,3 +385,148 @@ write, so it does not need to be inside the transaction).
 
 Every decision above satisfies a specific `requirements.md` item; `tasks.md` breaks this
 design into ordered implementation steps, each referencing the section here it implements.
+
+## 7. Requested products (added 2026-10-12, Fase 2 — `requirements.md` §7a)
+
+**Coordination with `specs/service-order-architecture-refactor/`**: §7.1–§7.4 below assume
+the current flat package (`model.go`, `service.go`, `repository.go`, `dto.go`). If that
+refactor lands first, the same changes apply to their relocated equivalents instead
+(`domain/service_order.go`, `usecase/create.go`, `adapter/postgres/repository.go`,
+`adapter/httpapi/dto.go`) — same reasoning
+`specs/monetary-value-precision/design.md` §5 and
+`specs/service-order-status-update/design.md` (opening note) already apply to their own
+changes; whichever of these two features is implemented second should check the other's
+actual landed layout rather than assuming this document's file names are still accurate.
+
+### 7.1 Domain layer
+
+`ServiceOrder` (`model.go`) gains `RequestedProductIDs []uuid.UUID` and a parallel
+`RequestedProductQuantities map[uuid.UUID]int` — mirroring exactly how
+`RequestedServiceIDs` is held, with the one addition (`quantity`) services don't need.
+`NewServiceOrder`'s signature gains a `requestedProducts []RequestedProduct` parameter,
+where `RequestedProduct` is a small new value type: `{ ProductID uuid.UUID; Quantity int
+}`. The constructor rejects (returns an error, not a panic) any entry with `Quantity <= 0`
+— the same "aggregate enforces its own structural invariants, existence checks live in the
+service layer" split §1.2 already uses for customer/vehicle ids.
+
+### 7.2 Application layer
+
+`ServiceOrderService.Create` gains one more validation step between "validate requested
+services" (existing step 6) and "build the aggregate" (existing step 7):
+
+6a. For each `RequestedProduct`, call `lookups.findActiveProductByID(ctx, productID)` —
+    **reusing** the method `specs/service-order-diagnosis-quote/design.md` already added to
+    `serviceOrderLookups` for quote pricing, rather than adding a second, near-identical
+    lookup. Return `ErrRequestedProductNotFound` (naming the missing/inactive id) when it
+    returns `ErrProductNotFound` — `findActiveProductByID` already excludes `INACTIVE`
+    products by its own `WHERE status = 'ACTIVE'` (per its existing implementation), so one
+    call covers both "doesn't exist" and "inactive" without a second query.
+
+No change to `productRef` (already has `ID`/`Status`/pricing fields from the quote
+feature) and no new `serviceOrderLookups` method — this is the one place in this change
+where an existing lookup is reused as-is instead of extended, unlike `customerRef`/
+`vehicleRef` in `specs/service-order-query/design.md` §1.6, because `findActiveProductByID`
+already returns everything this step needs (existence + active-status); no display field is
+missing (see §7.4).
+
+### 7.3 Persistence
+
+New join table, same shape as `service_order_requested_services` (§3.1) plus a `quantity`
+column:
+
+```sql
+CREATE TABLE IF NOT EXISTS service_order_requested_products (
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    product_id        UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    quantity          INTEGER NOT NULL CHECK (quantity > 0),
+    PRIMARY KEY (service_order_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_service_order_requested_products_product_id
+    ON service_order_requested_products (product_id);
+```
+
+`Create`'s transaction (§3.3) gains one more loop, after the existing
+`service_order_requested_services` insert loop and before the `service_order_history`
+insert:
+
+```go
+for _, rp := range order.RequestedProducts {
+    if _, err := tx.Exec(ctx,
+        `INSERT INTO service_order_requested_products (service_order_id, product_id, quantity) VALUES ($1, $2, $3)`,
+        order.ID, rp.ProductID, rp.Quantity,
+    ); err != nil {
+        return err
+    }
+}
+```
+
+No `products.current_stock` read or write happens anywhere in this transaction —
+`requirements.md` §7a.1 is enforced simply by not writing one; stock is only ever touched by
+`specs/service-order-stock-usage/`'s own, unrelated transaction.
+
+### 7.4 API layer
+
+`CreateRequest` (`dto.go`) gains `RequestedProducts []requestedProductInput`, where
+`requestedProductInput` is `{ ProductID string \`json:"productId"\`; Quantity int
+\`json:"quantity"\` }`; `Validate()` rejects a non-UUID `productId` or a `quantity <= 0` the
+same way it already rejects a malformed `requestedServiceIds` entry (400
+`VALIDATION_ERROR`, not a 404 — a structurally invalid id is a client input error,
+distinct from a well-formed id that just doesn't resolve to an `ACTIVE` product, which is
+404/409 per the table below).
+
+New row in the error-mapping table (`design.md` §1.5):
+
+| Situation | Status | `error.code` |
+| --- | --- | --- |
+| A requested product id does not exist, or exists but is `INACTIVE` | 404 | `PRODUCT_NOT_FOUND` |
+
+(`INACTIVE` maps to the same 404 as "not found" here — unlike the customer/vehicle
+`INACTIVE` cases, which are 409 because the customer/vehicle *id itself* is valid and
+central to the request's identity; a requested product is one line item among several, so
+treating an inactive one the same as an unknown one keeps the response shape uniform across
+every line-item rejection, service or product. `ErrRequestedServiceNotFound` already uses
+404, not 409, for the identical reason.)
+
+Response shape (§4.2) gains a `requestedProducts` array, parallel to `requestedServices`:
+
+```json
+"requestedProducts": [
+  { "id": "f0000000-...-0001", "code": 1, "name": "Brake pad (front)", "quantity": 2 }
+]
+```
+
+Built the same way `requestedServices`'s display data already is — one read query after the
+transaction commits (not inside it), against `products`, reusing `findActiveProductByID`'s
+result rather than a second roundtrip (the quantities come from the request, already known
+without a query).
+
+### 7.4a Documentation
+
+`docs/openapi.yaml`'s existing `POST /api/v1/service-orders` path (documented by
+`specs/service-order-query/design.md` §4, which already updated this document's
+`info.description`) gains `requestedProducts` in the request schema and the
+`PRODUCT_NOT_FOUND` response in the existing error schema — the same place
+`requestedServiceIds` and `SERVICE_NOT_FOUND` are already documented there, extended, not a
+new path.
+
+### 7.5 Testing strategy
+
+Extends §5 (not a new test file):
+- **Unit**: `NewServiceOrder` rejects `Quantity <= 0`; `service_test.go`'s fake
+  `serviceOrderLookups` gains the product-lookup cases already exercised by the quote
+  feature's own fake (reused, not re-implemented) — unknown product, inactive product,
+  success.
+- **Integration**: a requested-products success case (asserting `currentStock` is
+  unchanged after creation — the explicit proof for §7a.1), unknown/inactive product
+  rejection, non-positive quantity rejection (400, before any database write), and the
+  duplicate-product-id rollback case, exactly mirroring §5's existing duplicate-service-id
+  rollback test (`service_order_requested_products`'s own primary key producing the same
+  mid-transaction failure).
+
+## 8. Traceability (added 2026-10-12)
+
+| Requirement | Design section |
+| --- | --- |
+| §7a (requested products accepted, validated) | §7.1, §7.2, §7.4 |
+| §7a.1 (no stock movement/reservation at opening) | §7.3 |

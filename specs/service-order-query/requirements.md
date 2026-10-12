@@ -9,6 +9,12 @@ feature package; see `design.md` §1.1 for why).
 
 Source: Jira ticket "Consulta Administrativa de Ordens de Serviço" (RF11, RNF02, RNF04).
 
+**Changed on 2026-10-12** (Fase 2 Tech Challenge, `SOAT - Fase 2 - Tech challenge.pdf` p.3,
+"Listagem de ordens de serviço"): the Fase 2 brief mandates a specific default order and a
+default exclusion for this same endpoint. BR3 and AC1 below are updated accordingly; see the
+note under BR3 for the exact rule and for `CANCELED`'s inclusion, which the PDF itself does
+not address and was resolved as an explicit team decision instead of assumed.
+
 `internal/features/service-order/` currently only lets a caller *write* a service order
 (`POST /api/v1/service-orders`, `POST .../{id}/diagnosis`, `PUT .../{id}/quote`) and read
 back its own quote (`GET .../{id}/quote`). There is no way to list existing orders or see
@@ -28,8 +34,22 @@ this feature adds exactly that, as a read-only extension of the same aggregate.
 2. The listing accepts the following optional filters, combinable, all narrowing the result
    set (AND, not OR): service order code, status, customer CPF/CNPJ, vehicle license plate,
    and a creation-date range.
-3. The listing's default order is by creation date, most recent first, with the order code
-   (descending) as a stable tiebreaker.
+3. ~~The listing's default order is by creation date, most recent first, with the order code
+   (descending) as a stable tiebreaker.~~ **Changed on 2026-10-12** (Fase 2 Tech Challenge):
+   when the caller does not supply a `status` filter, the listing (a) excludes `COMPLETED`,
+   `DELIVERED`, and `CANCELED` orders (logical exclusion only — no row is deleted or
+   otherwise altered) and (b) orders the remaining orders by status priority —
+   `IN_PROGRESS` > `AWAITING_APPROVAL` > `IN_DIAGNOSIS` > `RECEIVED` — then oldest first
+   within a status (`created_at` ascending), with order code (ascending) as a stable
+   tiebreaker. When the caller *does* supply a `status` filter, both the exclusion and the
+   status-priority order are moot (every returned row already shares one status) and the
+   listing falls back to plain oldest-first (`created_at` ascending, `code` ascending) — an
+   explicit `status=COMPLETED`/`DELIVERED`/`CANCELED` therefore still works and returns
+   those orders; the PDF only asks to exclude terminal orders from "a listagem" (the
+   default/dashboard view), not to make them unfilterable. `CANCELED`'s exclusion
+   specifically is a team decision (not in the PDF's four-status priority list nor its
+   exclusion list, which only names "finalizadas e entregues") — excluded from the default
+   view by analogy with the other two terminal statuses.
 4. The detail view (`GET .../{id}` or `GET .../code/{code}`) shows: customer, vehicle,
    status, notes, the services requested at opening, the current quote (products/services,
    quantities, and unit/total prices) when one has been composed, and the full status-change
@@ -81,8 +101,12 @@ Both require `Authorization: Bearer <token>` (RNF02).
 
 ## 6. Acceptance criteria
 
-1. `GET /api/v1/service-orders` returns a paginated envelope (`data`, `page`, `pageSize`,
-   `total`, `totalPages`), most recent orders first, when called with no filters.
+1. ~~`GET /api/v1/service-orders` returns a paginated envelope (`data`, `page`, `pageSize`,
+   `total`, `totalPages`), most recent orders first, when called with no filters.~~
+   **Changed on 2026-10-12**: called with no filters, it returns a paginated envelope
+   ordered by status priority (`IN_PROGRESS` > `AWAITING_APPROVAL` > `IN_DIAGNOSIS` >
+   `RECEIVED`), oldest first within a status, excluding `COMPLETED`, `DELIVERED`, and
+   `CANCELED` orders (BR3).
 2. `GET /api/v1/service-orders?code=<code>` returns only the order with that code (or an
    empty page if none matches).
 3. `GET /api/v1/service-orders?status=<status>` returns only orders in that status.
@@ -101,6 +125,11 @@ Both require `Authorization: Bearer <token>` (RNF02).
    integer also returns `404` (it can never match a real order — see `design.md` §1.9).
 10. Every route in this feature returns `401` without a valid bearer token.
 11. `docs/openapi.yaml` documents both endpoints, their filters, and pagination.
+12. **Added 2026-10-12.** `GET /api/v1/service-orders?status=COMPLETED` (and `=DELIVERED`,
+    `=CANCELED`) still returns the matching orders — the default exclusion (BR3) only
+    applies when `status` is not supplied.
+13. **Added 2026-10-12.** Two orders in the same status, both present in an unfiltered
+    listing, appear with the older one (earlier `created_at`) first.
 
 ## 7. Open questions / discoveries resolved before or during implementation
 
