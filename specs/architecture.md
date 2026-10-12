@@ -1,4 +1,4 @@
-﻿# Current architecture â€” automotive-workshop-api
+# Current architecture â€” automotive-workshop-api
 
 This document describes the architecture **actually present in the code** of this
 repository as of this date. It does not describe the desired/planned architecture beyond

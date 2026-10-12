@@ -1,4 +1,4 @@
-﻿# Design â€” Service Order Stock Usage (FP-19)
+# Design â€” Service Order Stock Usage (FP-19)
 
 Satisfies: `requirements.md` (all sections). Extends `specs/service-order-execution/design.md`
 and `specs/service-order-quote-decision/design.md` rather than reopening their decisions
