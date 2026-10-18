@@ -41,8 +41,10 @@ type ServiceOrderDetail struct {
 	History           []*ServiceOrderHistory
 }
 
-// List retrieves a filtered, paginated page of service orders, most recent
-// first (requirements.md BR1-BR3).
+// List retrieves a filtered, paginated page of service orders. With no
+// status filter, it excludes COMPLETED/DELIVERED/CANCELED and orders by
+// status priority then oldest first; with a status filter, it orders
+// oldest first within that status (requirements.md BR1-BR3).
 func (service *ServiceOrderService) List(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
 	return service.lookups.listServiceOrders(ctx, filter, page, pageSize)
 }

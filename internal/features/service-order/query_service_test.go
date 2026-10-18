@@ -27,7 +27,7 @@ func seedListOrder(repo *fakeRepository, customerID, vehicleID uuid.UUID, status
 	return order
 }
 
-func TestListNoFilterReturnsMostRecentFirst(t *testing.T) {
+func TestListNoFilterOrdersOldestFirstWithinStatus(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
@@ -39,8 +39,60 @@ func TestListNoFilterReturnsMostRecentFirst(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, total)
 	require.Len(t, items, 2)
-	assert.Equal(t, newer.ID, items[0].Order.ID)
-	assert.Equal(t, older.ID, items[1].Order.ID)
+	assert.Equal(t, older.ID, items[0].Order.ID)
+	assert.Equal(t, newer.ID, items[1].Order.ID)
+}
+
+// TestListNoFilterOrdersByStatusPriority covers requirements.md's Fase 2
+// addendum to BR3/AC1: with no status filter, orders are grouped
+// IN_PROGRESS > AWAITING_APPROVAL > IN_DIAGNOSIS > RECEIVED regardless of
+// creation order, and COMPLETED/DELIVERED/CANCELED are excluded entirely.
+func TestListNoFilterOrdersByStatusPriority(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+
+	now := time.Now()
+	received := seedListOrder(repo, customerID, vehicleID, StatusReceived, now.Add(-10*time.Minute))
+	inDiagnosis := seedListOrder(repo, customerID, vehicleID, StatusInDiagnosis, now.Add(-9*time.Minute))
+	awaitingApproval := seedListOrder(repo, customerID, vehicleID, StatusAwaitingApproval, now.Add(-8*time.Minute))
+	inProgress := seedListOrder(repo, customerID, vehicleID, StatusInProgress, now.Add(-7*time.Minute))
+	seedListOrder(repo, customerID, vehicleID, StatusCompleted, now.Add(-6*time.Minute))
+	seedListOrder(repo, customerID, vehicleID, StatusDelivered, now.Add(-5*time.Minute))
+	seedListOrder(repo, customerID, vehicleID, StatusCanceled, now.Add(-4*time.Minute))
+
+	items, total, err := service.List(context.Background(), ListFilter{}, 1, 20)
+	require.NoError(t, err)
+	assert.Equal(t, 4, total)
+	require.Len(t, items, 4)
+	assert.Equal(t, inProgress.ID, items[0].Order.ID)
+	assert.Equal(t, awaitingApproval.ID, items[1].Order.ID)
+	assert.Equal(t, inDiagnosis.ID, items[2].Order.ID)
+	assert.Equal(t, received.ID, items[3].Order.ID)
+}
+
+// TestListExplicitTerminalStatusFilterBypassesDefaultExclusion covers
+// requirements.md AC12: status=COMPLETED/DELIVERED/CANCELED still returns
+// those orders, ordered oldest first, even though the default view excludes
+// them.
+func TestListExplicitTerminalStatusFilterBypassesDefaultExclusion(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+
+	now := time.Now()
+	olderCompleted := seedListOrder(repo, customerID, vehicleID, StatusCompleted, now.Add(-2*time.Hour))
+	newerCompleted := seedListOrder(repo, customerID, vehicleID, StatusCompleted, now)
+	seedListOrder(repo, customerID, vehicleID, StatusDelivered, now)
+	seedListOrder(repo, customerID, vehicleID, StatusCanceled, now)
+
+	status := string(StatusCompleted)
+	items, total, err := service.List(context.Background(), ListFilter{Status: &status}, 1, 20)
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	require.Len(t, items, 2)
+	assert.Equal(t, olderCompleted.ID, items[0].Order.ID)
+	assert.Equal(t, newerCompleted.ID, items[1].Order.ID)
 }
 
 func TestListFiltersByCode(t *testing.T) {
