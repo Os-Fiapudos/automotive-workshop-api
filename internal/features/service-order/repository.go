@@ -159,7 +159,8 @@ func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrder
 	return &PostgresServiceOrderRepository{pool: pool}
 }
 
-// Create persists order, its requested services, its creation history event,
+// Create persists order, its requested services and products, its creation
+// history event,
 // and its auto-generated tracking token in a single transaction (RNF07,
 // design.md §3.3; specs/service-order-tracking/design.md §5): if any step
 // fails, everything is rolled back — the API never leaves a service order
@@ -185,6 +186,17 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO service_order_requested_services (service_order_id, service_id) VALUES ($1, $2)`,
 			order.ID, serviceID,
+		); err != nil {
+			return "", err
+		}
+	}
+
+	// Requested products are recorded as demand only: products.current_stock
+	// is never read or written here (requirements.md §7a.1, design.md §7.3).
+	for _, product := range order.RequestedProducts {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO service_order_requested_products (service_order_id, product_id, quantity) VALUES ($1, $2, $3)`,
+			order.ID, product.ProductID, product.Quantity,
 		); err != nil {
 			return "", err
 		}

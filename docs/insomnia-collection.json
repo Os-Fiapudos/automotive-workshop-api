@@ -910,7 +910,7 @@
       "settingFollowRedirects": "global",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"customerId\": \"{{ _.customerId }}\",\n  \"vehicleId\": \"{{ _.vehicleId }}\",\n  \"requestedServiceIds\": [\n    \"{{ _.serviceId }}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}"
+        "text": "{\n  \"customerId\": \"{{ _.customerId }}\",\n  \"vehicleId\": \"{{ _.vehicleId }}\",\n  \"requestedServiceIds\": [\n    \"{{ _.serviceId }}\"\n  ],\n  \"requestedProducts\": [\n    {\n      \"productId\": \"{{ _.productId }}\",\n      \"quantity\": 2\n    }\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}"
       }
     },
     {

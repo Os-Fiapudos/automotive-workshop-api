@@ -77,25 +77,31 @@ tasks depend on earlier ones.
 
 ## 11. Fase 2 — requested products at opening (`design.md` §7, added 2026-10-12)
 
-- [ ] `docs/schema.sql` / `docs/entities.md`: add `service_order_requested_products` table
+- [x] `docs/schema.sql` / `docs/entities.md`: add `service_order_requested_products` table
       and document `ServiceOrder.requestedProducts` (`design.md` §7.3).
-- [ ] `model.go`: `RequestedProduct` value type; `ServiceOrder.RequestedProducts`;
+- [x] `model.go`: `RequestedProduct` value type; `ServiceOrder.RequestedProducts`;
       `NewServiceOrder` validates `Quantity > 0` per entry (`design.md` §7.1).
-- [ ] `service.go`: `Create` validates each requested product via the existing
+- [x] `service.go`: `Create` validates each requested product via the existing
       `findActiveProductByID` lookup (`design.md` §7.2); new `ErrRequestedProductNotFound`
       (`errors.go`).
-- [ ] `repository.go`: `Create`'s transaction inserts into
+- [x] `repository.go`: `Create`'s transaction inserts into
       `service_order_requested_products` (`design.md` §7.3) — no read/write of
       `products.current_stock` anywhere in this change.
-- [ ] `dto.go`: `CreateRequest.RequestedProducts` + validation; response gains
+- [x] `dto.go`: `CreateRequest.RequestedProducts` + validation; response gains
       `requestedProducts` (`design.md` §7.4); `httpsupport.go`/error table gains
       `PRODUCT_NOT_FOUND` (404).
-- [ ] Unit tests: constructor rejects non-positive quantity; service-layer product lookup
+- [x] Unit tests: constructor rejects non-positive quantity; service-layer product lookup
       cases (unknown, inactive, success) (`design.md` §7.5).
-- [ ] Integration tests: success case asserting `currentStock` unchanged; unknown/inactive
+- [x] Integration tests: success case asserting `currentStock` unchanged; unknown/inactive
       product rejection; non-positive quantity rejection; duplicate-product-id rollback case
       (`design.md` §7.5).
-- [ ] `docs/openapi.yaml`: add `requestedProducts` to `POST /api/v1/service-orders`'s
+- [x] `docs/openapi.yaml`: add `requestedProducts` to `POST /api/v1/service-orders`'s
       request schema and `PRODUCT_NOT_FOUND` to its error responses (`design.md` §7.4a).
-- [ ] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check the new
+- [x] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check the new
       `requirements.md` §6 checkboxes added under "Added 2026-10-12".
+- [x] `migrations/0002_service_order_requested_products.{up,down}.sql` (`design.md` §7.3,
+      added 2026-10-18).
+- [x] Explicit duplicate-product rejection (400 `VALIDATION_ERROR`) in DTO, service, and
+      aggregate; integration tests for the duplicate case and for rollback with requested
+      products present (`design.md` §7.4b).
+- [x] Postman/Insomnia/Bruno create-order requests gain `requestedProducts`.

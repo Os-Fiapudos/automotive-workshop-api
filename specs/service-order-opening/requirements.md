@@ -60,6 +60,16 @@ needs to validate a vehicle at order-opening time (see §7.2).
      `quantity`) happens at this step — stock is only ever debited later, through the
      existing `POST /api/v1/service-orders/{id}/stock-movements` endpoint
      (`specs/service-order-stock-usage/`), which this change does not touch.
+   - §7a.2 **Added 2026-10-18** (FP-27 / F2-US02 acceptance checklist: "Produto repetido tem
+     política explícita: rejeitar a demanda duplicada com erro documentado, sem gravação
+     parcial"; policy confirmed with the team before implementation). The same `productId`
+     appearing more than once in `requestedProducts` rejects the whole request with a
+     documented `400 VALIDATION_ERROR` (pointing at the repeated entry), before any database
+     write — duplicates are neither merged nor left to fail mid-transaction. The caller sends
+     one entry per product with its total quantity.
+   - §7a.3 The order, its requested services, its requested products, and its creation
+     history event are all written in the same transaction (extends §9 below): a failure at
+     any item rolls back every write.
 8. Creating the order must also record a `service_order_history` event
    (`event = 'creation'`, `previous_status = new_status = 'RECEIVED'` — see
    `docs/seed.sql`'s existing seed data for this exact convention already in use).
@@ -137,13 +147,20 @@ POST /api/v1/service-orders
 
 **Added 2026-10-12** (§7a):
 ```
-[ ] Requested products are persisted as the initial demand (no price, no stock movement)
-[ ] Reject when a requested product id does not exist in the catalog
-[ ] Reject when a requested product is INACTIVE
-[ ] Reject when a requested product's quantity is zero or negative
-[ ] The response returns the requested products (id, code, name, quantity)
-[ ] Opening an order with requestedProducts does not change any product's currentStock
-[ ] Unit and integration test coverage extended to the new product-validation rules
+[x] Requested products are persisted as the initial demand (no price, no stock movement)
+[x] Reject when a requested product id does not exist in the catalog
+[x] Reject when a requested product is INACTIVE
+[x] Reject when a requested product's quantity is zero or negative
+[x] The response returns the requested products (id, code, name, quantity)
+[x] Opening an order with requestedProducts does not change any product's currentStock
+[x] Unit and integration test coverage extended to the new product-validation rules
+```
+
+**Added 2026-10-18** (§7a.2, §7a.3):
+```
+[x] Reject a productId repeated in requestedProducts with 400 VALIDATION_ERROR, nothing persisted
+[x] A mid-transaction failure with requestedProducts present leaves no order and no requested-product row
+[x] service_order_requested_products is created by an incremental migration (migrations/0002_*)
 ```
 
 ## 7. Future requirements (explicitly deferred, not implemented here)
