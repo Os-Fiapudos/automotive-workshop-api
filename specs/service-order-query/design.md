@@ -105,16 +105,48 @@ because there is a business rule to check.
 
 ### 1.4 Sort order and pagination
 
-`ORDER BY service_orders.created_at DESC, service_orders.code DESC` — "most recent first"
-(BR3) is `created_at`, and `code DESC` is a deterministic tiebreaker for orders created in
-the same instant (matters once pagination is involved: an unstable tiebreak can duplicate or
-skip a row across pages). `page`/`pageSize` reuse the exact convention already duplicated
-per-feature in `customer`, `vehicle`, and `product` (`defaultPage = 1`, `defaultPageSize =
-20`, `maxPageSize = 100`, an out-of-range value is clamped rather than rejected) — this
-project has no shared pagination helper (`specs/architecture.md` §3 notes each feature
-duplicates its own `parseIntParam`), so this feature duplicates it too rather than
-introducing a `internal/shared/` package a single new feature doesn't justify on its own
-(`CLAUDE.md` §9.3).
+**Changed on 2026-10-12** (Fase 2 Tech Challenge; supersedes the original rule below, kept
+for history): when `filter.Status == nil` (no `status` query param), `listServiceOrders`
+adds `AND so.status NOT IN ('COMPLETED', 'DELIVERED', 'CANCELED')` to the `WHERE` chain
+built in §1.3, and orders by:
+
+```sql
+ORDER BY
+  CASE so.status
+    WHEN 'IN_PROGRESS'       THEN 1
+    WHEN 'AWAITING_APPROVAL' THEN 2
+    WHEN 'IN_DIAGNOSIS'      THEN 3
+    WHEN 'RECEIVED'          THEN 4
+  END,
+  so.created_at ASC,
+  so.code ASC
+```
+
+When `filter.Status != nil`, every returned row already shares one status, so the exclusion
+and the `CASE` are both skipped and the query orders by `so.created_at ASC, so.code ASC`
+instead — plain oldest-first. This is what keeps AC12 true: `status=COMPLETED` (or
+`DELIVERED`/`CANCELED`) still returns those orders, just not through the default,
+no-filter path. `requirements.md` BR3's note explains why `CANCELED` is excluded from the
+default view by team decision rather than by a literal reading of the PDF.
+
+`listServiceOrders`'s signature/call site does not change — `filter.Status`, already a
+parameter, is the only input the two branches above need; the branch is an `if` in the query
+builder next to the existing filter `if`s in §1.3, not a new parameter.
+
+---
+
+Original, pre-Fase-2 rule (superseded above): `ORDER BY service_orders.created_at DESC,
+service_orders.code DESC` — "most recent first" was this feature's original BR3, and
+`code DESC` was a deterministic tiebreaker for orders created in the same instant (matters
+once pagination is involved: an unstable tiebreak can duplicate or skip a row across pages).
+
+`page`/`pageSize` reuse the exact convention already duplicated per-feature in `customer`,
+`vehicle`, and `product` (`defaultPage = 1`, `defaultPageSize = 20`, `maxPageSize = 100`, an
+out-of-range value is clamped rather than rejected) — this project has no shared pagination
+helper (`specs/architecture.md` §3 notes each feature duplicates its own `parseIntParam`),
+so this feature duplicates it too rather than introducing a `internal/shared/` package a
+single new feature doesn't justify on its own (`CLAUDE.md` §9.3). Unaffected by the
+2026-10-12 change above.
 
 ### 1.5 Response envelope
 
@@ -339,7 +371,11 @@ hand-written fakes, no mocking library.
 accepting either a UUID or a sequential code, per §1.2), documenting every filter query
 parameter, the pagination parameters, the `bearerAuth` requirement, and the list/detail
 response schemas —
-`requirements.md` AC11. The existing `/api/v1/customers`/`/api/v1/vehicles` paths and the
+`requirements.md` AC11. **Changed on 2026-10-12**: the `GET /api/v1/service-orders`
+description is updated to document the new default ordering/exclusion rule (§1.4) and the
+`status`-filter override (AC12), replacing the old "most recent first" wording.
+
+The existing `/api/v1/customers`/`/api/v1/vehicles` paths and the
 document's `info.description` (which currently says `ServiceOrder`/`Quote` are "documented in
 docs/entities.md but not yet implemented/exposed via HTTP") are updated to stop claiming
 service orders aren't exposed via HTTP, without otherwise touching content out of this
@@ -361,3 +397,6 @@ feature's scope (auth, service catalog, product remain undocumented there, uncha
 | AC8 (detail contents) | §1.8, §1.9 |
 | AC10 (401 without token) | §1.2 |
 | AC11 (OpenAPI) | §4 |
+| BR3 Fase 2 addendum / AC1 (status priority, oldest-first, exclusion) | §1.4 |
+| AC12 (explicit status filter bypasses exclusion) | §1.4 |
+| AC13 (oldest-first within a status) | §1.4 |

@@ -74,3 +74,28 @@ tasks depend on earlier ones.
 - [ ] `DATABASE_URL=... go test ./...` (integration tests actually exercised, not skipped).
 - [ ] Re-check every acceptance-criteria checkbox in `requirements.md` §6 against the
       implementation before calling the feature done.
+
+## 11. Fase 2 — requested products at opening (`design.md` §7, added 2026-10-12)
+
+- [ ] `docs/schema.sql` / `docs/entities.md`: add `service_order_requested_products` table
+      and document `ServiceOrder.requestedProducts` (`design.md` §7.3).
+- [ ] `model.go`: `RequestedProduct` value type; `ServiceOrder.RequestedProducts`;
+      `NewServiceOrder` validates `Quantity > 0` per entry (`design.md` §7.1).
+- [ ] `service.go`: `Create` validates each requested product via the existing
+      `findActiveProductByID` lookup (`design.md` §7.2); new `ErrRequestedProductNotFound`
+      (`errors.go`).
+- [ ] `repository.go`: `Create`'s transaction inserts into
+      `service_order_requested_products` (`design.md` §7.3) — no read/write of
+      `products.current_stock` anywhere in this change.
+- [ ] `dto.go`: `CreateRequest.RequestedProducts` + validation; response gains
+      `requestedProducts` (`design.md` §7.4); `httpsupport.go`/error table gains
+      `PRODUCT_NOT_FOUND` (404).
+- [ ] Unit tests: constructor rejects non-positive quantity; service-layer product lookup
+      cases (unknown, inactive, success) (`design.md` §7.5).
+- [ ] Integration tests: success case asserting `currentStock` unchanged; unknown/inactive
+      product rejection; non-positive quantity rejection; duplicate-product-id rollback case
+      (`design.md` §7.5).
+- [ ] `docs/openapi.yaml`: add `requestedProducts` to `POST /api/v1/service-orders`'s
+      request schema and `PRODUCT_NOT_FOUND` to its error responses (`design.md` §7.4a).
+- [ ] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check the new
+      `requirements.md` §6 checkboxes added under "Added 2026-10-12".

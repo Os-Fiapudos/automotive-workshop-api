@@ -7,7 +7,7 @@ meta {
 post {
   url: {{baseUrl}}/api/v1/customers
   body: json
-  auth: none
+  auth: inherit
 }
 
 body:json {
@@ -22,5 +22,8 @@ body:json {
 script:post-response {
   if (res.body && res.body.id) {
     bru.setEnvVar("customerId", res.body.id);
+  }
+  if (res.body && res.body.document) {
+    bru.setEnvVar("document", res.body.document);
   }
 }

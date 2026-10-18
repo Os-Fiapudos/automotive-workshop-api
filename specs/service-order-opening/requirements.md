@@ -46,6 +46,20 @@ needs to validate a vehicle at order-opening time (see §7.2).
    (`Quote`/`RF05`, out of scope — see `specs/service-order-opening` future work, not yet
    specified). Each requested service id must reference an existing `Service` in the
    catalog; an unknown id rejects the whole request.
+7a. **Added 2026-10-12** (Fase 2 Tech Challenge, `SOAT - Fase 2 - Tech challenge.pdf` p.3,
+   "Abertura de Ordem de Serviço (OS): receber os dados do cliente, veículo, serviços e
+   peças"). The order also accepts an initial list of requested products/parts
+   (`requestedProducts`, each `{productId, quantity}`), the same kind of unpriced initial
+   demand §7 already defines for services — not a reservation and not a stock debit (see
+   §7a.1 below, and the Fase 2 team decision recorded in `GAPS-FASE-2.md` §7 item 8: stock
+   reservation/automatic debit stay out of scope for Fase 2). Each `productId` must
+   reference an existing, `ACTIVE` `Product`; `quantity` must be a positive integer. An
+   unknown or `INACTIVE` product, or a non-positive quantity, rejects the whole request —
+   same all-or-nothing behavior §7 already has for an unknown requested service.
+   - §7a.1 No stock movement, reservation, or availability check (`currentStock` vs.
+     `quantity`) happens at this step — stock is only ever debited later, through the
+     existing `POST /api/v1/service-orders/{id}/stock-movements` endpoint
+     (`specs/service-order-stock-usage/`), which this change does not touch.
 8. Creating the order must also record a `service_order_history` event
    (`event = 'creation'`, `previous_status = new_status = 'RECEIVED'` — see
    `docs/seed.sql`'s existing seed data for this exact convention already in use).
@@ -59,10 +73,11 @@ needs to validate a vehicle at order-opening time (see §7.2).
 In scope for this feature:
 
 - `ServiceOrder` domain aggregate: id, code, customer, vehicle, opened-at, status
-  (always `RECEIVED` on creation), notes, requested services, timestamps.
+  (always `RECEIVED` on creation), notes, requested services, **requested products
+  (added 2026-10-12, §7a)**, timestamps.
 - One use case: create a service order (`POST /api/v1/service-orders`).
 - Validation: customer exists/active, vehicle exists/active/owned by customer, requested
-  services exist.
+  services exist, **requested products exist and are `ACTIVE` (added 2026-10-12, §7a)**.
 - Transactional creation (order + requested services + first history event).
 - `vehicles.status` (`ACTIVE`/`INACTIVE`) added to the schema — required by rule §3, but
   is not a vehicle-management feature; only what the create-order validation needs.
@@ -118,6 +133,17 @@ POST /api/v1/service-orders
 [ ] Unit tests for the aggregate (always starts RECEIVED, no way to set another status)
 [ ] Unit tests for service-layer validation (customer/vehicle/service rules) via an in-memory fake repository
 [ ] Integration tests for the endpoint, including the transactional-rollback case
+```
+
+**Added 2026-10-12** (§7a):
+```
+[ ] Requested products are persisted as the initial demand (no price, no stock movement)
+[ ] Reject when a requested product id does not exist in the catalog
+[ ] Reject when a requested product is INACTIVE
+[ ] Reject when a requested product's quantity is zero or negative
+[ ] The response returns the requested products (id, code, name, quantity)
+[ ] Opening an order with requestedProducts does not change any product's currentStock
+[ ] Unit and integration test coverage extended to the new product-validation rules
 ```
 
 ## 7. Future requirements (explicitly deferred, not implemented here)

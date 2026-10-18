@@ -1,4 +1,4 @@
-﻿# Requirements Specification: Product & Stock Management
+# Requirements Specification: Product & Stock Management
 
 ## 1. Feature Purpose
 Manage replacement parts (`PART`) and consumable supplies (`SUPPLY`) catalog, stock adjustments, and balance querying in the automotive workshop system (`Modules/CatalogoEstoque/Produtos`), guaranteeing stock integrity, non-negative balances, and concurrent safety.

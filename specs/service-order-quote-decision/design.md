@@ -264,3 +264,113 @@ be the exact cross-feature coupling `CLAUDE.md` §9.2 forbids for a single strin
 
 Every decision above satisfies a specific `requirements.md` item; `tasks.md` breaks this
 design into the ordered steps actually taken.
+
+## 5. External-system notification channel (added 2026-10-12, `requirements.md` §9)
+
+**Coordination with `specs/service-order-architecture-refactor/`**: §5.1–§5.4 below assume
+the current flat package. If that refactor lands first, `decideQuote`'s refactor (§5.2)
+happens in `usecase/quote_decision.go`, the new route/handler (§5.3) in
+`adapter/httpapi/quote_decision_handler.go`, and the config wiring (§5.4) is unaffected
+(still `cmd/api/main.go`) — same note
+`specs/service-order-opening/design.md` §7 and
+`specs/service-order-status-update/design.md` already carry for their own Fase 2 additions.
+
+### 5.1 Shape: one endpoint, shared-secret header, reused decision logic
+
+```
+POST /api/v1/service-orders/{id}/quote/decision
+X-External-Notification-Secret: <shared secret>
+Content-Type: application/json
+
+{"decision": "approved"}
+```
+
+- `{id}` is the order's technical id (UUID) — unlike the customer-facing routes, this
+  channel is not nested under `/acompanhamento/{codigo}`, since it is not part of that
+  customer-tracking surface at all; it sits alongside this package's other
+  administrative-shaped routes (`{id}/diagnosis`, `{id}/quote`), which already identify the
+  order by UUID.
+- `decision` is the single field: `"approved"` or `"rejected"`; any other value is `400
+  VALIDATION_ERROR`.
+- No `requireAuth` (the administrative JWT) — the caller is an external system, not a
+  logged-in administrator; authenticated instead by comparing
+  `X-External-Notification-Secret` against a server-held secret (constant-time comparison,
+  `crypto/subtle.ConstantTimeCompare`, the same category of comparison
+  `internal/shared/token` already uses for JWT signature verification, applied here to avoid
+  a timing side-channel on the new secret).
+
+### 5.2 Application layer: one more entry point into `decideQuote`
+
+```go
+func (s *ServiceOrderService) DecideQuoteExternal(ctx context.Context, serviceOrderID uuid.UUID, decision QuoteDecision) (*ServiceOrder, *Quote, error)
+```
+
+Resolves the order by id (not by code+token, since there is no tracking token on this
+path), then calls the same private `decideQuote` core §1.6 already factored out —
+specifically the part of it *after* token/order resolution: load the quote, check
+`Status == QuoteStatusPending`, call `order.approveQuote()`/`order.rejectQuote()`, persist
+via the existing `DecideQuote` repository method. `decideQuote` is refactored to accept an
+already-resolved `*ServiceOrder` instead of resolving it itself, with the two existing
+token-based callers (`ApproveQuote`/`RejectQuote`) and this new one each doing their own
+resolution step first — this keeps the actual decision logic (and its RNF07 transaction,
+§1.5) in exactly one place, satisfying `requirements.md` §9 item 3 by construction rather
+than by duplicating the rule.
+
+### 5.3 API layer
+
+`handler.go`:
+
+```go
+mux.Handle("POST /api/v1/service-orders/{id}/quote/decision", wrap(handler.decideQuoteExternal))
+```
+
+`decideQuoteExternal`: reads `X-External-Notification-Secret`, compares it against
+`service.externalNotificationSecret` (a field set once at construction from
+`os.Getenv("EXTERNAL_NOTIFICATION_SECRET")` in `cmd/api/main.go`, the same "config comes
+from env, fails fast if missing" posture `internal/shared/config` already applies to
+`JWT_SECRET`/`DATABASE_URL`); a mismatch or empty header is `401`
+(`error.code = INVALID_EXTERNAL_SECRET`), before the body is even decoded, so a caller with
+a wrong secret learns nothing about whether `{id}` exists. On a match, decodes `{"decision":
+...}`, validates it is `approved`/`rejected`, and calls `DecideQuoteExternal`. Response
+reuses the existing `quoteDecisionResponse`/`toQuoteDecisionResponse` (§1.7) unchanged — the
+same reduced public shape, since an external system gets no more internal detail than the
+customer's own browser does.
+
+New row in the error-mapping table (`design.md` §1.7):
+
+| Error | Status | `error.code` |
+| --- | --- | --- |
+| Missing/incorrect `X-External-Notification-Secret` | 401 | `INVALID_EXTERNAL_SECRET` |
+| `decision` not `approved`/`rejected` | 400 | `VALIDATION_ERROR` |
+
+### 5.4 Configuration
+
+`.env.example` gains `EXTERNAL_NOTIFICATION_SECRET=` (empty, documented, no real value —
+same convention every other secret in that file already follows). `cmd/api/main.go` fails
+fast (`log.Fatalf`) if it is unset, mirroring exactly how it already fails fast on a missing
+`JWT_SECRET` — this is a deliberate choice over silently disabling the endpoint, so a
+misconfigured deployment is caught at startup, not the first time an external system calls
+in. In Kubernetes (`specs/kubernetes-deployment/`), this becomes a `Secret` key injected as
+an env var, the same mechanism `JWT_SECRET`/`DATABASE_URL` use there.
+
+### 5.5 Why a static shared secret, not HMAC (resolves `requirements.md` §9.2)
+
+A per-request HMAC signature (over the body, with a shared signing key) is the more common
+webhook-authentication pattern and was considered, but rejected for this MVP: it requires
+the external system to implement request signing to a spec this project would also have to
+publish and version, for a single, low-volume, internal-network endpoint whose only
+consumer is a system the workshop itself configures. A static secret in a header meets
+`requirements.md` §9 item 1's actual requirement (authenticate the caller as "the external
+system," not the customer) with the same amount of code this project's other
+single-secret-style checks already use. If a second external system or a public-internet
+exposure is introduced later, upgrading to HMAC is a follow-up, not a Fase 2 blocker.
+
+## 6. Traceability (added 2026-10-12)
+
+| Requirement | Design section |
+| --- | --- |
+| §9 items 1, 4, 5 (external auth) | §5.1, §5.3, §5.4 |
+| §9 item 2 (single endpoint, `decision` field) | §5.1 |
+| §9 item 3 / AC19 (same business rules, no duplicated logic) | §5.2 |
+| AC15–AC18 | §5.1, §5.3 |
+| AC20 (existing endpoints unchanged) | §5.1 (additive route, no change to §1.7's existing handlers) |
