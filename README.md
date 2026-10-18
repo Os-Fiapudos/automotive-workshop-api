@@ -149,6 +149,7 @@ cp .env.example .env
 > - `SWAGGER_UI_PORT=8082`
 > - `JWT_SECRET=change-me-dev-only-please-generate-a-real-random-value`
 > - `JWT_TTL=1h`
+> - `EXTERNAL_NOTIFICATION_SECRET=change-me-dev-only-external-notification-secret`
 
 ---
 
@@ -232,11 +233,12 @@ O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](do
 
 ## Documentação dos Endpoints da API
 
-A API possui **47 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
+A API possui **48 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
 
 ### Modelos de Autenticação:
 - **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
 - **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
+- **`X-External-Notification-Secret`**: Canal de sistema externo para decisão de orçamento; não usa JWT e exige o segredo compartilhado configurado em `EXTERNAL_NOTIFICATION_SECRET`.
 - **`Pública`**: Rotas abertas sem necessidade de credenciais.
 
 ---
@@ -300,6 +302,7 @@ A API possui **47 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 | `PUT` | `/api/v1/service-orders/{id}/quote` | JWT | Compõe/versiona o orçamento com itens de produtos e serviços. |
 | `GET` | `/api/v1/service-orders/{id}/quote` | JWT | Consulta o orçamento vinculado à OS. |
 | `POST` | `/api/v1/service-orders/{id}/quote/send` | JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
+| `POST` | `/api/v1/service-orders/{id}/quote/decision` | Segredo externo | Sistema externo notifica a decisão do cliente (`{"decision":"approved"\|"rejected"}` → `IN_PROGRESS`/`CANCELED`); `409` se já decidido. |
 | `POST` | `/api/v1/service-orders/{id}/executions` | JWT | Registra o início de execução de um serviço específico da OS. |
 | `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | JWT | Registra a conclusão da execução do serviço. |
 | `POST` | `/api/v1/service-orders/{id}/finalize` | JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |
@@ -320,7 +323,7 @@ A API possui **47 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 
 ## Coleções para Testes (Bruno, Postman e Insomnia)
 
-O projeto disponibiliza coleções completas e pré-configuradas para todas as 47 rotas, com encadeamento automático de variáveis:
+O projeto disponibiliza coleções completas e pré-configuradas para todas as 48 rotas, com encadeamento automático de variáveis:
 
 1. **Bruno (Recomendado)**: Localizado na pasta [`bruno/`](bruno). Abra o diretório diretamente no aplicativo Bruno. Selecione o ambiente `Local`.
 2. **Postman**: Importe o arquivo [`docs/postman-collection.json`](docs/postman-collection.json).
@@ -393,7 +396,7 @@ automotive-workshop-api/
 │   └── handlers_test/              # Testes de integração HTTP ponta a ponta
 ├── bruno/                          # Coleção de requisições para o cliente Bruno
 ├── docs/                           # Documentação arquitetural, OpenAPI, Postman e Schemas SQL
-│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (47 rotas)
+│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (48 rotas)
 │   ├── schema.sql                  # Schema DDL completo do PostgreSQL
 │   ├── seed.sql                    # Dados de carga inicial para desenvolvimento e testes
 │   ├── postman-collection.json     # Coleção Postman v2.1

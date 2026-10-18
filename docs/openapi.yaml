@@ -1502,6 +1502,93 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/service-orders/{id}/quote/decision:
+    post:
+      tags:
+      - service-orders
+      summary: Relay a customer's quote decision from an external system
+      description: 'External-system notification channel (specs/service-order-quote-decision/requirements.md
+        §9, Fase 2). Authenticated ONLY by the shared secret in X-External-Notification-Secret
+        — the administrative JWT is neither required nor accepted as a substitute.
+        The secret is checked before the order or the body are looked at, so a missing/wrong
+        secret is always 401 with no side effect and reveals nothing about whether
+        {id} exists. Applies exactly the same rules as the customer-facing .../orcamento/aprovar|reprovar
+        routes, through the same decision core and transaction: the quote must have
+        been sent (order AWAITING_APPROVAL) and still be PENDING; "approved" moves
+        the quote to APPROVED and the order to IN_PROGRESS, "rejected" moves the quote
+        to REJECTED and the order to CANCELED, and one history entry (approval/cancellation)
+        is written in the same transaction. Retry guidance for the external caller:
+        a 409 QUOTE_ALREADY_DECIDED means a decision is already recorded (through
+        either channel) — do not retry; a network failure or 5xx can be retried safely,
+        since a decision that did commit makes the retry a 409 rather than a duplicate.
+
+        '
+      operationId: decideServiceOrderQuoteExternal
+      security:
+      - externalNotificationSecret: []
+      parameters:
+      - $ref: '#/components/parameters/ServiceOrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalQuoteDecisionRequest'
+            examples:
+              approved:
+                value:
+                  decision: approved
+              rejected:
+                value:
+                  decision: rejected
+      responses:
+        '200':
+          description: The decision was recorded — same reduced projection as the
+            customer-facing decision routes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrderQuoteDecision'
+        '400':
+          description: 'Body is not valid JSON (code `BAD_REQUEST`), or `decision`
+            is not exactly `approved`/`rejected` (code `VALIDATION_ERROR`). No decision
+            is applied.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: 'X-External-Notification-Secret is missing or incorrect (code
+            `INVALID_EXTERNAL_SECRET`). No decision is applied.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: 'No service order with this id, or no quote composed for it
+            (code `NOT_FOUND`).
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: 'The quote has already been decided, through this or the customer
+            channel, whether the same or a different decision (code `QUOTE_ALREADY_DECIDED`),
+            or the quote has not been sent yet / the order is not AWAITING_APPROVAL
+            (code `INVALID_STATUS_TRANSITION`). Nothing is changed and no history entry
+            is written.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/service-orders/{id}/executions:
     post:
       tags:
@@ -2057,7 +2144,8 @@ components:
         route except creation (RNF02) — that includes the Service Order Query routes
         plus the diagnosis/quote/execution routes added by specs/service-order-diagnosis-quote/,
         specs/service-order-quote-decision/ (only its send-quote endpoint; approve/reject
-        are customer-facing, see trackingToken), and specs/service-order-execution/.
+        are customer-facing, see trackingToken, and the external decision route uses
+        externalNotificationSecret), and specs/service-order-execution/.
         Not required on Customer Management routes (see specs/customer-management/requirements.md
         §7.2) nor on POST /api/v1/service-orders (CLAUDE.md §1), and not accepted
         at all by the Service Order Tracking route or the customer-facing quote approve/reject
@@ -2073,6 +2161,18 @@ components:
         issuance endpoint). Deliberately a distinct header, not Authorization: Bearer,
         so it can never be confused with the administrative JWT (specs/service-order-tracking/requirements.md
         §0).
+
+        '
+    externalNotificationSecret:
+      type: apiKey
+      in: header
+      name: X-External-Notification-Secret
+      description: 'Shared secret an external system presents to relay a customer''s
+        quote decision (POST /api/v1/service-orders/{id}/quote/decision only). Configured
+        server-side via the EXTERNAL_NOTIFICATION_SECRET environment variable (a Kubernetes
+        Secret in cluster deployments); compared in constant time. Independent of
+        the administrative JWT, which this route neither requires nor accepts (specs/service-order-quote-decision/design.md
+        §5).
 
         '
   parameters:
@@ -3222,6 +3322,16 @@ components:
           type: string
           format: date-time
           nullable: true
+    ExternalQuoteDecisionRequest:
+      type: object
+      required:
+      - decision
+      properties:
+        decision:
+          type: string
+          enum:
+          - approved
+          - rejected
     StartExecutionRequest:
       type: object
       required:

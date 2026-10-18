@@ -49,32 +49,57 @@ Each task references the `design.md` section it implements. All tasks below are 
 
 ## Fase 2 — external-system notification channel (`design.md` §5, added 2026-10-12)
 
-- [ ] `quote_service.go`: refactor `decideQuote` to take an already-resolved `*ServiceOrder`
+- [x] `quote_service.go`: refactor `decideQuote` to take an already-resolved `*ServiceOrder`
       instead of resolving it itself; update `ApproveQuote`/`RejectQuote` to resolve first,
       then call it (`design.md` §5.2).
-- [ ] `quote_service.go`: add `DecideQuoteExternal(ctx, serviceOrderID, decision)`, resolving
+- [x] `quote_service.go`: add `DecideQuoteExternal(ctx, serviceOrderID, decision)`, resolving
       by id and calling the refactored `decideQuote` (`design.md` §5.2).
-- [ ] Register the new route against a real `*http.ServeMux` (`RegisterRoutes` call, no
+- [x] Register the new route against a real `*http.ServeMux` (`RegisterRoutes` call, no
       database needed) and confirm no pattern-conflict panic — this project has twice found
       `ServeMux` route conflicts this way (`specs/architecture.md` decision 18,
       `specs/service-order-query/design.md` §1.2), cheap insurance before writing the
       handler for real.
-- [ ] `handler.go`: register `POST /api/v1/service-orders/{id}/quote/decision`;
+- [x] `handler.go`: register `POST /api/v1/service-orders/{id}/quote/decision`;
       `decideQuoteExternal` handler — constant-time secret check
       (`X-External-Notification-Secret`), decode/validate `{"decision": ...}`
       (`design.md` §5.1, §5.3).
-- [ ] `httpsupport.go`: map missing/invalid secret to `401 INVALID_EXTERNAL_SECRET`
+- [x] `httpsupport.go`: map missing/invalid secret to `401 INVALID_EXTERNAL_SECRET`
       (`design.md` §5.3).
-- [ ] `cmd/api/main.go`: read `EXTERNAL_NOTIFICATION_SECRET` from env, `log.Fatalf` if unset,
+- [x] `cmd/api/main.go`: read `EXTERNAL_NOTIFICATION_SECRET` from env, `log.Fatalf` if unset,
       pass it into the service constructor (`design.md` §5.4).
-- [ ] `.env.example`: add `EXTERNAL_NOTIFICATION_SECRET=` (`design.md` §5.4).
-- [ ] Unit tests: `DecideQuoteExternal` success (approve/reject), repeated-decision conflict,
+- [x] `.env.example`: add `EXTERNAL_NOTIFICATION_SECRET=` (`design.md` §5.4).
+- [x] Unit tests: `DecideQuoteExternal` success (approve/reject), repeated-decision conflict,
       unknown order id — reusing the existing fake repository (`design.md` §5.2).
-- [ ] Integration tests: valid-secret approve/reject (DB status + history assertions),
+- [x] Integration tests: valid-secret approve/reject (DB status + history assertions),
       missing/wrong secret → `401` with zero side effects, invalid `decision` value → `400`,
       and a regression check that the two existing tracking-token endpoints are unaffected
       (AC20).
-- [ ] `docs/openapi.yaml`: document the new endpoint, its header, and its two response
+- [x] `docs/openapi.yaml`: document the new endpoint, its header, and its two response
       statuses.
-- [ ] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check AC15–AC20 in
+- [x] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check AC15–AC20 in
       `requirements.md` §9.1.
+
+Implementation notes (2026-10-18, FP-28):
+
+- The route is registered with `mux.HandleFunc`, **not** `wrap(...)` as the snippet in
+  `design.md` §5.3 shows — `wrap` is the `requireAuth` JWT wrapper, which would contradict
+  §5.1's "No `requireAuth`" and `requirements.md` §9 item 1. §5.1 is the governing decision;
+  see the erratum note in `design.md` §5.3.
+- The secret is set via `ServiceOrderService.WithExternalNotificationSecret(secret)`, chained
+  onto `NewServiceOrderService` in `cmd/api/main.go`, rather than a fourth constructor
+  parameter — same "set once at wiring time" outcome as §5.3, without changing the
+  constructor every other caller (and `specs/service-order-email-notification/`) uses. An
+  empty configured secret authenticates no one.
+- Both values are SHA-256-hashed before `subtle.ConstantTimeCompare`, so the secret's length
+  does not leak through timing either.
+- The decision value is matched exactly (`approved`/`rejected`, lowercase); anything else is
+  `400 VALIDATION_ERROR` via the new `ErrInvalidQuoteDecision`.
+- Tests: `internal/features/service-order/handler_test.go` (real-`ServeMux` registration,
+  401/400/409, no-JWT, AC20 regression) and `quote_service_test.go`
+  (`DecideQuoteExternal*`, `AuthenticateExternalNotification*`);
+  `internal/handlers_test/service_order_quote_external_decision_test.go` (approve/reject with
+  DB + history assertions, 401/400 with zero side effects, unsent-quote 409, repeat and
+  cross-channel 409 with no duplicated history, concurrent decisions — exactly one wins and
+  one history row is written).
+- Config: `.env.example`, `docker-compose.yml` (fails fast if unset), `Makefile` `run`
+  target, Bruno `Local` environment.

@@ -302,9 +302,12 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   from any user can still reach every protected route regardless of who they are. Every
   feature's routes are wrapped in `RequireAuth` as of 2026-08-26 (Customer Management and
   Service Order Opening's creation route were the last two — see section 1's note); the only
-  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login)
-  and Service Order Tracking's own route, which validates its own possession-based tracking
-  token instead of a JWT (RF12).
+  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login),
+  Service Order Tracking's own route and the customer quote approve/reject routes, which
+  validate their own possession-based tracking token instead of a JWT (RF12), and
+  `POST /api/v1/service-orders/{id}/quote/decision`, which authenticates an external system
+  by the `X-External-Notification-Secret` shared secret (`EXTERNAL_NOTIFICATION_SECRET`,
+  `specs/service-order-quote-decision/` §9).
 - **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
   defined by the service catalog listing), leaving room for pagination metadata later.
   Reuse this shape for new list endpoints instead of returning a bare JSON array.

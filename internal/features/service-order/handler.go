@@ -26,6 +26,11 @@ const (
 // coupling CLAUDE.md §9.2 forbids.
 const trackingTokenHeader = "X-Tracking-Token"
 
+// externalNotificationSecretHeader carries the shared secret the external
+// quote-decision channel authenticates with
+// (specs/service-order-quote-decision/design.md §5.1).
+const externalNotificationSecretHeader = "X-External-Notification-Secret"
+
 // RegisterRoutes registers every Service Order Opening/Diagnosis/Quote
 // endpoint on mux, using the same Go 1.22 method-aware ServeMux pattern as
 // every other feature (see specs/service-order-opening/design.md §1.5).
@@ -59,6 +64,13 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	mux.Handle("POST /api/v1/service-orders/{id}/quote/send", wrap(handler.sendQuote))
 	mux.HandleFunc("POST /api/v1/acompanhamento/{codigo}/orcamento/aprovar", handler.approveQuote)
 	mux.HandleFunc("POST /api/v1/acompanhamento/{codigo}/orcamento/reprovar", handler.rejectQuote)
+
+	// Added by specs/service-order-quote-decision/ §9 (Fase 2): an external
+	// system relays the customer's decision. Deliberately NOT wrapped in
+	// requireAuth — the caller is not a logged-in administrator; the handler
+	// authenticates it with X-External-Notification-Secret instead, before
+	// touching the order (design.md §5.1/§5.3).
+	mux.HandleFunc("POST /api/v1/service-orders/{id}/quote/decision", handler.decideQuoteExternal)
 
 	// Added by specs/service-order-query/ (RNF02: every route here requires
 	// a valid JWT, unlike the create route above). {id} accepts either a
@@ -225,6 +237,43 @@ func (handler *serviceOrderHandler) rejectQuote(w http.ResponseWriter, r *http.R
 	}
 
 	order, quote, err := handler.service.RejectQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toQuoteDecisionResponse(order, quote))
+}
+
+// decideQuoteExternal handles POST /api/v1/service-orders/{id}/quote/decision
+// (specs/service-order-quote-decision/design.md §5.3). The shared secret is
+// checked first — before {id} or the body are even looked at — so a caller
+// with a missing/wrong secret gets a 401 and learns nothing about whether
+// the order exists, and no decision is applied (AC17).
+func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r *http.Request) {
+	if !handler.service.AuthenticateExternalNotification(r.Header.Get(externalNotificationSecretHeader)) {
+		apierror.Write(w, apierror.Unauthorized("INVALID_EXTERNAL_SECRET", "external notification secret is missing or invalid"))
+		return
+	}
+
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	request, apiError := decodeJSON[ExternalQuoteDecisionRequest](r)
+	if apiError != nil {
+		apierror.Write(w, apiError)
+		return
+	}
+	decision, ok := request.toQuoteStatus()
+	if !ok {
+		writeServiceError(w, ErrInvalidQuoteDecision)
+		return
+	}
+
+	order, quote, err := handler.service.DecideQuoteExternal(r.Context(), id, decision)
 	if err != nil {
 		writeServiceError(w, err)
 		return

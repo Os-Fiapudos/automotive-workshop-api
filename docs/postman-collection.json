@@ -1079,6 +1079,94 @@
           "response": []
         },
         {
+          "name": "External quote decision - approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-External-Notification-Secret",
+                "value": "{{externalNotificationSecret}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"decision\": \"approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote/decision",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "service-orders",
+                "{{serviceOrderId}}",
+                "quote",
+                "decision"
+              ]
+            },
+            "description": "External-system channel (specs/service-order-quote-decision §9). Authenticated only by X-External-Notification-Secret (must equal the API's EXTERNAL_NOTIFICATION_SECRET) - no JWT. 200 on success, 401 missing/wrong secret, 400 invalid decision, 409 already decided or quote not sent.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "External quote decision - reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-External-Notification-Secret",
+                "value": "{{externalNotificationSecret}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"decision\": \"rejected\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote/decision",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "service-orders",
+                "{{serviceOrderId}}",
+                "quote",
+                "decision"
+              ]
+            },
+            "description": "External-system channel (specs/service-order-quote-decision §9). Authenticated only by X-External-Notification-Secret (must equal the API's EXTERNAL_NOTIFICATION_SECRET) - no JWT. 200 on success, 401 missing/wrong secret, 400 invalid decision, 409 already decided or quote not sent.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
           "name": "List service orders",
           "request": {
             "method": "GET",
@@ -1588,6 +1676,10 @@
       "key": "trackingToken",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "externalNotificationSecret",
+      "value": "change-me-dev-only-external-notification-secret"
     }
   ]
 }

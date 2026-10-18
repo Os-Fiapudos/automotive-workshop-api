@@ -59,10 +59,15 @@ type requestedProductRef struct {
 // non-nil; NewServiceOrderService defaults it to NoOpQuoteNotifier when nil
 // is passed, so existing callers (and tests) that only care about the other
 // use cases don't have to wire one explicitly.
+// externalNotificationSecret authenticates the external quote-decision
+// channel (specs/service-order-quote-decision/design.md §5) — set once at
+// wiring time via WithExternalNotificationSecret; left empty, that channel
+// rejects every caller.
 type ServiceOrderService struct {
-	repository ServiceOrderRepository
-	lookups    serviceOrderLookups
-	notifier   QuoteNotifier
+	repository                 ServiceOrderRepository
+	lookups                    serviceOrderLookups
+	notifier                   QuoteNotifier
+	externalNotificationSecret string
 }
 
 func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOrderLookups, notifier QuoteNotifier) *ServiceOrderService {
@@ -70,6 +75,15 @@ func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOr
 		notifier = NoOpQuoteNotifier{}
 	}
 	return &ServiceOrderService{repository: repository, lookups: lookups, notifier: notifier}
+}
+
+// WithExternalNotificationSecret sets the shared secret the external
+// quote-decision endpoint authenticates against (design.md §5.4) and returns
+// the same service, so it chains onto NewServiceOrderService at wiring time
+// without changing that constructor's signature for every existing caller.
+func (service *ServiceOrderService) WithExternalNotificationSecret(secret string) *ServiceOrderService {
+	service.externalNotificationSecret = secret
+	return service
 }
 
 // Create resolves the customer and vehicle referenced by input, validates

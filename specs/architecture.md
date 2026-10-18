@@ -95,6 +95,15 @@ code but are not yet described in this document; the sections below cover `auth`
 > `specs/service-order-diagnosis-quote/design.md` Â§1.6. See
 > `specs/service-order-quote-decision/design.md` for the full design.
 
+> **Addendum (`specs/service-order-quote-decision/` §9, Fase 2)**: one more `service-order`
+> route, `POST /api/v1/service-orders/{id}/quote/decision`, for an external system relaying
+> the customer's decision (`{"decision":"approved"|"rejected"}`). It is registered without
+> `requireAuth` and authenticates instead with the `X-External-Notification-Secret` header,
+> compared in constant time against `EXTERNAL_NOTIFICATION_SECRET` (read in `cmd/api/main.go`,
+> which fails fast if it is unset). After resolving the order by id it calls the same private
+> `decideQuote` core and `DecideQuote` transaction as the tracking-token routes, so the rules
+> and the conflict behavior are shared rather than duplicated.
+
 > **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
 > `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
 > a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/
