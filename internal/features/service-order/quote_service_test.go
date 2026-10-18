@@ -12,7 +12,7 @@ import (
 )
 
 func seedOrder(repo *fakeRepository, status Status) *ServiceOrder {
-	order, _ := NewServiceOrder(uuid.New(), uuid.New(), "", nil)
+	order, _ := NewServiceOrder(uuid.New(), uuid.New(), "", nil, nil)
 	order.Status = status
 	repo.addOrder(order)
 	return order

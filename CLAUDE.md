@@ -415,6 +415,14 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   `goose`) configured in the project today. **To be defined**: incremental migration
   strategy for when the schema needs to evolve after the volume already exists in
   shared/production environments.
+- **Added 2026-10-18**: `migrations/` holds incremental `golang-migrate`-style files
+  (`NNNN_<name>.up.sql`/`.down.sql`, see `specs/database-migrations/`). The first one is
+  `0002_service_order_requested_products` (FP-27); the `0001_init` baseline and the
+  `migrate` tooling itself belong to the database-migrations feature and are not in the
+  repo yet. Until they land, an `.up.sql` (written with `IF NOT EXISTS`) can be applied to
+  an existing volume by hand:
+  `docker compose exec -T db psql -U workshop -d automotive_workshop -f - < migrations/<file>.up.sql`.
+  Every migration is mirrored into `docs/schema.sql` in the same change.
 - To apply schema changes locally today, the flow is to recreate the volume:
   ```bash
   docker compose down -v

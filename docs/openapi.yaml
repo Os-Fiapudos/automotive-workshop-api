@@ -1090,8 +1090,17 @@ paths:
         §1). Exactly one of customerId/customerDocument and exactly one of vehicleId/licensePlate
         must be present (specs/service-order-opening/design.md §4.1). Any `status`
         field sent in the body is ignored — the server is the only author of a new
-        order''s status, which always starts RECEIVED (requirements.md §3.6). requestedServiceIds
-        and notes are optional.
+        order''s status, which always starts RECEIVED (requirements.md §3.6). requestedServiceIds,
+        requestedProducts and notes are optional.
+
+        requestedProducts (requirements.md §7a) is unpriced initial demand: each productId
+        must reference an existing ACTIVE product, quantity must be a positive integer,
+        and a productId may appear only once (a repeated product is rejected with 400
+        VALIDATION_ERROR — send one entry with the total quantity). Opening an order
+        does not reserve, debit, or check stock availability; stock is only debited
+        later via POST /api/v1/service-orders/{id}/stock-movements. The order, its
+        requested services/products, and its creation history event are written in
+        one transaction — any failure rolls back everything.
 
         '
       operationId: createServiceOrder
@@ -1111,6 +1120,9 @@ paths:
                   vehicleId: b0000000-0000-0000-0000-000000000001
                   requestedServiceIds:
                   - d0000000-0000-0000-0000-000000000001
+                  requestedProducts:
+                  - productId: c0000000-0000-0000-0000-000000000003
+                    quantity: 2
                   notes: Customer reported a light engine noise.
               byDocumentAndPlate:
                 summary: Customer/vehicle identified by document/plate
@@ -1136,19 +1148,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceOrderCreateResponse'
         '400':
-          description: 'Malformed JSON body (code `INVALID_BODY`), or not exactly
-            one customer/vehicle identifier pair given (code `VALIDATION_ERROR`).
+          description: 'Malformed JSON body, including a non-integer requestedProducts
+            quantity (code `INVALID_BODY`); not exactly one customer/vehicle identifier
+            pair given, a requestedProducts entry with a non-UUID productId or a quantity
+            <= 0, or the same productId repeated in requestedProducts (code `VALIDATION_ERROR`,
+            with `details[].field` such as `requestedProducts[1].productId`). Nothing
+            is persisted.
 
             '
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                duplicateRequestedProduct:
+                  summary: Same product requested twice
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: invalid service order data
+                      details:
+                      - field: requestedProducts[1].productId
+                        message: 'duplicate product: already requested at requestedProducts[0];
+                          send each product once with its total quantity'
         '401':
           description: Missing, malformed, or expired bearer token.
         '404':
           description: 'The referenced customer (code `NOT_FOUND`), vehicle (code
-            `NOT_FOUND`), or a requested service id (code `NOT_FOUND`) does not exist.
+            `NOT_FOUND`), or a requested service id (code `NOT_FOUND`) does not exist;
+            or a requested product does not exist or is INACTIVE (code `PRODUCT_NOT_FOUND`).
 
             '
           content:
@@ -2694,6 +2722,7 @@ components:
               - DIAGNOSIS_NOT_STARTED
               - QUOTE_ALREADY_DECIDED
               - PRODUCT_INACTIVE
+              - PRODUCT_NOT_FOUND
               - SERVICE_EXECUTION_ALREADY_FINISHED
               - EXECUTIONS_NOT_COMPLETED
               - INTERNAL_ERROR
@@ -3039,8 +3068,44 @@ components:
           items:
             type: string
             format: uuid
+        requestedProducts:
+          type: array
+          description: 'Products/parts requested at opening (requirements.md §7a).
+            Each productId at most once. Not a stock reservation or debit.
+
+            '
+          items:
+            $ref: '#/components/schemas/RequestedProductInput'
         notes:
           type: string
+    RequestedProductInput:
+      type: object
+      required:
+      - productId
+      - quantity
+      properties:
+        productId:
+          type: string
+          format: uuid
+          description: An existing, ACTIVE product.
+        quantity:
+          type: integer
+          minimum: 1
+          description: Positive integer.
+    ServiceOrderRequestedProduct:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        name:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
     ServiceOrderCreateResponse:
       type: object
       properties:
@@ -3068,6 +3133,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ServiceOrderRequestedService'
+        requestedProducts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceOrderRequestedProduct'
         createdAt:
           type: string
           format: date-time

@@ -159,3 +159,94 @@ func TestServiceCreateAllowsNoRequestedServices(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Services)
 }
+
+func TestServiceCreateWithRequestedProducts(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+	productID := uuid.New()
+	repo.addProduct(&productRef{ID: productID, Code: 7, Name: "Brake Pad", Active: true})
+	repo.setProductStock(productID, 15)
+
+	result, err := service.Create(context.Background(), CreateInput{
+		CustomerID:        customerID.String(),
+		VehicleID:         vehicleID.String(),
+		RequestedProducts: []RequestedProductInput{{ProductID: productID.String(), Quantity: 2}},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, []RequestedProduct{{ProductID: productID, Quantity: 2}}, result.Order.RequestedProducts)
+	require.Len(t, result.Products, 1)
+	assert.Equal(t, "Brake Pad", result.Products[0].Product.Name)
+	assert.EqualValues(t, 7, result.Products[0].Product.Code)
+	assert.Equal(t, 2, result.Products[0].Quantity)
+	assert.Equal(t, 15, repo.productStock[productID], "opening an order must not touch stock (requirements.md §7a.1)")
+	assert.Empty(t, repo.movements)
+}
+
+func TestServiceCreateRequestedProductNotFound(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+
+	_, err := service.Create(context.Background(), CreateInput{
+		CustomerID:        customerID.String(),
+		VehicleID:         vehicleID.String(),
+		RequestedProducts: []RequestedProductInput{{ProductID: uuid.New().String(), Quantity: 1}},
+	})
+	assert.ErrorIs(t, err, ErrRequestedProductNotFound)
+	assert.Empty(t, repo.orders, "no order may be persisted")
+}
+
+func TestServiceCreateRequestedProductInactive(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+	productID := uuid.New()
+	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Old Part", Active: false})
+
+	_, err := service.Create(context.Background(), CreateInput{
+		CustomerID:        customerID.String(),
+		VehicleID:         vehicleID.String(),
+		RequestedProducts: []RequestedProductInput{{ProductID: productID.String(), Quantity: 1}},
+	})
+	assert.ErrorIs(t, err, ErrRequestedProductNotFound)
+	assert.Empty(t, repo.orders, "no order may be persisted")
+}
+
+func TestServiceCreateRequestedProductInvalidQuantity(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+	productID := uuid.New()
+	repo.addProduct(&productRef{ID: productID, Active: true})
+
+	for _, quantity := range []int{0, -3} {
+		_, err := service.Create(context.Background(), CreateInput{
+			CustomerID:        customerID.String(),
+			VehicleID:         vehicleID.String(),
+			RequestedProducts: []RequestedProductInput{{ProductID: productID.String(), Quantity: quantity}},
+		})
+		assert.ErrorIs(t, err, ErrInvalidRequestedProductQuantity, "quantity %d", quantity)
+	}
+	assert.Empty(t, repo.orders, "no order may be persisted")
+}
+
+func TestServiceCreateRejectsDuplicateRequestedProduct(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
+	productID := uuid.New()
+	repo.addProduct(&productRef{ID: productID, Active: true})
+
+	_, err := service.Create(context.Background(), CreateInput{
+		CustomerID: customerID.String(),
+		VehicleID:  vehicleID.String(),
+		RequestedProducts: []RequestedProductInput{
+			{ProductID: productID.String(), Quantity: 1},
+			{ProductID: productID.String(), Quantity: 2},
+		},
+	})
+	assert.ErrorIs(t, err, ErrDuplicateRequestedProduct)
+	assert.Empty(t, repo.orders, "no order may be persisted")
+}

@@ -82,6 +82,7 @@
 | status      | string    | Current status of the service order: `RECEIVED` (vehicle received) → `IN_DIAGNOSIS` (under diagnosis) → `AWAITING_APPROVAL` (quote sent to customer) → `IN_PROGRESS` (work in progress) → `COMPLETED` (work completed) → `DELIVERED` (vehicle returned to customer). `AWAITING_APPROVAL` branches to `CANCELED` instead of `IN_PROGRESS` if the customer rejects the quote (see [specs/service-order-quote-decision](../specs/service-order-quote-decision/)). |
 | quote       | Quote     | Quote linked to this service order.                                                                         |
 | requestedServices | Service[] | Services initially requested when the order was opened — the customer's stated demand, not the definitive priced quote (see `quote`). |
+| requestedProducts | RequestedProduct[] | Products/parts initially requested when the order was opened, each `{productId, quantity}` (positive integer quantity, each product at most once) — unpriced demand only: not a stock reservation and not a stock debit. Stock is only debited later by the stock-usage flow. |
 | notes       | string    | Free-form notes about the service (e.g. customer's report, vehicle condition).                              |
 | createdAt   | string    | Record creation date/time, generated automatically.                                                         |
 | updatedAt   | string    | Record last update date/time, generated automatically.                                                      |

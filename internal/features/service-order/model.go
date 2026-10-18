@@ -67,8 +67,17 @@ type ServiceOrder struct {
 	Status              Status
 	Notes               string
 	RequestedServiceIDs []uuid.UUID
+	RequestedProducts   []RequestedProduct
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+// RequestedProduct is one product/part the customer asked for when the order
+// was opened (specs/service-order-opening/requirements.md §7a) — unpriced
+// initial demand, never a stock reservation or debit (§7a.1).
+type RequestedProduct struct {
+	ProductID uuid.UUID
+	Quantity  int
 }
 
 // NewServiceOrder builds a new service order, always starting RECEIVED (see
@@ -77,11 +86,24 @@ type ServiceOrder struct {
 // ownership are the service layer's responsibility (design.md §1.2), since
 // they require repository access this constructor does not have.
 //
-// requestedServiceIDs may be empty: no requirement mandates at least one
-// requested service at opening time.
-func NewServiceOrder(customerID, vehicleID uuid.UUID, notes string, requestedServiceIDs []uuid.UUID) (*ServiceOrder, error) {
+// requestedServiceIDs and requestedProducts may be empty: no requirement
+// mandates at least one requested item at opening time. Every requested
+// product must have a positive quantity and appear at most once
+// (specs/service-order-opening/design.md §7.1).
+func NewServiceOrder(customerID, vehicleID uuid.UUID, notes string, requestedServiceIDs []uuid.UUID, requestedProducts []RequestedProduct) (*ServiceOrder, error) {
 	if customerID == uuid.Nil || vehicleID == uuid.Nil {
 		return nil, ErrInvalidAggregate
+	}
+
+	seenProducts := make(map[uuid.UUID]bool, len(requestedProducts))
+	for _, product := range requestedProducts {
+		if product.Quantity <= 0 {
+			return nil, ErrInvalidRequestedProductQuantity
+		}
+		if seenProducts[product.ProductID] {
+			return nil, ErrDuplicateRequestedProduct
+		}
+		seenProducts[product.ProductID] = true
 	}
 
 	return &ServiceOrder{
@@ -91,6 +113,7 @@ func NewServiceOrder(customerID, vehicleID uuid.UUID, notes string, requestedSer
 		Status:              StatusReceived,
 		Notes:               notes,
 		RequestedServiceIDs: requestedServiceIDs,
+		RequestedProducts:   requestedProducts,
 	}, nil
 }
 

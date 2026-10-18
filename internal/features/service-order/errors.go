@@ -34,6 +34,21 @@ var (
 	// does not exist in the catalog.
 	ErrRequestedServiceNotFound = errors.New("requested service not found")
 
+	// ErrRequestedProductNotFound is returned when a requested product id
+	// does not exist in the catalog or exists but is INACTIVE
+	// (specs/service-order-opening/design.md §7.4 — both map to the same 404).
+	ErrRequestedProductNotFound = errors.New("requested product not found or inactive")
+
+	// ErrInvalidRequestedProductQuantity is returned when a requested
+	// product's quantity is not a positive integer.
+	ErrInvalidRequestedProductQuantity = errors.New("requested product quantity must be greater than zero")
+
+	// ErrDuplicateRequestedProduct is returned when the same product id
+	// appears more than once in requestedProducts — rejected explicitly,
+	// before any write, rather than left to a mid-transaction primary-key
+	// failure (specs/service-order-opening/design.md §7.4b).
+	ErrDuplicateRequestedProduct = errors.New("requested product appears more than once")
+
 	// ErrServiceOrderNotFound is returned when the identified service order
 	// does not exist.
 	ErrServiceOrderNotFound = errors.New("service order not found")

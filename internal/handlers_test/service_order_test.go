@@ -368,6 +368,261 @@ func TestServiceOrderCreateRollsBackOnPartialFailure(t *testing.T) {
 	assert.Equal(t, before, after, "a failed creation must not leave an orphan service_orders row")
 }
 
+// requestedProductRows returns product_id → quantity for every
+// service_order_requested_products row of serviceOrderID.
+func requestedProductRows(t *testing.T, pool *pgxpool.Pool, serviceOrderID string) map[string]int {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT product_id::text, quantity FROM service_order_requested_products WHERE service_order_id = $1`, serviceOrderID)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	result := make(map[string]int)
+	for rows.Next() {
+		var productID string
+		var quantity int
+		require.NoError(t, rows.Scan(&productID, &quantity))
+		result[productID] = quantity
+	}
+	require.NoError(t, rows.Err())
+	return result
+}
+
+func countRequestedProductRowsForProduct(t *testing.T, pool *pgxpool.Pool, productID string) int {
+	t.Helper()
+	var count int
+	err := pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM service_order_requested_products WHERE product_id = $1`, productID).Scan(&count)
+	require.NoError(t, err)
+	return count
+}
+
+// errorCode decodes the shared apierror envelope and returns error.code.
+func errorCode(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	return body.Error.Code
+}
+
+// TestServiceOrderCreateWithRequestedProducts covers
+// specs/service-order-opening/requirements.md §7a: requested products are
+// persisted with their quantities in the same creation, returned in the
+// response, and — §7a.1 — no product's current_stock changes and no stock
+// movement is recorded.
+func TestServiceOrderCreateWithRequestedProducts(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	serviceID := insertService(t, pool)
+	firstProductID := insertProduct(t, pool, 35.90, true)
+	secondProductID := insertProduct(t, pool, 129.90, true)
+	firstStockBefore := productStock(t, pool, firstProductID)
+	secondStockBefore := productStock(t, pool, secondProductID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID:          createdCustomer.ID,
+		VehicleID:           vehicleID,
+		RequestedServiceIDs: []string{serviceID},
+		RequestedProducts: []serviceorder.RequestedProductRequest{
+			{ProductID: firstProductID, Quantity: 2},
+			{ProductID: secondProductID, Quantity: 50}, // above current stock: availability is not checked at opening
+		},
+	}, authToken)
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var created serviceorder.Response
+	decodeBody(t, resp, &created)
+	cleanupServiceOrder(t, pool, created.ID)
+
+	assert.Equal(t, "RECEIVED", created.Status)
+	assert.NotZero(t, created.Code)
+	require.Len(t, created.RequestedServices, 1)
+	require.Len(t, created.RequestedProducts, 2)
+	assert.Equal(t, firstProductID, created.RequestedProducts[0].ID)
+	assert.Equal(t, 2, created.RequestedProducts[0].Quantity)
+	assert.Equal(t, "Oil Filter", created.RequestedProducts[0].Name)
+	assert.NotZero(t, created.RequestedProducts[0].Code)
+	assert.Equal(t, secondProductID, created.RequestedProducts[1].ID)
+	assert.Equal(t, 50, created.RequestedProducts[1].Quantity)
+
+	assert.Equal(t, map[string]int{firstProductID: 2, secondProductID: 50}, requestedProductRows(t, pool, created.ID))
+
+	var historyEvents int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM service_order_history WHERE service_order_id = $1 AND event = 'creation'`, created.ID,
+	).Scan(&historyEvents))
+	assert.Equal(t, 1, historyEvents)
+
+	assert.Equal(t, firstStockBefore, productStock(t, pool, firstProductID), "opening an order must not debit stock")
+	assert.Equal(t, secondStockBefore, productStock(t, pool, secondProductID), "opening an order must not debit stock")
+	var movements int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM stock_movements WHERE service_order_id = $1`, created.ID,
+	).Scan(&movements))
+	assert.Zero(t, movements, "opening an order must not record stock movements")
+}
+
+func TestServiceOrderCreateWithRequestedProductsRequiresAuth(t *testing.T) {
+	pool, server, _ := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	productID := insertProduct(t, pool, 10, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID:        createdCustomer.ID,
+		VehicleID:         vehicleID,
+		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
+	}, "")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+	assert.Zero(t, countRequestedProductRowsForProduct(t, pool, productID))
+}
+
+func TestServiceOrderCreateRejectsUnknownRequestedProduct(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID:        createdCustomer.ID,
+		VehicleID:         vehicleID,
+		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: uuid.NewString(), Quantity: 1}},
+	}, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, "PRODUCT_NOT_FOUND", errorCode(t, resp))
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+}
+
+func TestServiceOrderCreateRejectsInactiveRequestedProduct(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	productID := insertProduct(t, pool, 10, false)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID:        createdCustomer.ID,
+		VehicleID:         vehicleID,
+		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
+	}, authToken)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, "PRODUCT_NOT_FOUND", errorCode(t, resp))
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+}
+
+func TestServiceOrderCreateRejectsNonPositiveRequestedProductQuantity(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	productID := insertProduct(t, pool, 10, true)
+
+	for _, quantity := range []int{0, -2} {
+		resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+			CustomerID:        createdCustomer.ID,
+			VehicleID:         vehicleID,
+			RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: quantity}},
+		}, authToken)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "quantity %d", quantity)
+		assert.Equal(t, "VALIDATION_ERROR", errorCode(t, resp))
+	}
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+}
+
+func TestServiceOrderCreateRejectsFractionalRequestedProductQuantity(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	productID := insertProduct(t, pool, 10, true)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", map[string]any{
+		"customerId":        createdCustomer.ID,
+		"vehicleId":         vehicleID,
+		"requestedProducts": []map[string]any{{"productId": productID, "quantity": 1.5}},
+	}, authToken)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Equal(t, "INVALID_BODY", errorCode(t, resp))
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+}
+
+// TestServiceOrderCreateRejectsDuplicateRequestedProduct covers the explicit
+// duplicate policy (design.md §7.4b): a product repeated in
+// requestedProducts is rejected with 400 VALIDATION_ERROR before any write —
+// no order, no requested-product row, no stock change.
+func TestServiceOrderCreateRejectsDuplicateRequestedProduct(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	productID := insertProduct(t, pool, 10, true)
+	stockBefore := productStock(t, pool, productID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID: createdCustomer.ID,
+		VehicleID:  vehicleID,
+		RequestedProducts: []serviceorder.RequestedProductRequest{
+			{ProductID: productID, Quantity: 1},
+			{ProductID: productID, Quantity: 2},
+		},
+	}, authToken)
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details []struct {
+				Field   string `json:"field"`
+				Message string `json:"message"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	decodeBody(t, resp, &body)
+	assert.Equal(t, "VALIDATION_ERROR", body.Error.Code)
+	require.Len(t, body.Error.Details, 1)
+	assert.Equal(t, "requestedProducts[1].productId", body.Error.Details[0].Field)
+
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
+	assert.Zero(t, countRequestedProductRowsForProduct(t, pool, productID))
+	assert.Equal(t, stockBefore, productStock(t, pool, productID))
+}
+
+// TestServiceOrderCreateWithRequestedProductsRollsBackOnPartialFailure
+// extends RNF07's rollback proof to requested products: valid products are
+// sent alongside a duplicated requested service, which fails mid-transaction
+// (service_order_requested_services primary key, design.md §3.4) after the
+// service_orders row was inserted. Nothing may survive — no order, no
+// requested-product row — and stock stays untouched.
+func TestServiceOrderCreateWithRequestedProductsRollsBackOnPartialFailure(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	createdCustomer := insertActiveCustomer(t, server, pool)
+	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
+	serviceID := insertService(t, pool)
+	productID := insertProduct(t, pool, 10, true)
+	stockBefore := productStock(t, pool, productID)
+
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		CustomerID:          createdCustomer.ID,
+		VehicleID:           vehicleID,
+		RequestedServiceIDs: []string{serviceID, serviceID},
+		RequestedProducts:   []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 3}},
+	}, authToken)
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID), "no orphan service_orders row")
+	assert.Zero(t, countRequestedProductRowsForProduct(t, pool, productID), "no orphan requested-product row")
+	assert.Equal(t, stockBefore, productStock(t, pool, productID))
+}
+
 // createServiceOrder creates a service order through the real API and
 // returns its full response, for use as a fixture by the diagnosis/quote
 // tests below.

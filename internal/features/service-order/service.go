@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 
@@ -19,7 +20,15 @@ type CreateInput struct {
 	VehicleID           string
 	LicensePlate        string
 	RequestedServiceIDs []string
+	RequestedProducts   []RequestedProductInput
 	Notes               string
+}
+
+// RequestedProductInput is a raw, unresolved requested product as supplied
+// by a create request (specs/service-order-opening/design.md §7.4).
+type RequestedProductInput struct {
+	ProductID string
+	Quantity  int
 }
 
 // CreateResult bundles the created aggregate with the display data
@@ -31,7 +40,16 @@ type CreateResult struct {
 	Customer      *customerRef
 	Vehicle       *vehicleRef
 	Services      []*serviceRef
+	Products      []*requestedProductRef
 	TrackingToken string
+}
+
+// requestedProductRef pairs a requested product's catalog display data with
+// the quantity asked for — the quantity comes from the request, not from a
+// query (design.md §7.4).
+type requestedProductRef struct {
+	Product  *productRef
+	Quantity int
 }
 
 // ServiceOrderService orchestrates every use case on the ServiceOrder
@@ -85,7 +103,12 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		}
 	}
 
-	order, err := NewServiceOrder(customer.ID, vehicle.ID, input.Notes, requestedServiceIDs)
+	requestedProducts, products, err := service.resolveRequestedProducts(ctx, input.RequestedProducts)
+	if err != nil {
+		return nil, err
+	}
+
+	order, err := NewServiceOrder(customer.ID, vehicle.ID, input.Notes, requestedServiceIDs, requestedProducts)
 	if err != nil {
 		return nil, err
 	}
@@ -105,8 +128,55 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		Customer:      customer,
 		Vehicle:       vehicle,
 		Services:      requestedServices,
+		Products:      products,
 		TrackingToken: trackingToken,
 	}, nil
+}
+
+// resolveRequestedProducts validates every requested product
+// (specs/service-order-opening/requirements.md §7a): positive quantity, no
+// repeated product id, and an existing ACTIVE catalog product. Structural
+// checks run first, over the whole list, so a malformed request never
+// reaches the database. No stock balance is read or checked here (§7a.1).
+// It reuses findActiveProductByID, the quote feature's lookup (design.md
+// §7.2), and keeps its result as the response's display data.
+func (service *ServiceOrderService) resolveRequestedProducts(ctx context.Context, inputs []RequestedProductInput) ([]RequestedProduct, []*requestedProductRef, error) {
+	if len(inputs) == 0 {
+		return nil, nil, nil
+	}
+
+	requested := make([]RequestedProduct, len(inputs))
+	seen := make(map[uuid.UUID]bool, len(inputs))
+	for index, input := range inputs {
+		id, err := uuid.Parse(input.ProductID)
+		if err != nil {
+			return nil, nil, ErrRequestedProductNotFound
+		}
+		if input.Quantity <= 0 {
+			return nil, nil, ErrInvalidRequestedProductQuantity
+		}
+		if seen[id] {
+			return nil, nil, ErrDuplicateRequestedProduct
+		}
+		seen[id] = true
+		requested[index] = RequestedProduct{ProductID: id, Quantity: input.Quantity}
+	}
+
+	refs := make([]*requestedProductRef, len(requested))
+	for index, product := range requested {
+		ref, err := service.lookups.findActiveProductByID(ctx, product.ProductID)
+		if err != nil {
+			if errors.Is(err, ErrProductNotFound) {
+				return nil, nil, ErrRequestedProductNotFound
+			}
+			return nil, nil, err
+		}
+		if !ref.Active {
+			return nil, nil, ErrRequestedProductNotFound
+		}
+		refs[index] = &requestedProductRef{Product: ref, Quantity: product.Quantity}
+	}
+	return requested, refs, nil
 }
 
 func (service *ServiceOrderService) resolveCustomer(ctx context.Context, input CreateInput) (*customerRef, error) {

@@ -949,10 +949,10 @@
                 "service-orders"
               ]
             },
-            "description": "Requires a valid JWT (this route was wrapped in requireAuth on 2026-08-26, closing VULN-02 — see CLAUDE.md section 1). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
+            "description": "Requires a valid JWT (this route was wrapped in requireAuth on 2026-08-26, closing VULN-02 — see CLAUDE.md section 1). The customer may be identified by customerId or customerDocument, and the vehicle by vehicleId or licensePlate. requestedProducts [{productId, quantity}] is optional unpriced demand: each product must exist and be ACTIVE, quantity a positive integer, and a repeated productId is rejected with 400 VALIDATION_ERROR; opening the order does not reserve or debit stock. The response carries trackingToken and code, both stored by the test script for the customer-facing routes below.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"requestedServiceIds\": [\n    \"{{serviceId}}\"\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}",
+              "raw": "{\n  \"customerId\": \"{{customerId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"requestedServiceIds\": [\n    \"{{serviceId}}\"\n  ],\n  \"requestedProducts\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 2\n    }\n  ],\n  \"notes\": \"Cliente relata barulho na suspensao\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

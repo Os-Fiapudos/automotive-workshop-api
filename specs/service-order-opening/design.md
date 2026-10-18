@@ -422,6 +422,12 @@ services" (existing step 6) and "build the aggregate" (existing step 7):
     products by its own `WHERE status = 'ACTIVE'` (per its existing implementation), so one
     call covers both "doesn't exist" and "inactive" without a second query.
 
+    > **Implementation note (2026-10-18)**: the landed `findActiveProductByID` does *not*
+    > filter by status — it returns `productRef.Active` (`status = 'ACTIVE'`) and leaves the
+    > check to the caller, same as the quote feature does. `Create` therefore checks
+    > `ref.Active` itself and maps `false` to `ErrRequestedProductNotFound`. Still one query
+    > per product, same observable behavior as described above.
+
 No change to `productRef` (already has `ID`/`Status`/pricing fields from the quote
 feature) and no new `serviceOrderLookups` method — this is the one place in this change
 where an existing lookup is reused as-is instead of extended, unlike `customerRef`/
@@ -460,6 +466,14 @@ for _, rp := range order.RequestedProducts {
     }
 }
 ```
+
+**Incremental migration (added 2026-10-18).** Per the FP-27 acceptance checklist, this
+table is delivered as `migrations/0002_service_order_requested_products.up.sql` /
+`.down.sql` (`golang-migrate` naming from `specs/database-migrations/design.md` §2,
+numbered on top of that feature's `0001_init` baseline), and mirrored into
+`docs/schema.sql` in the same change (`specs/database-migrations/requirements.md` BR2). The
+`.up.sql` uses `IF NOT EXISTS`, so it can also be applied by hand with `psql -f` to an
+existing volume before the migration tooling lands.
 
 No `products.current_stock` read or write happens anywhere in this transaction —
 `requirements.md` §7a.1 is enforced simply by not writing one; stock is only ever touched by
@@ -501,6 +515,30 @@ transaction commits (not inside it), against `products`, reusing `findActiveProd
 result rather than a second roundtrip (the quantities come from the request, already known
 without a query).
 
+### 7.4b Duplicate requested products (added 2026-10-18, `requirements.md` §7a.2)
+
+Unlike `requestedServiceIds` (§3.4, where a duplicate still surfaces as a mid-transaction
+primary-key failure → `500`), a repeated `productId` in `requestedProducts` is rejected
+explicitly, before any write:
+
+- `CreateRequest.Validate()` reports it as a `VALIDATION_ERROR` detail on the repeated entry
+  (`field: "requestedProducts[i].productId"`, message naming the first occurrence) → `400`.
+- Defense in depth: `ServiceOrderService.Create` (`ErrDuplicateRequestedProduct`) and
+  `NewServiceOrder` (aggregate invariant) reject it too, both mapped to `400
+  VALIDATION_ERROR` — so the `service_order_requested_products` primary key is never the
+  first line of defense.
+
+Duplicates are not merged (no silent summing of quantities) — the client must send one
+entry per product. §7.5's "duplicate-product-id rollback case" is replaced accordingly: the
+duplicate-product integration test asserts `400` with nothing persisted, and the rollback
+proof for requested products uses a duplicated *service* id alongside valid products (the
+`service_order_requested_services` PK fails mid-transaction, after the order row exists),
+asserting no order row, no requested-product row, and unchanged `current_stock`.
+
+Error-code note: `PRODUCT_NOT_FOUND` is emitted literally as `error.code` (built directly
+as an `apierror.Error`, since `apierror.NotFound` always uses the generic `NOT_FOUND`),
+matching the table above.
+
 ### 7.4a Documentation
 
 `docs/openapi.yaml`'s existing `POST /api/v1/service-orders` path (documented by
@@ -530,3 +568,5 @@ Extends §5 (not a new test file):
 | --- | --- |
 | §7a (requested products accepted, validated) | §7.1, §7.2, §7.4 |
 | §7a.1 (no stock movement/reservation at opening) | §7.3 |
+| §7a.2 (explicit duplicate-product rejection) | §7.4b |
+| §7a.3 (single transaction incl. requested products) | §7.3 |
