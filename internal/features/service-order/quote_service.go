@@ -3,6 +3,7 @@ package serviceorder
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -91,12 +92,37 @@ func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderI
 		return nil, err
 	}
 
-	// Best-effort: the MVP has no real e-mail integration, and a
-	// notification failure must never undo or block an already-recorded
-	// send (specs/service-order-quote-decision/requirements.md).
-	_ = service.notifier.NotifyQuoteSent(ctx, order, sent)
+	service.notifyQuoteSent(ctx, order, sent)
 
 	return sent, nil
+}
+
+// notifyQuoteSent is the best-effort notification step after a committed
+// send: no failure here (customer lookup or provider) may undo or alter the
+// send (specs/service-order-quote-decision/requirements.md §4 item 10). There
+// is no retry or outbox — a failure is only logged. The log carries the order
+// code and an outcome only, never the recipient, name, token or credentials.
+func (service *ServiceOrderService) notifyQuoteSent(ctx context.Context, order *ServiceOrder, quote *Quote) {
+	customer, err := service.lookups.findCustomerByID(ctx, order.CustomerID)
+	if err != nil {
+		log.Printf("quote notification: order %d: customer lookup failed", order.Code)
+		return
+	}
+
+	notification := QuoteNotification{OrderCode: order.Code, TotalAmount: quote.TotalAmount}
+	if customer.Email != nil {
+		notification.RecipientEmail = strings.TrimSpace(*customer.Email)
+	}
+	if notification.RecipientEmail == "" {
+		log.Printf("quote notification: order %d: skipped, customer has no e-mail", order.Code)
+		return
+	}
+
+	if err := service.notifier.NotifyQuoteSent(ctx, notification); err != nil {
+		log.Printf("quote notification: order %d: send failed", order.Code)
+		return
+	}
+	log.Printf("quote notification: order %d: sent", order.Code)
 }
 
 // ApproveQuote records the customer's approval of the service order's quote,

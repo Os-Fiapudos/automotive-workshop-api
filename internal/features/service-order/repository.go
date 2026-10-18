@@ -23,6 +23,9 @@ type customerRef struct {
 	Active   bool
 	Document string
 	Phone    string
+	// Email is nullable (customers.email); only the quote-sent notification
+	// reads it (specs/service-order-email-notification/).
+	Email *string
 }
 
 // vehicleRef is the vehicle-side equivalent of customerRef. Brand/Model/Year/
@@ -217,19 +220,19 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 
 func (repository *PostgresServiceOrderRepository) findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE id = $1`, id)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE id = $1`, id)
 	return scanCustomerRef(row)
 }
 
 func (repository *PostgresServiceOrderRepository) findCustomerByDocument(ctx context.Context, normalizedDocument string) (*customerRef, error) {
 	row := repository.pool.QueryRow(ctx,
-		`SELECT id, code, name, status = 'ACTIVE', document, phone FROM customers WHERE document = $1`, normalizedDocument)
+		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE document = $1`, normalizedDocument)
 	return scanCustomerRef(row)
 }
 
 func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 	ref := &customerRef{}
-	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone); err != nil {
+	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone, &ref.Email); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCustomerNotFound
 		}
