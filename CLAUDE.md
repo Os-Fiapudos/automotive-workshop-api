@@ -69,10 +69,10 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
 
 ## 2. Technology stack
 
-- **Language**: Go 1.25 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
-  pins `go-version: "1.25"`, and [Dockerfile](Dockerfile) builds on `golang:1.25-alpine`.
+- **Language**: Go 1.26 (see [go.mod](go.mod)) — CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+  pins `go-version: "1.26"`, and [Dockerfile](Dockerfile) builds on `golang:1.26-alpine`.
   These three must stay in sync; when adding or upgrading a dependency, check that its own
-  `go` directive (and its transitive dependencies') doesn't exceed 1.25.
+  `go` directive (and its transitive dependencies') doesn't exceed 1.26.
   **Changed on 2026-08-24, from 1.22.** The project was pinned to Go 1.22 and several
   dependencies were deliberately held back to stay under that ceiling. The security analysis
   in [docs/security-report.md](docs/security-report.md) showed the pin had become the
@@ -81,6 +81,12 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   1.25 took the reachable count to zero. Historical notes about the 1.22 ceiling in
   `specs/auth/`, `specs/customer-management/`, and `specs/service-catalog/` are records of
   decisions made at the time — they are no longer the rule.
+  **Changed on 2026-10-18, from 1.25 to 1.26.** `govulncheck` (CI `security` job) started
+  failing on standard-library advisories (e.g. GO-2026-6617, GO-2026-6613) in `net/http`,
+  `net/textproto` and `crypto/tls`, fixed only in Go 1.26.9, so the line was raised to 1.26
+  (`go.mod` `go 1.26.0`; CI `go-version: "1.26"` resolves to the latest 1.26 patch;
+  `SCANNER_GO_VERSION` follows; Dockerfile `golang:1.26-alpine`). Notes above that mention
+  1.25 are records of the decision at the time.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
   see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
   by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
@@ -437,10 +443,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 15. Rules specific to working with Go
 
-- Go 1.25, per `go.mod` and CI's pinned `go-version: "1.25"` — do not use syntax/features
-  from newer versions, and check every dependency's own `go` directive stays ≤ 1.25 before
+- Go 1.26, per `go.mod` and CI's pinned `go-version: "1.26"` — do not use syntax/features
+  from newer versions, and check every dependency's own `go` directive stays ≤ 1.26 before
   `go get`/`go mod tidy` (see §2 above). Keep [Dockerfile](Dockerfile)'s Go build image
-  (`golang:1.25-alpine`) in sync with whatever `go.mod` requires.
+  (`golang:1.26-alpine`) in sync with whatever `go.mod` requires.
 - Format with `gofmt` (the Go community standard); do not introduce alternative formatting
   styles.
 - Follow the standard `cmd/` + `internal/` layout already established — non-exported

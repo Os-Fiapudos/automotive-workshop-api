@@ -100,7 +100,7 @@ A aplicação foi projetada com foco em alta performance, baixo acoplamento e de
 
 | Tecnologia / Dependência | Versão | Finalidade e Justificativa |
 | :--- | :---: | :--- |
-| **Go** | `1.25` | Linguagem compilada com excelente performance, tipagem estática e segurança de memória. |
+| **Go** | `1.26` | Linguagem compilada com excelente performance, tipagem estática e segurança de memória. |
 | **`net/http` (stdlib)** | Nativo | Roteamento HTTP nativo utilizando as melhorias de padrões por método do Go (`http.ServeMux`), dispensando frameworks externos como Gin ou Fiber. |
 | **PostgreSQL** | `16` | Banco de dados relacional robusto com uso de UUID nativo (`pgcrypto`), ENUMs nativos, índices otimizados e transações ACID. |
 | **`github.com/jackc/pgx/v5`** | `v5.10.0` | Driver e pool de conexões (`pgxpool`) de alta performance para PostgreSQL em Go, sem overhead de ORMs pesados. |
@@ -170,7 +170,7 @@ make start
 
 O Docker iniciará 4 serviços automaticamente:
 1. **`db`** (PostgreSQL 16): Aplica os scripts de schema (`docs/schema.sql`) e carga inicial (`docs/seed.sql`) na inicialização do volume.
-2. **`api`** (Go 1.25): Constrói e inicializa a API na porta `8080` assim que o banco estiver saudável (`healthcheck`).
+2. **`api`** (Go 1.26): Constrói e inicializa a API na porta `8080` assim que o banco estiver saudável (`healthcheck`).
 3. **`swagger-ui`**: Interface interativa com a documentação OpenAPI 3.0 na porta `8082`.
 4. **`adminer`**: Interface web para navegação e consultas no PostgreSQL na porta `8081`.
 
