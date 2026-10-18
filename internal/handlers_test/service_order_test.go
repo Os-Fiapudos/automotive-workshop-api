@@ -593,7 +593,10 @@ func TestServiceOrderDetailRequiresAuth(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
-func TestServiceOrderListNoFilterReturnsMostRecentFirst(t *testing.T) {
+// TestServiceOrderListNoFilterOrdersOldestFirstWithinStatus covers
+// requirements.md AC13 (Fase 2 addendum): within the same status, the older
+// order (earlier created_at) comes first.
+func TestServiceOrderListNoFilterOrdersOldestFirstWithinStatus(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	older := createServiceOrder(t, server, pool)
 	time.Sleep(10 * time.Millisecond)
@@ -609,7 +612,87 @@ func TestServiceOrderListNoFilterReturnsMostRecentFirst(t *testing.T) {
 	for i, item := range list.Data {
 		positions[item.ID] = i
 	}
-	assert.Less(t, positions[newer.ID], positions[older.ID])
+	assert.Less(t, positions[older.ID], positions[newer.ID])
+}
+
+// setServiceOrderStatus forces a service order directly to status via SQL —
+// same "insert the missing precondition directly" pattern
+// moveServiceOrderToInProgress already uses, here to reach every status
+// (including the terminal ones) without re-driving the full
+// diagnosis/quote/execution lifecycle, which is already covered by its own
+// tests; this test only needs the resulting status, not how it was reached.
+func setServiceOrderStatus(t *testing.T, pool *pgxpool.Pool, orderID, status string) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), `UPDATE service_orders SET status = $1 WHERE id = $2`, status, orderID)
+	require.NoError(t, err)
+}
+
+// TestServiceOrderListDefaultOrderPrioritizesStatusAndExcludesTerminal
+// covers requirements.md BR3's Fase 2 addendum / AC1: with no status
+// filter, COMPLETED/DELIVERED/CANCELED orders are excluded from the
+// listing, and the remaining ones are grouped
+// IN_PROGRESS > AWAITING_APPROVAL > IN_DIAGNOSIS > RECEIVED.
+func TestServiceOrderListDefaultOrderPrioritizesStatusAndExcludesTerminal(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+
+	received := createServiceOrder(t, server, pool)
+	inDiagnosis := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, inDiagnosis.ID, "IN_DIAGNOSIS")
+	awaitingApproval := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, awaitingApproval.ID, "AWAITING_APPROVAL")
+	inProgress := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, inProgress.ID, "IN_PROGRESS")
+	completed := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, completed.ID, "COMPLETED")
+	delivered := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, delivered.ID, "DELIVERED")
+	canceled := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, canceled.ID, "CANCELED")
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?pageSize=500", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	positions := make(map[string]int, len(list.Data))
+	for i, item := range list.Data {
+		positions[item.ID] = i
+	}
+
+	for _, terminal := range []serviceorder.Response{completed, delivered, canceled} {
+		_, present := positions[terminal.ID]
+		assert.False(t, present, "terminal order %s must not appear in the default listing", terminal.ID)
+	}
+
+	require.Contains(t, positions, inProgress.ID)
+	require.Contains(t, positions, awaitingApproval.ID)
+	require.Contains(t, positions, inDiagnosis.ID)
+	require.Contains(t, positions, received.ID)
+
+	assert.Less(t, positions[inProgress.ID], positions[awaitingApproval.ID])
+	assert.Less(t, positions[awaitingApproval.ID], positions[inDiagnosis.ID])
+	assert.Less(t, positions[inDiagnosis.ID], positions[received.ID])
+}
+
+// TestServiceOrderListExplicitTerminalStatusFilterReturnsMatchingOrders
+// covers requirements.md AC12: an explicit status=COMPLETED/DELIVERED/
+// CANCELED filter still returns those orders, bypassing the default
+// exclusion.
+func TestServiceOrderListExplicitTerminalStatusFilterReturnsMatchingOrders(t *testing.T) {
+	pool, server, authToken := testServiceOrderServer(t)
+	completed := createServiceOrder(t, server, pool)
+	setServiceOrderStatus(t, pool, completed.ID, "COMPLETED")
+
+	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=COMPLETED&pageSize=500", nil, authToken)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var list serviceorder.ListResponse
+	decodeBody(t, resp, &list)
+
+	var ids []string
+	for _, item := range list.Data {
+		ids = append(ids, item.ID)
+	}
+	assert.Contains(t, ids, completed.ID)
 }
 
 func TestServiceOrderListFiltersByCode(t *testing.T) {

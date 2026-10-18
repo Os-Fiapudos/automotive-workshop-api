@@ -87,23 +87,23 @@ Each task references the `design.md` section it implements.
 
 ## 10. Fase 2 — status-priority ordering and default exclusion (`design.md` §1.4, changed 2026-10-12)
 
-- [ ] `query_repository.go`: in `listServiceOrders`, when `filter.Status == nil`, add
+- [x] `query_repository.go`: in `listServiceOrders`, when `filter.Status == nil`, add
       `AND so.status NOT IN ('COMPLETED', 'DELIVERED', 'CANCELED')` to the existing filter
       chain (§1.3's `WHERE 1=1` builder).
-- [ ] `query_repository.go`: replace the single `ORDER BY` with the two-branch logic —
+- [x] `query_repository.go`: replace the single `ORDER BY` with the two-branch logic —
       status-priority `CASE` + `created_at ASC, code ASC` when `filter.Status == nil`;
       plain `created_at ASC, code ASC` when `filter.Status != nil` (exact `CASE` in
       `design.md` §1.4).
-- [ ] `query_service_test.go`: unfiltered listing returns orders grouped
+- [x] `query_service_test.go`: unfiltered listing returns orders grouped
       `IN_PROGRESS > AWAITING_APPROVAL > IN_DIAGNOSIS > RECEIVED`, oldest first within each
       group, with no `COMPLETED`/`DELIVERED`/`CANCELED` order present.
-- [ ] `query_service_test.go`: `status=COMPLETED` (and `=DELIVERED`, `=CANCELED`) still
+- [x] `query_service_test.go`: `status=COMPLETED` (and `=DELIVERED`, `=CANCELED`) still
       returns the matching orders, oldest first (AC12).
-- [ ] `internal/handlers_test/service_order_test.go`: end-to-end case seeding orders across
+- [x] `internal/handlers_test/service_order_test.go`: end-to-end case seeding orders across
       all seven statuses against Postgres, asserting the exact unfiltered listing order and
       the exclusion, plus one explicit `status=COMPLETED` call returning that order.
-- [ ] `docs/openapi.yaml`: update the `GET /api/v1/service-orders` description per
+- [x] `docs/openapi.yaml`: update the `GET /api/v1/service-orders` description per
       `design.md` §4's 2026-10-12 note (new default order/exclusion, `status`-filter
       override).
-- [ ] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check
+- [x] Re-run `go build ./...`, `go vet ./...`, `go test ./...`; re-check
       `requirements.md` AC1, AC12, AC13 against the implemented behavior.

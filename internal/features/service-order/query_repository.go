@@ -81,8 +81,13 @@ func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ct
 }
 
 // listServiceOrders retrieves a filtered, paginated page of service orders
-// joined with their customer/vehicle, most recent first
-// (design.md §1.3/§1.4). Every filter is optional and combined with AND.
+// joined with their customer/vehicle (design.md §1.3/§1.4). Every filter is
+// optional and combined with AND. When filter.Status is nil, the default,
+// no-filter view excludes COMPLETED/DELIVERED/CANCELED and orders by status
+// priority (IN_PROGRESS > AWAITING_APPROVAL > IN_DIAGNOSIS > RECEIVED), then
+// oldest first; when filter.Status is set, every row already shares one
+// status, so both the exclusion and the priority CASE are skipped in favor
+// of plain oldest-first (requirements.md BR3, AC12/AC13).
 func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
 	offset := (page - 1) * pageSize
 
@@ -129,7 +134,22 @@ func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.
 		argIdx++
 	}
 
-	query += ` ORDER BY so.created_at DESC, so.code DESC LIMIT $` + strconv.Itoa(argIdx) + ` OFFSET $` + strconv.Itoa(argIdx+1)
+	if filter.Status == nil {
+		query += ` AND so.status NOT IN ('COMPLETED', 'DELIVERED', 'CANCELED')
+			ORDER BY
+			  CASE so.status
+			    WHEN 'IN_PROGRESS'       THEN 1
+			    WHEN 'AWAITING_APPROVAL' THEN 2
+			    WHEN 'IN_DIAGNOSIS'      THEN 3
+			    WHEN 'RECEIVED'          THEN 4
+			  END,
+			  so.created_at ASC,
+			  so.code ASC`
+	} else {
+		query += ` ORDER BY so.created_at ASC, so.code ASC`
+	}
+
+	query += ` LIMIT $` + strconv.Itoa(argIdx) + ` OFFSET $` + strconv.Itoa(argIdx+1)
 	args = append(args, pageSize, offset)
 
 	rows, err := repository.pool.Query(ctx, query, args...)

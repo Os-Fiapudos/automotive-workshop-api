@@ -1169,8 +1169,16 @@ paths:
       tags:
       - service-orders
       summary: List service orders (paginated, filterable)
-      description: 'Most recent orders first (by creation date, order code as a tiebreaker).
-        All filters are optional and combine with AND.
+      description: 'All filters are optional and combine with AND. When no `status`
+        filter is given, the listing excludes COMPLETED/DELIVERED/CANCELED orders
+        and groups the rest by status priority — IN_PROGRESS, then AWAITING_APPROVAL,
+        then IN_DIAGNOSIS, then RECEIVED — oldest first within each status (order
+        code as a tiebreaker). When `status` is given, every returned row already
+        shares one status, so the exclusion and priority grouping are skipped in
+        favor of plain oldest-first — this is what lets `status=COMPLETED`/`DELIVERED`/`CANCELED`
+        still return those orders for historical/audit queries, even though they
+        never appear in the default view (specs/service-order-query/requirements.md
+        BR3, Fase 2 Tech Challenge addendum).
 
         '
       operationId: listServiceOrders
