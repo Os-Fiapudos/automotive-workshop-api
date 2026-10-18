@@ -391,6 +391,12 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   versioned.
 - `.env.example` documents the expected variables without real sensitive values; keep it
   up to date when introducing new variables, without putting real secrets in it.
+- **Quote-sent e-mail (Resend)**: `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are an optional
+  pair read in `config.Load` — neither set disables the notification (no-op), a key without a
+  sender fails startup. The integration is a plain `net/http` call (no SDK), best-effort, with
+  no retry/outbox. Logs from it carry only the order code and an outcome — never the API key,
+  the customer's e-mail or name (see
+  [specs/service-order-email-notification/](specs/service-order-email-notification/)).
 - When implementing database access, use parameterized queries — never concatenate user
   input into SQL (SQL injection protection).
 - Validate and sanitize all input received in handlers before passing it to

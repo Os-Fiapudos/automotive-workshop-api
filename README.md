@@ -149,6 +149,9 @@ cp .env.example .env
 > - `SWAGGER_UI_PORT=8082`
 > - `JWT_SECRET=change-me-dev-only-please-generate-a-real-random-value`
 > - `JWT_TTL=1h`
+> - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (opcionais, sempre em par): habilitam o e-mail de
+>   "orçamento disponível" via Resend. Sem a chave, a notificação fica desabilitada (no-op); chave
+>   sem remetente impede a API de iniciar.
 
 ---
 
