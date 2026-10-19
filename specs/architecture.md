@@ -438,11 +438,15 @@ pool for the whole process:
 
 ## 7. External integrations
 
-No external integration (third-party APIs, message queues, e-mail/SMS services, payment
-gateways, etc.) is present in the code or in `go.mod`. `docs/entities.md` mentions e-mail
-notification as the *purpose* of the Customer's `email` field ("used for notifications and
-communication"), but no notification-sending mechanism is implemented. **To be defined**
-should any external integration be specified in the future.
+One outbound integration exists: the quote-sent e-mail notification
+([specs/service-order-email-notification/](service-order-email-notification/)).
+`serviceorder.ResendQuoteNotifier` implements the `QuoteNotifier` port with a single HTTP call
+to Resend's API (stdlib `net/http`, injected client with a 5s timeout, no SDK and no `go.mod`
+entry). `cmd/api/wiring.go` (`buildQuoteNotifier`) picks it when `RESEND_API_KEY` is set and
+falls back to `NoOpQuoteNotifier` otherwise. It runs synchronously after `SendQuote` commits,
+is best-effort (failures are logged without PII and never affect the response) and has no
+retry or outbox. Nothing else (message queues, SMS, payment gateways) is integrated.
+**To be defined** should any other external integration be specified in the future.
 
 ## 8. Error handling
 

@@ -8,9 +8,9 @@ env:
   # scripts/security-scan.sh and with the versions recorded in docs/security-report.md.
   GOVULNCHECK_VERSION: v1.7.0
   GOSEC_VERSION: v2.28.0
-  # Both scanners require Go >= 1.25 to build. This applies only to the scanner job; the
-  # project itself is built and tested with the pinned 1.22 below.
-  SCANNER_GO_VERSION: "1.25"
+  # govulncheck reports standard-library advisories for the toolchain it runs on, so the
+  # scanner job must use the same Go line as the project (kept in sync with go.mod).
+  SCANNER_GO_VERSION: "1.26"
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
       - run: go build ./...
       - run: go vet ./...
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
       # The seed is a prerequisite, not a convenience: it inserts the administrative user
       # the auth integration tests log in as. Schema without seed produced 74 failures.

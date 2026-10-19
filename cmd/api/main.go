@@ -66,6 +66,11 @@ func main() {
 	vehicleRepository := vehicle.NewPostgresVehicleRepository(pool)
 	vehicleService := vehicle.NewVehicleService(vehicleRepository, customerLookupAdapter{service: customerService})
 
+	quoteNotifier := buildQuoteNotifier(configuration, nil)
+	if configuration.ResendAPIKey == "" {
+		log.Println("RESEND_API_KEY not set - quote-sent e-mail notifications are disabled")
+	}
+
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
 	// Shared secret for the external quote-decision channel
 	// (specs/service-order-quote-decision/design.md §5.4): fails fast like
@@ -75,7 +80,7 @@ func main() {
 	if externalNotificationSecret == "" {
 		log.Fatalf("EXTERNAL_NOTIFICATION_SECRET environment variable is not set")
 	}
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, serviceorder.NoOpQuoteNotifier{}).
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier).
 		WithExternalNotificationSecret(externalNotificationSecret)
 
 	productRepository := product.NewPostgresProductRepository(pool)

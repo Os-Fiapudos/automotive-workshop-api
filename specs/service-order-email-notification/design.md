@@ -1,158 +1,71 @@
 # Design — Quote-Sent E-mail Notification (Resend)
 
-Satisfies: `requirements.md` (all sections). Implements the `QuoteNotifier` port
-`specs/service-order-quote-decision/design.md` §1.4 already defines; does not change that
-interface's signature.
+Satisfies: `requirements.md`. Replaces the earlier draft of this file (see the revision note
+in `requirements.md`).
 
-If `specs/service-order-architecture-refactor/` has already landed, `ResendQuoteNotifier`
-is an adapter (`adapter/resend/notifier.go` or alongside the other adapters) implementing
-the `usecase.QuoteNotifier` port; if not, it is a new file in the current flat package
-(`resend_notifier.go`), implementing the existing `QuoteNotifier` interface in
-`quote_notifier.go`. Either way, the interface itself and the call site in `SendQuote` are
-unchanged — only the wiring in `main.go` picks a different implementation.
-
-## 1. `ResendQuoteNotifier` — direct HTTP call, no SDK
+## 1. Port and DTO (`quote_notifier.go`)
 
 ```go
-package serviceorder // or adapter/resend, per the note above
-
-type ResendQuoteNotifier struct {
-    apiKey     string
-    fromEmail  string
-    httpClient *http.Client // injected, so tests substitute a fake RoundTripper
+type QuoteNotification struct {
+    OrderCode      int64
+    TotalAmount    float64
+    RecipientEmail string
 }
-
-func NewResendQuoteNotifier(apiKey, fromEmail string, httpClient *http.Client) *ResendQuoteNotifier {
-    if httpClient == nil {
-        httpClient = &http.Client{Timeout: 5 * time.Second}
-    }
-    return &ResendQuoteNotifier{apiKey: apiKey, fromEmail: fromEmail, httpClient: httpClient}
-}
-
-func (n *ResendQuoteNotifier) NotifyQuoteSent(ctx context.Context, order *ServiceOrder, quote *Quote) error {
-    if order.Customer == nil || order.Customer.Email == nil || *order.Customer.Email == "" {
-        return nil // requirements.md BR1 — no address, nothing to do, not an error
-    }
-
-    body, _ := json.Marshal(map[string]any{
-        "from":    n.fromEmail,
-        "to":      []string{*order.Customer.Email},
-        "subject": fmt.Sprintf("Seu orçamento da OS #%d está pronto", order.Code),
-        "text": fmt.Sprintf(
-            "Olá! O orçamento da sua ordem de serviço #%d está pronto, no valor de %s. "+
-                "Acesse o link de acompanhamento que você recebeu ao abrir a ordem de "+
-                "serviço para aprovar ou recusar.",
-            order.Code, quote.TotalAmount, // formatted via money.Cents's own String()/MarshalJSON once specs/monetary-value-precision/ lands; plain float64 formatting until then
-        ),
-    })
-
-    req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(body))
-    if err != nil {
-        return err
-    }
-    req.Header.Set("Authorization", "Bearer "+n.apiKey)
-    req.Header.Set("Content-Type", "application/json")
-
-    resp, err := n.httpClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    if resp.StatusCode >= 300 {
-        return fmt.Errorf("resend: unexpected status %d", resp.StatusCode)
-    }
-    return nil
+type QuoteNotifier interface {
+    NotifyQuoteSent(ctx context.Context, notification QuoteNotification) error
 }
 ```
 
-No `resend-go` (or any other) SDK import — a single, small HTTP call, matching the
-recommendation in `requirements.md` §1 and this project's "don't add a dependency without
-justified need" posture (`CLAUDE.md` §12). The error this method returns is still discarded
-by its caller (`SendQuote`, per `specs/service-order-quote-decision/design.md` §1.4,
-unchanged) — returning a real `error` value here (rather than always `nil`) is what lets
-this type be unit-tested for its failure path (`requirements.md` AC3) even though the
-caller never inspects it.
+The DTO deliberately has no customer name and no token. `NoOpQuoteNotifier` stays the default.
 
-## 2. `customerRef.Email` (requirements.md §4)
+## 2. Recipient lookup
 
-```go
-type customerRef struct {
-    ID       uuid.UUID
-    Code     int64
-    Name     string
-    Active   bool
-    Document string
-    Phone    string
-    Email    *string // added by this feature
-}
-```
+`customerRef` gains `Email *string`; `findCustomerByID` / `findCustomerByDocument` select
+`customers.email` and `scanCustomerRef` scans it (extends the existing query, no parallel
+one). No schema change: `customers.email` already exists and is nullable.
 
-The query `SendQuote`'s call path uses to resolve `order.Customer` (already loaded before
-`SendQuote` calls `notifier.NotifyQuoteSent`, per the existing flow) is extended to select
-`customers.email` alongside the columns it already selects — same "extend the existing
-query, don't add a parallel one" pattern `specs/service-order-query/design.md` §1.6 already
-used for `Document`/`Phone` on this exact struct.
+## 3. `SendQuote` flow (`quote_service.go`)
 
-## 3. Wiring (`cmd/api/main.go`)
+After the repository commit, `notifyQuoteSent`:
+1. `findCustomerByID(order.CustomerID)` — error → log `customer lookup failed`, return;
+2. build the DTO; blank/nil e-mail → log `skipped`, return;
+3. `notifier.NotifyQuoteSent` — error → log `send failed`; success → log `sent`.
 
-```go
-var quoteNotifier serviceorder.QuoteNotifier = serviceorder.NoOpQuoteNotifier{}
-if resendAPIKey := os.Getenv("RESEND_API_KEY"); resendAPIKey != "" {
-    fromEmail := os.Getenv("RESEND_FROM_EMAIL")
-    if fromEmail == "" {
-        log.Fatal("RESEND_FROM_EMAIL is required when RESEND_API_KEY is set")
-    }
-    quoteNotifier = serviceorder.NewResendQuoteNotifier(resendAPIKey, fromEmail, nil)
-} else {
-    log.Println("RESEND_API_KEY not set — quote-sent e-mail notifications are disabled")
-}
+Nothing is returned to `SendQuote`'s caller. Logs include the order code only.
 
-serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier)
-```
+## 4. Adapter (`resend_notifier.go`)
 
-`RESEND_API_KEY` unset is not fatal (`requirements.md` BR4); `RESEND_API_KEY` set without
-`RESEND_FROM_EMAIL` *is* fatal — a half-configured integration (a key but no sender address)
-is a configuration mistake worth catching at startup, not a legitimate "disabled" state like
-having neither set at all.
+`ResendQuoteNotifier{apiKey, fromEmail, endpoint, httpClient}`; nil client → `Timeout: 5s`.
+One `POST https://api.resend.com/emails` with `Authorization: Bearer`, JSON `from`, `to`,
+`subject`, `text`. The text carries the order code and total (`R$ 450,50`) and asks the
+customer to contact the workshop. Non-2xx → `ErrResendRejected` with the status only (the
+response body may echo the address); transport/context errors are wrapped and returned.
 
-## 4. Configuration
+## 5. Configuration and composition
 
-`.env.example` gains:
-```
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=
-```
-both empty, grouped under the same `# Fase 2 — external integrations` comment
-`specs/service-order-quote-decision/design.md` §5.4 and
-`specs/service-order-status-update/design.md` §4 already introduced there.
-`docker-compose.yml`'s `api` service environment list gains both — **not** with the
-fail-fast `${VAR:?...}` form the other Fase 2 secrets use (`specs/containerization/design.md`
-§3), since neither is required (`requirements.md` BR4): `RESEND_API_KEY: ${RESEND_API_KEY:-}`
-(defaults to empty, not an error).
+`config.Config` gains `ResendAPIKey`, `ResendFromEmail`; `config.Load` rejects a key without
+a sender. `cmd/api/wiring.go` `buildQuoteNotifier(cfg, httpClient)` returns the Resend
+adapter when the key is set and `NoOpQuoteNotifier{}` otherwise; `main` calls it and logs the
+"disabled" notice. `.env.example` lists both variables (empty); `docker-compose.yml` passes
+them with `${VAR:-}` (not fail-fast).
 
-## 5. Testing strategy
+## 6. Tests
 
-- **Unit** (`resend_notifier_test.go`, new): `NotifyQuoteSent` with a fake
-  `http.RoundTripper` —
-  success (one request made, correct `Authorization`/body/recipient), no customer e-mail
-  (zero requests made, `nil` returned, AC2), Resend returns a non-2xx status (`error`
-  returned, not panicked, AC3), network error from the transport (`error` returned).
-- **Integration** (`internal/handlers_test/service_order_quote_decision_test.go`, extended):
-  one case with `RESEND_API_KEY` unset — confirms `SendQuote` behaves identically to before
-  this feature (AC4); this is the one integration test that actually exercises the fallback
-  wiring in `main.go`, not just the unit-level `NoOpQuoteNotifier` behavior.
-- No test calls the real Resend API — every test substitutes the `http.Client`'s transport
-  (§1's `httpClient` injection point exists specifically so tests never make a real network
-  call, consistent with every other test in this project running without external network
-  access).
+- `resend_notifier_test.go`: fake `RoundTripper` — success (headers, recipient, no link),
+  blank recipient, 4xx/5xx, transport error, canceled context.
+- `quote_notification_test.go`: fake notifier — DTO after send, no e-mail, notifier failure,
+  lookup failure, and log contents without PII.
+- `config_test.go`: the key/sender combinations.
+- `cmd/api/wiring_test.go`: composition, including `config.Load` from environment variables.
+- Integration (`internal/handlers_test/`) keeps wiring a nil/no-op notifier, covering the
+  unconfigured behavior of `SendQuote`.
 
-## 6. Traceability
+## 7. Traceability
 
-| Requirement | Design section |
+| Requirement | Section |
 | --- | --- |
-| BR1 (no e-mail on file → no-op) | §1 |
-| BR2 (informational only, no tracking link) | §1 |
-| BR3 (failure never propagates/blocks, no PII in logs) | §1, §5 |
-| BR4 (config from env, non-fatal when unset) | §3 |
-| BR5 (SendQuote unchanged) | §1 (same interface, same call site) |
-| AC1–AC6 | §1, §2, §3, §5 |
+| BR1, BR2 | §2, §3 |
+| BR3, BR4, BR5 | §3, §4 |
+| BR6 | §3 (no retry/outbox) |
+| BR7, BR8 | §4, §5 |
+| AC1–AC8 | §3–§6 |

@@ -35,6 +35,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
       JWT_TTL: ${JWT_TTL:-1h}
       EXTERNAL_NOTIFICATION_SECRET: ${EXTERNAL_NOTIFICATION_SECRET:?EXTERNAL_NOTIFICATION_SECRET is required - set it in .env}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
