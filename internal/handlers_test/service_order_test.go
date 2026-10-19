@@ -55,7 +55,8 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	customerService := customer.NewCustomerService(customerRepository)
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil)
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil).
+		WithExternalNotificationSecret(testExternalNotificationSecret)
 
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)

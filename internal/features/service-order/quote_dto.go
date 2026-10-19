@@ -145,6 +145,33 @@ func toQuoteDecisionResponse(order *ServiceOrder, quote *Quote) quoteDecisionRes
 	}
 }
 
+// ExternalQuoteDecisionRequest is the body of
+// POST /api/v1/service-orders/{id}/quote/decision
+// (specs/service-order-quote-decision/design.md §5.1).
+type ExternalQuoteDecisionRequest struct {
+	Decision string `json:"decision"`
+}
+
+// External decision values accepted by ExternalQuoteDecisionRequest.
+const (
+	externalDecisionApproved = "approved"
+	externalDecisionRejected = "rejected"
+)
+
+// toQuoteStatus maps the relayed decision onto the quote status it
+// produces; ok is false for anything other than exactly "approved" or
+// "rejected" (AC18).
+func (request ExternalQuoteDecisionRequest) toQuoteStatus() (QuoteStatus, bool) {
+	switch request.Decision {
+	case externalDecisionApproved:
+		return QuoteStatusApproved, true
+	case externalDecisionRejected:
+		return QuoteStatusRejected, true
+	default:
+		return "", false
+	}
+}
+
 // serviceOrderStatusResponse is the minimal response for the diagnosis
 // endpoint — just the order's id and new status, not the full
 // service-order-opening Response shape (which also needs customer/vehicle

@@ -1,0 +1,21 @@
+meta {
+  name: External Quote Decision
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/quote/decision
+  body: json
+  auth: none
+}
+
+headers {
+  X-External-Notification-Secret: {{externalNotificationSecret}}
+}
+
+body:json {
+  {
+    "decision": "approved"
+  }
+}

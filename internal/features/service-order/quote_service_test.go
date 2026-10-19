@@ -418,3 +418,100 @@ func TestApproveQuoteTwiceIsConsistentConflict(t *testing.T) {
 	assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
 	assert.Equal(t, StatusInProgress, order.Status)
 }
+
+// ---- External notification channel (requirements.md §9) ----
+
+func TestDecideQuoteExternalApproveSuccess(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	updatedOrder, quote, err := service.DecideQuoteExternal(context.Background(), order.ID, QuoteStatusApproved)
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusInProgress, updatedOrder.Status)
+	assert.Equal(t, QuoteStatusApproved, quote.Status)
+	assert.NotNil(t, quote.RespondedAt)
+}
+
+func TestDecideQuoteExternalRejectSuccess(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	updatedOrder, quote, err := service.DecideQuoteExternal(context.Background(), order.ID, QuoteStatusRejected)
+	require.NoError(t, err)
+
+	assert.Equal(t, StatusCanceled, updatedOrder.Status)
+	assert.Equal(t, QuoteStatusRejected, quote.Status)
+	assert.NotNil(t, quote.RespondedAt)
+}
+
+func TestDecideQuoteExternalRejectsUnknownOrder(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+
+	_, _, err := service.DecideQuoteExternal(context.Background(), uuid.New(), QuoteStatusApproved)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrServiceOrderNotFound)
+}
+
+func TestDecideQuoteExternalRejectsInvalidDecision(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.DecideQuoteExternal(context.Background(), order.ID, QuoteStatusPending)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidQuoteDecision)
+	assert.Equal(t, StatusAwaitingApproval, order.Status)
+}
+
+// TestDecideQuoteExternalRequiresSentQuote: a quote composed but never sent
+// leaves the order IN_DIAGNOSIS, so the shared core's status precondition
+// rejects the decision.
+func TestDecideQuoteExternalRequiresSentQuote(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, StatusInDiagnosis)
+	composeQuoteForOrder(t, service, repo, order)
+
+	_, _, err := service.DecideQuoteExternal(context.Background(), order.ID, QuoteStatusApproved)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+}
+
+// TestDecideQuoteExternalRepeatIsConflict covers AC19 across both channels:
+// a decision already taken via the customer channel, then relayed again
+// externally (same or different), is a consistent 409 with no state change.
+func TestDecideQuoteExternalRepeatIsConflict(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedSentQuote(t, service, repo, "the-real-token")
+
+	_, _, err := service.ApproveQuote(context.Background(), order.Code, "the-real-token")
+	require.NoError(t, err)
+
+	for _, decision := range []QuoteStatus{QuoteStatusApproved, QuoteStatusRejected} {
+		_, _, err = service.DecideQuoteExternal(context.Background(), order.ID, decision)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrQuoteAlreadyDecided)
+		assert.Equal(t, StatusInProgress, order.Status)
+	}
+}
+
+func TestAuthenticateExternalNotification(t *testing.T) {
+	service := newTestService(newFakeRepository()).WithExternalNotificationSecret("s3cret")
+
+	assert.True(t, service.AuthenticateExternalNotification("s3cret"))
+	assert.False(t, service.AuthenticateExternalNotification(""))
+	assert.False(t, service.AuthenticateExternalNotification("s3cre"))
+	assert.False(t, service.AuthenticateExternalNotification("s3cret-longer"))
+}
+
+func TestAuthenticateExternalNotificationRejectsWhenUnconfigured(t *testing.T) {
+	service := newTestService(newFakeRepository())
+
+	assert.False(t, service.AuthenticateExternalNotification(""))
+	assert.False(t, service.AuthenticateExternalNotification("anything"))
+}

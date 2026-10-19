@@ -111,6 +111,11 @@ var (
 	// deliberately indistinguishable from the caller's perspective, 401).
 	ErrTrackingTokenInvalid = errors.New("tracking token is invalid, revoked, or does not match this service order")
 
+	// ErrInvalidQuoteDecision is returned by DecideQuoteExternal when the
+	// relayed decision is neither approved nor rejected
+	// (specs/service-order-quote-decision/requirements.md AC18, 400).
+	ErrInvalidQuoteDecision = errors.New("decision must be approved or rejected")
+
 	// ErrEmptyStockUsage is returned when a stock usage request has no items
 	// (specs/service-order-stock-usage/).
 	ErrEmptyStockUsage = errors.New("stock usage must include at least one item")

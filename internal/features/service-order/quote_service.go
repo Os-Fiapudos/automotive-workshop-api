@@ -2,6 +2,8 @@ package serviceorder
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"log"
 	"strings"
@@ -132,33 +134,75 @@ func (service *ServiceOrderService) notifyQuoteSent(ctx context.Context, order *
 // IN_PROGRESS. Returns the updated order alongside the quote since the
 // public response reports both statuses.
 func (service *ServiceOrderService) ApproveQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
-	return service.decideQuote(ctx, code, rawTrackingToken, QuoteStatusApproved)
+	order, err := service.resolveOrderByTrackingToken(ctx, code, rawTrackingToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	return service.decideQuote(ctx, order, QuoteStatusApproved)
 }
 
 // RejectQuote records the customer's rejection of the service order's
 // quote, identified and authenticated the same way as ApproveQuote.
 // Rejecting moves the order to CANCELED.
 func (service *ServiceOrderService) RejectQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
-	return service.decideQuote(ctx, code, rawTrackingToken, QuoteStatusRejected)
-}
-
-// decideQuote is the shared implementation behind ApproveQuote/RejectQuote:
-// resolve the order by code + tracking token (ErrServiceOrderNotFound for an
-// unknown code, ErrTrackingTokenInvalid for a wrong/foreign/revoked token —
-// so a customer can never respond to another order's quote), require the
-// quote to still be PENDING (ErrQuoteAlreadyDecided otherwise — the same
-// outcome whether this is a second, different decision or a repeat of the
-// same one), then apply and persist the decision.
-func (service *ServiceOrderService) decideQuote(ctx context.Context, code int64, rawTrackingToken string, decision QuoteStatus) (*ServiceOrder, *Quote, error) {
-	if strings.TrimSpace(rawTrackingToken) == "" {
-		return nil, nil, ErrTrackingTokenInvalid
-	}
-
-	order, err := service.lookups.findServiceOrderByCodeWithTrackingToken(ctx, code, trackingtoken.Hash(rawTrackingToken))
+	order, err := service.resolveOrderByTrackingToken(ctx, code, rawTrackingToken)
 	if err != nil {
 		return nil, nil, err
 	}
+	return service.decideQuote(ctx, order, QuoteStatusRejected)
+}
 
+// DecideQuoteExternal records a decision relayed by an external system
+// (specs/service-order-quote-decision/requirements.md §9, design.md §5.2).
+// The caller has already been authenticated by the shared secret
+// (AuthenticateExternalNotification); the order is resolved by its
+// technical id, since no tracking token exists on this path, and the
+// decision then goes through exactly the same decideQuote core as the
+// customer-facing channel — same preconditions, same transaction.
+func (service *ServiceOrderService) DecideQuoteExternal(ctx context.Context, serviceOrderID uuid.UUID, decision QuoteStatus) (*ServiceOrder, *Quote, error) {
+	if decision != QuoteStatusApproved && decision != QuoteStatusRejected {
+		return nil, nil, ErrInvalidQuoteDecision
+	}
+
+	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return service.decideQuote(ctx, order, decision)
+}
+
+// AuthenticateExternalNotification reports whether presented matches the
+// configured external-notification secret (design.md §5.1). Both values are
+// hashed before the constant-time comparison so neither the content nor the
+// length of the secret leaks through timing. An unconfigured (empty) secret
+// never authenticates anyone.
+func (service *ServiceOrderService) AuthenticateExternalNotification(presented string) bool {
+	if service.externalNotificationSecret == "" || presented == "" {
+		return false
+	}
+	expected := sha256.Sum256([]byte(service.externalNotificationSecret))
+	actual := sha256.Sum256([]byte(presented))
+	return subtle.ConstantTimeCompare(expected[:], actual[:]) == 1
+}
+
+// resolveOrderByTrackingToken resolves the order by code + tracking token
+// (ErrServiceOrderNotFound for an unknown code, ErrTrackingTokenInvalid for
+// a missing/wrong/foreign/revoked token — so a customer can never respond to
+// another order's quote).
+func (service *ServiceOrderService) resolveOrderByTrackingToken(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, error) {
+	if strings.TrimSpace(rawTrackingToken) == "" {
+		return nil, ErrTrackingTokenInvalid
+	}
+	return service.lookups.findServiceOrderByCodeWithTrackingToken(ctx, code, trackingtoken.Hash(rawTrackingToken))
+}
+
+// decideQuote is the single decision core behind every channel
+// (ApproveQuote/RejectQuote and DecideQuoteExternal — design.md §5.2): given
+// an already-resolved order, require the quote to still be PENDING
+// (ErrQuoteAlreadyDecided otherwise — the same outcome whether this is a
+// second, different decision or a repeat of the same one), then apply and
+// persist the decision in DecideQuote's single transaction (RNF07).
+func (service *ServiceOrderService) decideQuote(ctx context.Context, order *ServiceOrder, decision QuoteStatus) (*ServiceOrder, *Quote, error) {
 	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, order.ID)
 	if err != nil {
 		return nil, nil, err

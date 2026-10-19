@@ -34,6 +34,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-workshop}:${POSTGRES_PASSWORD:-workshop}@db:5432/${POSTGRES_DB:-automotive_workshop}?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
       JWT_TTL: ${JWT_TTL:-1h}
+      EXTERNAL_NOTIFICATION_SECRET: ${EXTERNAL_NOTIFICATION_SECRET:?EXTERNAL_NOTIFICATION_SECRET is required - set it in .env}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:

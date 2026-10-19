@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,7 +72,16 @@ func main() {
 	}
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier)
+	// Shared secret for the external quote-decision channel
+	// (specs/service-order-quote-decision/design.md §5.4): fails fast like
+	// JWT_SECRET, so a misconfigured deployment is caught at startup rather
+	// than on the first external call.
+	externalNotificationSecret := os.Getenv("EXTERNAL_NOTIFICATION_SECRET")
+	if externalNotificationSecret == "" {
+		log.Fatalf("EXTERNAL_NOTIFICATION_SECRET environment variable is not set")
+	}
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier).
+		WithExternalNotificationSecret(externalNotificationSecret)
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)
