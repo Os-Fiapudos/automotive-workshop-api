@@ -362,6 +362,32 @@ func (fake *fakeRepository) findAverageExecutionTimeByService(_ context.Context,
 	return metrics, nil
 }
 
+// statusPriority mirrors the ORDER BY CASE PostgresServiceOrderRepository.
+// listServiceOrders uses for the default, no-status-filter view
+// (design.md §1.4): lower is higher priority, and a status absent from the
+// CASE (i.e. not one of these four) never reaches this ordering because it's
+// excluded by statusExcludedByDefault below.
+func statusPriority(status Status) int {
+	switch status {
+	case StatusInProgress:
+		return 1
+	case StatusAwaitingApproval:
+		return 2
+	case StatusInDiagnosis:
+		return 3
+	case StatusReceived:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// statusExcludedByDefault reports whether status is left out of the
+// default, no-status-filter listing (design.md §1.4).
+func statusExcludedByDefault(status Status) bool {
+	return status == StatusCompleted || status == StatusDelivered || status == StatusCanceled
+}
+
 // listServiceOrders is an in-memory equivalent of
 // PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
 // the same way the real SQL query does (design.md §1.3/§1.4), for the
@@ -373,6 +399,9 @@ func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilt
 			continue
 		}
 		if filter.Status != nil && string(order.Status) != *filter.Status {
+			continue
+		}
+		if filter.Status == nil && statusExcludedByDefault(order.Status) {
 			continue
 		}
 		customer := fake.customers[order.CustomerID]
@@ -393,10 +422,16 @@ func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilt
 	}
 
 	sort.Slice(matched, func(i, j int) bool {
-		if !matched[i].Order.CreatedAt.Equal(matched[j].Order.CreatedAt) {
-			return matched[i].Order.CreatedAt.After(matched[j].Order.CreatedAt)
+		if filter.Status == nil {
+			pi, pj := statusPriority(matched[i].Order.Status), statusPriority(matched[j].Order.Status)
+			if pi != pj {
+				return pi < pj
+			}
 		}
-		return matched[i].Order.Code > matched[j].Order.Code
+		if !matched[i].Order.CreatedAt.Equal(matched[j].Order.CreatedAt) {
+			return matched[i].Order.CreatedAt.Before(matched[j].Order.CreatedAt)
+		}
+		return matched[i].Order.Code < matched[j].Order.Code
 	})
 
 	total := len(matched)

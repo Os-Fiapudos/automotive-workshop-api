@@ -153,3 +153,59 @@ quote after it has been sent (recomposing after send is unaffected — it was al
 before this feature and is not extended or restricted here), quote creation itself (owned by
 `specs/service-order-diagnosis-quote/`), and any definition of `CANCELED` beyond the
 explicit decision recorded in §5.
+
+## 9. Added 2026-10-12 — external-system notification channel (Fase 2)
+
+Source: `SOAT - Fase 2 - Tech challenge.pdf` p.3, "Aprovação de orçamento: endpoint para
+receber notificações externas de aprovação ou recusa do orçamento do cliente" — distinct
+from §3 item 4/§6 above, which cover the *customer* deciding directly, authenticated by
+their own tracking token. The Fase 2 brief asks for a channel an **external system** (not
+the customer's browser/app) can call to relay a decision it collected some other way. This
+section adds that channel; it does not change or replace `POST .../orcamento/aprovar` /
+`.../reprovar`, which keep serving the customer-facing flow exactly as specified above.
+
+1. A new endpoint accepts an external system's notification of the customer's decision,
+   authenticated by a shared secret the external system presents — not a per-order tracking
+   token, since the external system is not the customer and was never issued one.
+2. The endpoint is a single route taking an explicit `decision` field (`approved` or
+   `rejected`), not two separate routes — the PDF describes one endpoint for "aprovação ou
+   recusa."
+3. Once authenticated, the same business rules as §4 apply without exception (BR3, BR4,
+   BR5, BR6, BR7, BR9): only a `PENDING` quote can be decided, approval/rejection move the
+   order the same way, a repeated decision is rejected as a conflict, and a history event is
+   recorded in the same transaction.
+4. The shared secret is a project secret (`CLAUDE.md` §13 — comes from an environment
+   variable, never hardcoded; in Kubernetes, from a Secret — see
+   `specs/kubernetes-deployment/`), not logged, not returned in any response.
+5. An invalid or missing secret is rejected the same way as any other authentication
+   failure in this project — no information about *why* it failed (wrong secret vs. no
+   order found) is revealed beyond what BR8's equivalent already reveals for the tracking
+   token path.
+
+## 9.1 Acceptance criteria (added 2026-10-12)
+
+- [ ] AC15 — `POST /api/v1/service-orders/{id}/quote/decision` with a valid secret and
+      `{"decision": "approved"}` approves the quote exactly like `.../orcamento/aprovar`
+      does (BR4, AC5, AC6).
+- [ ] AC16 — same endpoint with `{"decision": "rejected"}` rejects the quote exactly like
+      `.../orcamento/reprovar` does (BR5, AC7, AC8).
+- [ ] AC17 — a missing or incorrect shared secret is rejected with `401`, and no decision is
+      applied.
+- [ ] AC18 — a `decision` value other than `approved`/`rejected` is rejected with `400`, and
+      no decision is applied.
+- [ ] AC19 — this endpoint is subject to the same conflict/idempotency rule as AC10 (a
+      repeated decision, through either channel, is rejected consistently).
+- [ ] AC20 — the two existing customer-facing endpoints (§6) are unchanged in behavior,
+      request shape, and authentication.
+
+## 9.2 Out of scope (added 2026-10-12)
+
+- Per-external-system identities, scopes, or multiple secrets — a single shared secret is
+  sufficient for the MVP (same "no role/permission model" posture `CLAUDE.md` §13 already
+  states project-wide).
+- Signature-based authentication (HMAC over the request body) — a static shared-secret
+  header is the chosen mechanism (see `design.md` §8 for the rationale); upgrading to HMAC
+  is a future hardening step, not required by the PDF.
+- Retrying/queueing a failed external notification — the external system's own
+  responsibility; this endpoint is a plain synchronous HTTP call like every other write
+  endpoint in the project.

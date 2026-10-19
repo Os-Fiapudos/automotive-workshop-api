@@ -68,6 +68,12 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.Conflict("VEHICLE_NOT_OWNED_BY_CUSTOMER", "vehicle does not belong to the identified customer"))
 	case errors.Is(err, ErrRequestedServiceNotFound):
 		apierror.Write(w, apierror.NotFound("requested service not found"))
+	case errors.Is(err, ErrRequestedProductNotFound):
+		apierror.Write(w, &apierror.Error{Status: http.StatusNotFound, Code: "PRODUCT_NOT_FOUND", Message: "requested product not found or inactive"})
+	case errors.Is(err, ErrInvalidRequestedProductQuantity):
+		apierror.Write(w, apierror.Validation("requested product quantity must be a positive integer"))
+	case errors.Is(err, ErrDuplicateRequestedProduct):
+		apierror.Write(w, apierror.Validation("a product may appear only once in requestedProducts"))
 	case errors.Is(err, ErrInvalidAggregate):
 		apierror.Write(w, apierror.Validation("invalid service order data"))
 	case errors.Is(err, ErrServiceOrderNotFound):

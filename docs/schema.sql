@@ -265,6 +265,18 @@ COMMENT ON TABLE service_order_requested_services IS 'Services initially request
 COMMENT ON COLUMN service_order_requested_services.service_order_id IS 'Reference to the ServiceOrder this request belongs to.';
 COMMENT ON COLUMN service_order_requested_services.service_id IS 'Reference to the requested Service.';
 
+CREATE TABLE IF NOT EXISTS service_order_requested_products (
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    product_id        UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    quantity          INTEGER NOT NULL CHECK (quantity > 0),
+    PRIMARY KEY (service_order_id, product_id)
+);
+
+COMMENT ON TABLE service_order_requested_products IS 'Products/parts initially requested when a service order was opened — unpriced demand only: not a stock reservation and not a stock debit.';
+COMMENT ON COLUMN service_order_requested_products.service_order_id IS 'Reference to the ServiceOrder this request belongs to.';
+COMMENT ON COLUMN service_order_requested_products.product_id IS 'Reference to the requested Product.';
+COMMENT ON COLUMN service_order_requested_products.quantity IS 'Requested quantity (positive integer). Each product appears at most once per order.';
+
 -- ---- Quote ----
 
 CREATE TABLE IF NOT EXISTS quotes (
@@ -463,6 +475,7 @@ CREATE INDEX IF NOT EXISTS ix_service_orders_vehicle_id ON service_orders (vehic
 CREATE INDEX IF NOT EXISTS ix_quote_products_product_id ON quote_products (product_id);
 CREATE INDEX IF NOT EXISTS ix_quote_services_service_id ON quote_services (service_id);
 CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON service_order_requested_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_service_order_requested_products_product_id ON service_order_requested_products (product_id);
 CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);

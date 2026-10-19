@@ -10,7 +10,7 @@ import (
 
 func newTestOrder(t *testing.T, status Status) *ServiceOrder {
 	t.Helper()
-	order, err := NewServiceOrder(uuid.New(), uuid.New(), "", nil)
+	order, err := NewServiceOrder(uuid.New(), uuid.New(), "", nil, nil)
 	require.NoError(t, err)
 	order.Status = status
 	return order
