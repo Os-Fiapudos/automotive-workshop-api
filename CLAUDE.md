@@ -116,6 +116,10 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
 
 ```
 cmd/api/main.go             → HTTP entrypoint, wires up the server and registers feature routes
+cmd/bootstrap-admin/        → one-off command creating the first admin user on a migrated
+                               database (specs/database-migrations/, section 13)
+migrations/                 → versioned schema migrations (golang-migrate), section 14
+scripts/                    → coverage.sh, security-scan.sh, migrate.sh
 internal/features/          → one folder per business feature (vertical slice)
   features/auth/            → implemented slice: handler + service + repository + model
                                (login, /me; unit-tested)
@@ -137,8 +141,9 @@ internal/shared/            → cross-cutting code reused across features — im
 internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
                                customer_test.go, service_catalog_test.go), each skipped
                                independently when DATABASE_URL is unset
-docs/                       → domain model (entities.md) and PostgreSQL schema
-                               (schema.sql, seed.sql)
+docs/                       → domain model (entities.md), schema reference (schema.sql —
+                               produced by migrations/, no longer executed) and dev seed
+                               (seed.sql)
 .github/workflows/ci.yml    → CI pipeline
 Dockerfile, docker-compose.yml, .env.example → containerized local environment
 ```
@@ -175,33 +180,30 @@ go run ./cmd/api
 (Needs `DATABASE_URL` and `JWT_SECRET` set in the environment — the process fails fast
 without them. See `.env.example` for every variable.)
 
-Bring up the full environment (Postgres + Adminer + API) via Docker Compose:
+Bring up the full environment (Postgres + migrations + seed + API + Adminer + Swagger) via
+Docker Compose:
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
+- Order: `db` (healthy) → `migrate` (one-shot, applies `migrations/`; the API does not start
+  if it fails) → `api`; `seed` (one-shot, `docs/seed.sql`) runs after `migrate` on every
+  `up`, and nothing waits on it. Postgres' `docker-entrypoint-initdb.d` no longer creates
+  anything (since 2026-10-19, FP-33 — see section 14).
 - API: http://localhost:8080/health
-- Postgres: `localhost:5432` (credentials in `.env`), schema applied automatically on the
-  first startup of the volume.
+- Postgres: `localhost:5432` (credentials in `.env`).
 - Adminer: http://localhost:8081 (system `PostgreSQL`, server `db`).
 
-Recreate the database from scratch (e.g. after changing `schema.sql`, which only runs on
-initial volume creation):
+Recreate the database from scratch (destroys its data):
 ```bash
 docker compose down -v
 docker compose up -d
 ```
 
-`docs/seed.sql` is mounted as `/docker-entrypoint-initdb.d/02-seed.sql`, so it runs
-automatically after `schema.sql` on the initial creation of the volume. To re-apply it to an
-existing volume (it is idempotent via `ON CONFLICT DO NOTHING`) — it includes two
-administrative users (`admin@workshop.local` / `admin123` and
+The seed includes two administrative users (`admin@workshop.local` / `admin123` and
 `soat-architecture@workshop.local` / `soat-architecture`, both dev/evaluation-only,
-bcrypt-hashed at insert time):
-```bash
-docker compose cp docs/seed.sql db:/tmp/seed.sql
-docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
-```
+bcrypt-hashed at insert time). It is idempotent (`ON CONFLICT DO NOTHING`); re-run it alone
+with `docker compose up seed` (or `make seed`).
 
 ## 6. How to run the tests
 
@@ -219,6 +221,8 @@ To also run the integration tests against the local compose Postgres:
 ```bash
 DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' go test ./...
 ```
+They expect a database migrated to the latest version plus `docs/seed.sql` — what Compose
+builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the seed.
 
 ## 7. Lint, static analysis, and other checks
 
@@ -232,6 +236,10 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 - `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
   `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
   Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+- `scripts/migrate.sh verify` — run in CI by the `migrations` job (and locally by
+  `make migrate-verify`): on throwaway containers, checks the migration chain against
+  `docs/schema.sql`, re-run/no-op, full down/up, Fase 1 adoption with data preserved,
+  refusal of a non-matching database, and failure/recovery. See section 14.
 - No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
   `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
@@ -406,6 +414,13 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   no retry/outbox. Logs from it carry only the order code and an outcome — never the API key,
   the customer's e-mail or name (see
   [specs/service-order-email-notification/](specs/service-order-email-notification/)).
+- **Administrative user bootstrap** (`cmd/bootstrap-admin`, shipped in the API image as
+  `/bootstrap-admin`): reads `ADMIN_EMAIL`/`ADMIN_PASSWORD` (12–72 bytes)/optional
+  `ADMIN_NAME` from the environment — a Kubernetes `Secret` in the cluster, never Git —
+  hashes with bcrypt in-process, inserts only if the e-mail is not taken (an existing user,
+  and its password, are never modified), and logs only the outcome. Deployed environments
+  use it instead of `docs/seed.sql`, whose passwords are public (see
+  [specs/database-migrations/](specs/database-migrations/) BR10/BR11).
 - When implementing database access, use parameterized queries — never concatenate user
   input into SQL (SQL injection protection).
 - Validate and sanitize all input received in handlers before passing it to
@@ -423,26 +438,31 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 14. Database and migration rules
 
-- The schema is defined in [docs/schema.sql](docs/schema.sql) and applied automatically by
-  Postgres only on the **initial creation of the Docker volume**
-  (`docker-entrypoint-initdb.d`, as `01-schema.sql`; [docs/seed.sql](docs/seed.sql) is
-  mounted next to it as `02-seed.sql` and runs right after). There is no migration tool (e.g. `golang-migrate`,
-  `goose`) configured in the project today. **To be defined**: incremental migration
-  strategy for when the schema needs to evolve after the volume already exists in
-  shared/production environments.
-- **Added 2026-10-18**: `migrations/` holds incremental `golang-migrate`-style files
-  (`NNNN_<name>.up.sql`/`.down.sql`, see `specs/database-migrations/`). The first one is
-  `0002_service_order_requested_products` (FP-27); the `0001_init` baseline and the
-  `migrate` tooling itself belong to the database-migrations feature and are not in the
-  repo yet. Until they land, an `.up.sql` (written with `IF NOT EXISTS`) can be applied to
-  an existing volume by hand:
-  `docker compose exec -T db psql -U workshop -d automotive_workshop -f - < migrations/<file>.up.sql`.
-  Every migration is mirrored into `docs/schema.sql` in the same change.
-- To apply schema changes locally today, the flow is to recreate the volume:
-  ```bash
-  docker compose down -v
-  docker compose up -d
-  ```
+- **Resolved 2026-10-19 (FP-33, [specs/database-migrations/](specs/database-migrations/)) —
+  this section used to list the migration strategy as "to be defined".** The schema is
+  created and evolved **only** by the migrations in `migrations/`, applied with
+  `golang-migrate` `v4.20.1` from the `migrate/migrate` image (pinned in
+  `scripts/migrate.sh` and `docker-compose.yml` — keep the two in sync; not a `go.mod`
+  dependency). The same chain runs in Compose (`migrate` service), CI, and the Kubernetes
+  migration `Job` (FP-34). Postgres' `docker-entrypoint-initdb.d` no longer applies
+  `docs/schema.sql` or `docs/seed.sql`.
+- `0001_init` is the baseline: the Fase 1 schema (`docs/schema.sql` at `0e6f2ab`), with a
+  guard that refuses to run on a database that already has tables. A pre-existing database
+  (e.g. a Fase 1 volume) is adopted with `scripts/migrate.sh baseline` /
+  `make migrate-baseline`: it backs up, proves the schema equals exactly one migration
+  version on a throwaway database, then records that version. Never record ("force") a
+  version without that proof — the script has no raw `force` on purpose. The same command
+  recovers a database left dirty by a failed migration.
+- **Adding a schema change**: `make migrate-create name=<snake_case>` → write the `.up.sql`
+  and its exact-inverse `.down.sql` → update [docs/schema.sql](docs/schema.sql) to the
+  resulting full schema **in the same change** (it is the human-readable reference, no
+  longer executed by any environment) → `make migrate-verify` (CI job `migrations` fails if
+  the chain and `docs/schema.sql` diverge). Never edit a migration that was applied
+  anywhere; add a corrective one. No `BEGIN`/`COMMIT` and nothing that cannot run in a
+  transaction (`CREATE INDEX CONCURRENTLY`, …): each file must stay atomic.
+- `down` (`scripts/migrate.sh down`, `make migrate-down`) is for disposable databases only
+  and refuses without `MIGRATE_CONFIRM_DOWN=yes`; with data that matters, back up and add a
+  corrective migration instead.
 - Any schema change must keep [docs/entities.md](docs/entities.md),
   [docs/schema.sql](docs/schema.sql), and [docs/seed.sql](docs/seed.sql) in sync with each
   other.

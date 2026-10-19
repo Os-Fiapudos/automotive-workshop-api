@@ -43,7 +43,16 @@ help: ## Mostra esta ajuda
 	@echo '  make start-db     — Sobe apenas o banco Postgres'
 	@echo '  make logs         — Mostra logs dos containers'
 	@echo '  make stop         — Para todos os serviços'
-	@echo '  make reset        — Recria banco do zero (apaga dados) + seed'
+	@echo '  make reset        — Recria banco do zero (apaga dados) + migrations + seed'
+	@echo ''
+	@echo '=== Migrations do banco (golang-migrate) ==='
+	@echo '  make migrate-up       — Aplica as migrations pendentes'
+	@echo '  make migrate-version  — Mostra a versão atual do schema'
+	@echo '  make migrate-create name=<nome> — Cria o próximo par NNNN_<nome>.up/.down.sql'
+	@echo '  make migrate-baseline — Adota um banco existente (Fase 1/dirty): backup + comprovação'
+	@echo '  make migrate-verify   — Verifica a cadeia inteira em containers descartáveis (igual à CI)'
+	@echo '  make migrate-down MIGRATE_CONFIRM_DOWN=yes — Reverte 1 migration (só banco descartável)'
+	@echo '  make bootstrap-admin  — Cria o admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD'
 	@echo ''
 	@echo '=== Opção 2: Banco no Docker + API local ==='
 	@echo '  make start-db     — Sobe apenas o Postgres (docker)'
@@ -116,11 +125,9 @@ clean: ## Para e remove containers + volumes (APAGA DADOS)
 	@echo 'Containers e volumes removidos — dados apagados.'
 
 .PHONY: reset
-reset: setup clean start ## Recria banco do zero (apaga dados) + popula com seed
-	@sleep 3
-	$(MAKE) seed
+reset: setup clean start ## Recria banco do zero (apaga dados) + migrations + seed
 	@echo ''
-	@echo 'Reset completo! Banco recriado e populado com dados de exemplo.'
+	@echo 'Reset completo! Banco recriado pelas migrations e populado pelo serviço seed do Compose.'
 	@echo '  Usuário admin: admin@workshop.local / admin123'
 	@echo '  Faça login com: make login'
 
@@ -184,8 +191,55 @@ psql: ## Abre console psql interativo no banco via Docker
 # ─── Schema ───────────────────────────────────────────────────────────────────
 
 .PHONY: schema
-schema: ## Recria o esquema do banco (apaga e recria tudo via schema.sql)
+schema: migrate-check-db ## Recria o esquema do banco (APAGA TUDO) reaplicando as migrations
 	@echo 'ATENÇÃO: Isso vai apagar TODOS os dados existentes!'
 	$(COMPOSE) exec -T db psql -U $(DB_USER) -d $(DB_NAME) -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-	$(COMPOSE) exec -T db psql -U $(DB_USER) -d $(DB_NAME) -f /docker-entrypoint-initdb.d/01-schema.sql
-	@echo 'Schema recriado a partir de docs/schema.sql'
+	@$(MIGRATE_ENV) $(MIGRATE) up
+	@echo 'Schema recriado pelas migrations (make seed para os dados de exemplo).'
+
+# ─── Migrations (specs/database-migrations/) ──────────────────────────────────
+# The tool containers join the Compose database's network and reach it as db:5432,
+# so these targets work the same on Linux, macOS and Windows (no --network host).
+
+MIGRATE         := scripts/migrate.sh
+COMPOSE_DB_URL   = postgres://$(DB_USER):$(DB_PASS)@db:5432/$(DB_NAME)?sslmode=disable
+COMPOSE_NETWORK  = $(shell docker inspect -f '{{range $$k, $$v := .NetworkSettings.Networks}}{{$$k}}{{end}}' $$($(COMPOSE) ps -q db 2>/dev/null) 2>/dev/null)
+MIGRATE_ENV      = DATABASE_URL='$(COMPOSE_DB_URL)' MIGRATE_NETWORK='$(COMPOSE_NETWORK)'
+
+# Passed to `docker compose run -e` by bootstrap-admin, whether set in the
+# environment or on the make command line.
+export ADMIN_EMAIL ADMIN_PASSWORD ADMIN_NAME
+
+.PHONY: migrate-check-db
+migrate-check-db:
+	@test -n "$(COMPOSE_NETWORK)" || { echo "O banco do Compose não está rodando — suba com: make start-db"; exit 1; }
+
+.PHONY: migrate-up
+migrate-up: migrate-check-db ## Aplica as migrations pendentes no banco do Compose
+	@$(MIGRATE_ENV) $(MIGRATE) up
+
+.PHONY: migrate-version
+migrate-version: migrate-check-db ## Mostra a versão atual do schema
+	@$(MIGRATE_ENV) $(MIGRATE) version
+
+.PHONY: migrate-create
+migrate-create: ## Cria o próximo par de migration (make migrate-create name=add_x)
+	@test -n "$(name)" || { echo "Uso: make migrate-create name=<nome_em_snake_case>"; exit 1; }
+	$(MIGRATE) create $(name)
+
+.PHONY: migrate-down
+migrate-down: migrate-check-db ## Reverte 1 migration — só em banco descartável (MIGRATE_CONFIRM_DOWN=yes)
+	@$(MIGRATE_ENV) MIGRATE_CONFIRM_DOWN='$(MIGRATE_CONFIRM_DOWN)' $(MIGRATE) down 1
+
+.PHONY: migrate-baseline
+migrate-baseline: migrate-check-db ## Adota um banco existente (Fase 1/dirty): backup + comprovação + versão
+	@$(MIGRATE_ENV) $(MIGRATE) baseline
+
+.PHONY: migrate-verify
+migrate-verify: ## Verifica a cadeia de migrations em containers descartáveis (igual à CI)
+	$(MIGRATE) verify
+
+.PHONY: bootstrap-admin
+bootstrap-admin: ## Cria o usuário admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD (idempotente)
+	@test -n "$$ADMIN_EMAIL" && test -n "$$ADMIN_PASSWORD" || { echo "Uso: ADMIN_EMAIL=... ADMIN_PASSWORD=... make bootstrap-admin"; exit 1; }
+	$(COMPOSE) run --build --rm --no-deps -e ADMIN_EMAIL -e ADMIN_PASSWORD -e ADMIN_NAME api /bootstrap-admin
