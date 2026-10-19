@@ -65,8 +65,13 @@ func main() {
 	vehicleRepository := vehicle.NewPostgresVehicleRepository(pool)
 	vehicleService := vehicle.NewVehicleService(vehicleRepository, customerLookupAdapter{service: customerService})
 
+	quoteNotifier := buildQuoteNotifier(configuration, nil)
+	if configuration.ResendAPIKey == "" {
+		log.Println("RESEND_API_KEY not set - quote-sent e-mail notifications are disabled")
+	}
+
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, serviceorder.NoOpQuoteNotifier{})
+	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier)
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)

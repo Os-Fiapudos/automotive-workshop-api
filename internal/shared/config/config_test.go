@@ -95,3 +95,39 @@ func TestLoadRejectsInvalidJWTTTL(t *testing.T) {
 		t.Fatalf("expected a JWT_TTL error, got: %v", err)
 	}
 }
+
+func TestLoadResendConfiguration(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     string
+		from    string
+		wantErr bool
+	}{
+		{"disabled when neither is set", "", "", false},
+		{"disabled when only the sender is set", "", "oficina@example.com", false},
+		{"key without sender is rejected", "re_key", "", true},
+		{"complete pair", "re_key", "oficina@example.com", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
+			t.Setenv("JWT_SECRET", validJWTSecret)
+			t.Setenv("RESEND_API_KEY", tc.key)
+			t.Setenv("RESEND_FROM_EMAIL", tc.from)
+
+			cfg, err := Load()
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "RESEND_FROM_EMAIL") {
+					t.Fatalf("expected RESEND_FROM_EMAIL error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.ResendAPIKey != tc.key || cfg.ResendFromEmail != tc.from {
+				t.Errorf("got key=%q from=%q", cfg.ResendAPIKey, cfg.ResendFromEmail)
+			}
+		})
+	}
+}

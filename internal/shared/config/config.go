@@ -22,11 +22,19 @@ type Config struct {
 	Port        string
 	JWTSecret   string
 	JWTTTL      time.Duration
+
+	// ResendAPIKey/ResendFromEmail configure the optional quote-sent e-mail
+	// notification (specs/service-order-email-notification/). Both empty means
+	// the integration is disabled; Load rejects a key without a sender.
+	ResendAPIKey    string
+	ResendFromEmail string
 }
 
 // Load reads DATABASE_URL and JWT_SECRET (both required — the process fails
 // fast without them, per specs/auth/design.md §5), and PORT/JWT_TTL
 // (optional, defaulting to "8080" and 1h respectively) from the environment.
+// RESEND_API_KEY and RESEND_FROM_EMAIL are an optional pair: neither set
+// disables e-mail notification, but a key without a sender is a startup error.
 func Load() (Config, error) {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -55,5 +63,18 @@ func Load() (Config, error) {
 		port = "8080"
 	}
 
-	return Config{DatabaseURL: databaseURL, Port: port, JWTSecret: jwtSecret, JWTTTL: jwtTTL}, nil
+	resendAPIKey := os.Getenv("RESEND_API_KEY")
+	resendFromEmail := os.Getenv("RESEND_FROM_EMAIL")
+	if resendAPIKey != "" && resendFromEmail == "" {
+		return Config{}, fmt.Errorf("RESEND_FROM_EMAIL is required when RESEND_API_KEY is set")
+	}
+
+	return Config{
+		DatabaseURL:     databaseURL,
+		Port:            port,
+		JWTSecret:       jwtSecret,
+		JWTTTL:          jwtTTL,
+		ResendAPIKey:    resendAPIKey,
+		ResendFromEmail: resendFromEmail,
+	}, nil
 }

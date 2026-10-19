@@ -1,37 +1,31 @@
 # Tasks — Quote-Sent E-mail Notification (Resend)
 
-## 1. Domain/read-model (`design.md` §2)
+## 1. Configuration
+- [x] `config.Config` + `config.Load`: optional `RESEND_API_KEY` / `RESEND_FROM_EMAIL` pair.
+- [x] `config_test.go` cases.
 
-- [ ] `customerRef` gains `Email *string`; the query `SendQuote` uses to resolve the order's
-      customer selects `customers.email` too.
+## 2. Port and lookup
+- [x] `QuoteNotification` DTO; `QuoteNotifier` and `NoOpQuoteNotifier` updated.
+- [x] `customerRef.Email`; `findCustomerByID` / `findCustomerByDocument` / `scanCustomerRef`.
 
-## 2. Notifier implementation (`design.md` §1)
+## 3. Service
+- [x] `SendQuote` → `notifyQuoteSent` (lookup, DTO, notify, PII-free log).
 
-- [ ] `ResendQuoteNotifier` implementing `QuoteNotifier`: no customer e-mail → no-op;
-      builds and sends the Resend HTTP request; non-2xx or transport error → returned as
-      `error` (still discarded by `SendQuote`, unchanged).
-- [ ] Confirm message content has no tracking link (`requirements.md` §1/BR2 constraint).
+## 4. Adapter
+- [x] `ResendQuoteNotifier` (HTTP, 5s timeout, no SDK, no link in the text).
 
-## 3. Wiring (`design.md` §3, §4)
+## 5. Composition and ops
+- [x] `cmd/api/wiring.go` `buildQuoteNotifier`; `main` uses it.
+- [x] `.env.example`, `docker-compose.yml` (non-fail-fast).
+- [x] `README.md`, `CLAUDE.md` §13, `specs/architecture.md` §7.
 
-- [ ] `cmd/api/main.go`: read `RESEND_API_KEY`/`RESEND_FROM_EMAIL`; wire
-      `ResendQuoteNotifier` when the key is set (fatal if the key is set but the from-address
-      isn't), `NoOpQuoteNotifier{}` with a log line otherwise.
-- [ ] `.env.example`: add `RESEND_API_KEY=`, `RESEND_FROM_EMAIL=`.
-- [ ] `docker-compose.yml`: add both to the `api` service's environment, non-fail-fast form
-      (`design.md` §4 — differs from `specs/containerization/`'s other Fase 2 secrets, which
-      stay fail-fast).
+## 6. Tests
+- [x] Adapter tests with a fake transport.
+- [x] Service tests with a fake notifier (incl. log contents).
+- [x] Wiring tests (`cmd/api/wiring_test.go`).
 
-## 4. Tests (`design.md` §5)
-
-- [ ] Unit tests with a fake `http.RoundTripper`: success, no-email no-op, non-2xx response,
-      transport error.
-- [ ] Integration test: `RESEND_API_KEY` unset → `SendQuote` behaves identically to the
-      pre-feature `NoOpQuoteNotifier` wiring.
-
-## 5. Verification
-
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...` pass.
-- [ ] Confirm no log line in this feature's code contains the API key, customer e-mail, or
-      customer name (manual code read, `requirements.md` AC5 — not mechanically enforced).
-- [ ] Re-check `requirements.md` AC1–AC6.
+## 7. Verification
+- [x] `go build ./...`, `go vet ./...`, `go test ./...`.
+- [ ] `scripts/coverage.sh` against a real Postgres (RNF06).
+- [ ] Demo evidence of a real send, only if Resend is adopted with a verified sender.
+- [ ] PR review.
