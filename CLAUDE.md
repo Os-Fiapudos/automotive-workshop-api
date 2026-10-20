@@ -109,6 +109,14 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)). `api` now
   requires `JWT_SECRET` to be set (compose fails fast via `${JWT_SECRET:?...}` if it's
   missing from `.env`).
+  **Hardened on 2026-10-19 (FP-32, [specs/containerization/](specs/containerization/))**:
+  the image runs on `alpine:3.24` as non-root UID/GID `10001`, has a `HEALTHCHECK` on
+  `/health` (BusyBox `wget`), and is built from an allowlist
+  [.dockerignore](.dockerignore) (`go.mod`, `go.sum`, `cmd/`, `internal/` only — a new path
+  the build needs must be re-included there and copied in the `Dockerfile`). Image versions
+  (`alpine:3.24`, `adminer:6.1.1`, `swaggerapi/swagger-ui:v5.33.1`,
+  `migrate/migrate:v4.20.1`) are pinned on purpose: raise them as a reviewed change, never
+  back to `:latest`.
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
 
@@ -119,7 +127,7 @@ cmd/api/main.go             → HTTP entrypoint, wires up the server and registe
 cmd/bootstrap-admin/        → one-off command creating the first admin user on a migrated
                                database (specs/database-migrations/, section 13)
 migrations/                 → versioned schema migrations (golang-migrate), section 14
-scripts/                    → coverage.sh, security-scan.sh, migrate.sh
+scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh
 internal/features/          → one folder per business feature (vertical slice)
   features/auth/            → implemented slice: handler + service + repository + model
                                (login, /me; unit-tested)
@@ -145,7 +153,7 @@ docs/                       → domain model (entities.md), schema reference (sc
                                produced by migrations/, no longer executed) and dev seed
                                (seed.sql)
 .github/workflows/ci.yml    → CI pipeline
-Dockerfile, docker-compose.yml, .env.example → containerized local environment
+Dockerfile, .dockerignore, docker-compose.yml, .env.example → containerized local environment
 ```
 
 specs/                      → SDD specifications: specs/README.md (process) and
@@ -190,9 +198,13 @@ docker compose up -d
   if it fails) → `api`; `seed` (one-shot, `docs/seed.sql`) runs after `migrate` on every
   `up`, and nothing waits on it. Postgres' `docker-entrypoint-initdb.d` no longer creates
   anything (since 2026-10-19, FP-33 — see section 14).
-- API: http://localhost:8080/health
+- API: http://localhost:8080/health (`docker compose ps` shows it `healthy`).
 - Postgres: `localhost:5432` (credentials in `.env`).
 - Adminer: http://localhost:8081 (system `PostgreSQL`, server `db`).
+- Swagger UI: http://localhost:8082 (`docs/openapi.yaml`).
+- Smoke test: `make smoke` (`scripts/smoke.sh`, needs only `curl`) — health, login with the
+  seed admin, opens and reads a service order. After a restart, `SMOKE_EXPECT_ORDER_ID=<id>
+  make smoke` also checks an order created before it survived.
 
 Recreate the database from scratch (destroys its data):
 ```bash

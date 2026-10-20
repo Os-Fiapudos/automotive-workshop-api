@@ -154,6 +154,11 @@ cp .env.example .env
 > - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (opcionais, sempre em par): habilitam o e-mail de
 >   "orçamento disponível" via Resend. Sem a chave, a notificação fica desabilitada (no-op); chave
 >   sem remetente impede a API de iniciar.
+>
+> **Obrigatórias:** `JWT_SECRET` e `EXTERNAL_NOTIFICATION_SECRET`. Sem qualquer uma delas, o
+> `docker compose` se recusa a subir e diz qual variável falta (ex.: `required variable
+> JWT_SECRET is missing a value`). As portas (`*_PORT`) são as do seu computador; dentro dos
+> containers elas não mudam.
 
 ---
 
@@ -174,11 +179,22 @@ O Docker iniciará os serviços nesta ordem:
 1. **`db`** (PostgreSQL 16): o banco, vazio na primeira subida — ele **não** cria o schema sozinho.
 2. **`migrate`** (golang-migrate, executa e termina): aplica as [migrations](#migrações-do-banco-de-dados) pendentes de `migrations/` assim que o banco está saudável. Se falhar, `docker compose up` termina com erro e a API **não** sobe.
 3. **`seed`** (executa e termina): aplica os dados de exemplo de `docs/seed.sql` depois das migrations, a cada `up` (é idempotente). Uma falha no seed não impede a API de subir.
-4. **`api`** (Go 1.26): inicializa a API na porta `8080` depois que as migrations terminam com sucesso.
-5. **`swagger-ui`**: Interface interativa com a documentação OpenAPI 3.0 na porta `8082`.
-6. **`adminer`**: Interface web para navegação e consultas no PostgreSQL na porta `8081`.
+4. **`api`** (Go 1.26): inicializa a API na porta `8080` depois que o banco está saudável e as migrations terminam com sucesso; fica `healthy` quando `GET /health` responde.
+5. **`swagger-ui`** (`v5.33.1`): Interface interativa com a documentação OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)) na porta `8082`.
+6. **`adminer`** (`6.1.1`): Interface web para navegação e consultas no PostgreSQL na porta `8081`, depois que o banco está saudável.
 
 > `migrate` e `seed` aparecem como `Exited (0)` em `docker compose ps -a` — é o esperado. Para ver o que aplicaram: `docker compose logs migrate seed`.
+
+#### Sobre a imagem da API
+
+O [Dockerfile](Dockerfile) é multi-stage ([specs/containerization/](specs/containerization/)):
+
+- **Build** em `golang:1.26-alpine` (mesma versão do `go.mod` e da CI). As dependências são baixadas numa camada própria, reaproveitada enquanto `go.mod`/`go.sum` não mudam.
+- **Execução** em `alpine:3.24`, só com os binários `/api` e `/bootstrap-admin` (sem Go nem código-fonte).
+- Roda como **usuário não root** `app` (UID/GID `10001`), sem permissão de escrita nos binários.
+- **`HEALTHCHECK`** chama `GET /health` a cada 10 s; `docker compose ps` mostra `(healthy)`.
+- O [.dockerignore](.dockerignore) é uma lista de permitidos: só `go.mod`, `go.sum`, `cmd/` e `internal/` entram no contexto de build. `.env`, `backups/`, estado do Terraform e qualquer arquivo novo ficam de fora.
+- As versões das imagens (`alpine`, `adminer`, `swagger-ui`, `migrate`) são fixadas de propósito; atualize-as revisando a spec, não trocando para `latest`.
 
 ---
 
@@ -200,6 +216,21 @@ curl http://localhost:8080/health
 {"status":"ok"}
 ```
 
+Para um teste completo, rode o **smoke test** ([scripts/smoke.sh](scripts/smoke.sh)): health, login com o admin do seed, abertura de uma OS autenticada e consulta dela.
+
+```bash
+make smoke          # ou: scripts/smoke.sh  (precisa só de curl)
+```
+
+A última linha mostra o id da OS criada. Para provar que os dados sobrevivem a um restart (ficam no volume `db_data`):
+
+```bash
+docker compose restart          # ou: docker compose down && docker compose up -d  (sem -v)
+SMOKE_EXPECT_ORDER_ID=<id da OS> make smoke
+```
+
+O script usa por padrão a porta `API_PORT` do `.env` e os IDs fixos do seed; todos podem ser trocados por variáveis `SMOKE_*` (veja o cabeçalho do script). Cada execução abre uma OS nova no banco local.
+
 ---
 
 ### URLs e Acessos Disponíveis
@@ -207,7 +238,7 @@ curl http://localhost:8080/health
 | Serviço | URL de Acesso | Descrição |
 | :--- | :--- | :--- |
 | **API REST** | `http://localhost:8080` | Ponto de entrada da API. |
-| **Swagger UI** | `http://localhost:8082` | Documentação interativa completa (OpenAPI 3.0). |
+| **Swagger UI** | `http://localhost:8082` | Documentação interativa completa (OpenAPI 3.0). As collections (Bruno, Postman, Insomnia) estão em [Coleções para Testes](#coleções-para-testes-bruno-postman-e-insomnia). |
 | **Adminer (DB Web)** | `http://localhost:8081` | Gerenciador do Postgres (Servidor: `db`, Usuário: `workshop`, Senha: `workshop`, Base: `automotive_workshop`). |
 | **Postgres Database** | `localhost:5432` | Conexão direta com o banco de dados. |
 
@@ -226,6 +257,7 @@ curl http://localhost:8080/health
 | **Aplicar migrations pendentes** | `make migrate-up` | `docker compose up migrate` |
 | **Ver versão do schema** | `make migrate-version` | — |
 | **Testar login via curl** | `make login` | *(via curl no endpoint `/api/v1/auth/login`)* |
+| **Smoke test (health, login, abrir e consultar OS)** | `make smoke` | `scripts/smoke.sh` |
 | **Abrir terminal psql no banco** | `make psql` | `docker compose exec db psql -U workshop -d automotive_workshop` |
 
 ---
@@ -505,10 +537,12 @@ automotive-workshop-api/
 ├── scripts/                        # Scripts de automação
 │   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
 │   ├── migrate.sh                  # Migrations: up, version, create, down, baseline, verify
-│   └── security-scan.sh            # Varredura com gosec e govulncheck
+│   ├── security-scan.sh            # Varredura com gosec e govulncheck
+│   └── smoke.sh                    # Smoke test da stack local (health, login, abrir/consultar OS)
 ├── .env.example                    # Modelo de configuração de ambiente
 ├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer)
-├── Dockerfile                      # Build multistage da API em Go
+├── .dockerignore                   # Contexto de build: só go.mod, go.sum, cmd/ e internal/
+├── Dockerfile                      # Build multi-stage da API (não root, healthcheck)
 ├── Makefile                        # Atalhos de comandos para desenvolvimento
 └── go.mod                          # Módulo Go e dependências
 ```
