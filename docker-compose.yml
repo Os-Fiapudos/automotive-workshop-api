@@ -1,3 +1,11 @@
+# Local environment (specs/containerization/, specs/database-migrations/).
+#
+# Startup order: db (healthy) -> migrate (exits 0) -> api (healthy); seed runs
+# after migrate and nothing waits on it; adminer waits for db; n8n starts
+# after api.
+# Host ports (set in .env): API_PORT 8080, ADMINER_PORT 8081,
+# SWAGGER_UI_PORT 8082, N8N_PORT 5678, POSTGRES_PORT 5432.
+# Image versions are pinned on purpose - review them before raising.
 services:
   db:
     image: postgres:16-alpine
@@ -52,14 +60,16 @@ services:
         condition: service_completed_successfully
 
   adminer:
-    image: adminer:latest
+    image: adminer:6.1.1
     restart: unless-stopped
     ports:
-      - "${ADMINER_PORT:-8085}:8080"
+      - "${ADMINER_PORT:-8081}:8080"
     depends_on:
       db:
         condition: service_healthy
 
+  # Health is reported by the image's HEALTHCHECK (GET /health). PORT is not set:
+  # inside the container the API stays on 8080; API_PORT only changes the host side.
   api:
     build: .
     restart: unless-stopped
@@ -110,14 +120,14 @@ services:
       - api
 
   swagger-ui:
-    image: swaggerapi/swagger-ui:latest
+    image: swaggerapi/swagger-ui:v5.33.1
     restart: unless-stopped
     environment:
       SWAGGER_JSON: /openapi.yaml
     volumes:
       - ./docs/openapi.yaml:/openapi.yaml:ro
     ports:
-      - "${SWAGGER_UI_PORT:-8083}:8080"
+      - "${SWAGGER_UI_PORT:-8082}:8080"
 
 volumes:
   db_data:

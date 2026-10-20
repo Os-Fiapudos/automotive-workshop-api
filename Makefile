@@ -44,6 +44,7 @@ help: ## Mostra esta ajuda
 	@echo '  make logs         — Mostra logs dos containers'
 	@echo '  make stop         — Para todos os serviços'
 	@echo '  make reset        — Recria banco do zero (apaga dados) + migrations + seed'
+	@echo '  make smoke        — Smoke test: health, login, abre e consulta uma OS'
 	@echo ''
 	@echo '=== Migrations do banco (golang-migrate) ==='
 	@echo '  make migrate-up       — Aplica as migrations pendentes'
@@ -184,6 +185,10 @@ login: ## Faz login com o usuário admin e exibe o JWT
 curl: ## Testa o health check da API
 	@echo '>>> Health check:'
 	@curl -s http://localhost:$(API_PORT)/health | jq .
+
+.PHONY: smoke
+smoke: ## Smoke test da stack local: health, login, abre e consulta uma OS (SMOKE_EXPECT_ORDER_ID após restart)
+	@API_PORT=$(API_PORT) scripts/smoke.sh
 
 .PHONY: psql
 psql: ## Abre console psql interativo no banco via Docker
