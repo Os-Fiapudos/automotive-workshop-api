@@ -79,8 +79,9 @@ func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Co
 // service_order_history, transactionally (RNF07). The
 // "AND status = 'RECEIVED'" guard closes a race with a concurrent
 // transition: zero rows affected is treated the same as the pre-checked
-// ErrInvalidStatusTransition.
-func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Context, order *ServiceOrder) error {
+// ErrInvalidStatusTransition. notes, if non-empty, is appended to the
+// history description (specs/service-order-status-update/design.md §2).
+func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Context, order *ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -101,7 +102,7 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'diagnosis_started', $2, 'RECEIVED', $3)`,
-		order.ID, "Diagnosis started.", string(order.Status),
+		order.ID, historyDescription(historyDiagnosisStarted, notes), string(order.Status),
 	); err != nil {
 		return err
 	}

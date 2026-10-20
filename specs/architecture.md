@@ -104,6 +104,16 @@ code but are not yet described in this document; the sections below cover `auth`
 > `decideQuote` core and `DecideQuote` transaction as the tracking-token routes, so the rules
 > and the conflict behavior are shared rather than duplicated.
 
+> **Addendum (`specs/service-order-status-update/`, Fase 2)**: `POST /api/v1/service-orders/{id}/status`,
+> also registered without `requireAuth`, authenticates with `X-External-Status-Secret`
+> against `EXTERNAL_STATUS_UPDATE_SECRET` (required, and must differ from
+> `EXTERNAL_NOTIFICATION_SECRET` — `cmd/api/main.go` fails fast otherwise). It dispatches
+> `IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED` to the same private cores behind
+> `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder`; the repository transition methods now take
+> a `notes` argument appended to the history description (always `""` from the
+> administrative routes). The calling tool is an n8n service in `docker-compose.yml` whose
+> workflow is versioned in `tools/n8n/` and imported on startup.
+
 > **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
 > `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
 > a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/

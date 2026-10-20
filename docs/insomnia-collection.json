@@ -1143,7 +1143,7 @@
       "settingFollowRedirects": "global",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"endedAt\": \"2026-08-24T18:30:00Z\"\n}"
+        "text": "{}"
       }
     },
     {

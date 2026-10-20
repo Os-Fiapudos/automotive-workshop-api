@@ -106,6 +106,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.Unauthorized("INVALID_TRACKING_TOKEN", "tracking token is invalid, revoked, or does not match this service order"))
 	case errors.Is(err, ErrInvalidQuoteDecision):
 		apierror.Write(w, apierror.Validation("decision must be approved or rejected"))
+	case errors.Is(err, ErrUnsupportedExternalStatus):
+		apierror.Write(w, apierror.Validation("status must be one of IN_DIAGNOSIS, COMPLETED, DELIVERED"))
+	case errors.Is(err, ErrInvalidStatusUpdateNotes):
+		apierror.Write(w, apierror.Validation("notes must be at most 500 characters"))
 	case errors.Is(err, ErrEmptyStockUsage):
 		apierror.Write(w, apierror.Validation("stock usage must include at least one item"))
 	case errors.Is(err, ErrInsufficientStock):
