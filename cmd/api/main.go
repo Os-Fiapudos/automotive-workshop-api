@@ -80,8 +80,20 @@ func main() {
 	if externalNotificationSecret == "" {
 		log.Fatalf("EXTERNAL_NOTIFICATION_SECRET environment variable is not set")
 	}
+	// Shared secret for the external status-update tool
+	// (specs/service-order-status-update/design.md §3): required, and must
+	// differ from the quote-decision secret so each integration can be
+	// rotated/revoked on its own (requirements.md BR4).
+	externalStatusUpdateSecret := os.Getenv("EXTERNAL_STATUS_UPDATE_SECRET")
+	if externalStatusUpdateSecret == "" {
+		log.Fatalf("EXTERNAL_STATUS_UPDATE_SECRET environment variable is not set")
+	}
+	if externalStatusUpdateSecret == externalNotificationSecret {
+		log.Fatalf("EXTERNAL_STATUS_UPDATE_SECRET must differ from EXTERNAL_NOTIFICATION_SECRET")
+	}
 	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier).
-		WithExternalNotificationSecret(externalNotificationSecret)
+		WithExternalNotificationSecret(externalNotificationSecret).
+		WithExternalStatusUpdateSecret(externalStatusUpdateSecret)
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)

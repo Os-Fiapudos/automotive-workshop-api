@@ -104,6 +104,16 @@ code but are not yet described in this document; the sections below cover `auth`
 > `decideQuote` core and `DecideQuote` transaction as the tracking-token routes, so the rules
 > and the conflict behavior are shared rather than duplicated.
 
+> **Addendum (`specs/service-order-status-update/`, Fase 2)**: `POST /api/v1/service-orders/{id}/status`,
+> also registered without `requireAuth`, authenticates with `X-External-Status-Secret`
+> against `EXTERNAL_STATUS_UPDATE_SECRET` (required, and must differ from
+> `EXTERNAL_NOTIFICATION_SECRET` — `cmd/api/main.go` fails fast otherwise). It dispatches
+> `IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED` to the same private cores behind
+> `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder`; the repository transition methods now take
+> a `notes` argument appended to the history description (always `""` from the
+> administrative routes). The calling tool is an n8n service in `docker-compose.yml` whose
+> workflow is versioned in `tools/n8n/` and imported on startup.
+
 > **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
 > `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
 > a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/
@@ -203,7 +213,7 @@ depends on another's current state.
 | Sample data | `docs/seed.sql` | Implemented as plain SQL; applied by the Compose `seed` service after the migrations (local and CI test databases only, never a deployed environment). Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`), four sample customers, five sample vehicles (one `INACTIVE`, owned by the one `INACTIVE` customer), and six sample services (one deliberately inactive). |
 | Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User` and the `Service.active` field. `Customer`, `Vehicle`, `User`, and `Service` are the only entities with a corresponding Go implementation. |
 | API documentation | `docs/openapi.yaml` | Implemented for the Customer Management and Vehicle Management endpoints (schemas, pagination, error envelope, `bearerAuth` security scheme for Vehicle Management). The auth and service catalog endpoints are not documented here â€” `specs/auth/requirements.md` and `specs/service-catalog/requirements.md` both scoped RNF10 out as a separate future feature. |
-| Local environment | `docker-compose.yml`, `Dockerfile`, `.dockerignore`, `scripts/smoke.sh` | Implemented â€” orchestrates `db` (Postgres), the one-shot `migrate` and `seed` (FP-33), `api`, `adminer` and `swagger-ui`; `api` requires `JWT_SECRET` and `EXTERNAL_NOTIFICATION_SECRET` (fails fast via compose variable substitution if unset). Since FP-32 (2026-10-19, `specs/containerization/`) the image runs on `alpine:3.24` as non-root UID/GID `10001` with a `HEALTHCHECK` on `/health`, built from an allowlist `.dockerignore`; helper images are pinned; `make smoke` checks health, login and an authenticated service-order opening/query. |
+| Local environment | `docker-compose.yml`, `Dockerfile`, `.dockerignore`, `scripts/smoke.sh` | Implemented â€” orchestrates `db` (Postgres), the one-shot `migrate` and `seed` (FP-33), `api`, `adminer`, `swagger-ui` and `n8n` (FP-30); `api` requires `JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET` and `EXTERNAL_STATUS_UPDATE_SECRET` (fails fast via compose variable substitution if unset). Since FP-32 (2026-10-19, `specs/containerization/`) the image runs on `alpine:3.24` as non-root UID/GID `10001` with a `HEALTHCHECK` on `/health`, built from an allowlist `.dockerignore`; helper images are pinned; `make smoke` checks health, login and an authenticated service-order opening/query. |
 | CI | `.github/workflows/ci.yml` | Implemented â€” runs `go build ./...`, `go vet ./...`, `go test ./...`. |
 
 ## 3. Responsibilities

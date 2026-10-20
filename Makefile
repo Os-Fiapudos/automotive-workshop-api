@@ -140,6 +140,7 @@ run: ## Roda a API localmente (requer Postgres rodando via start-db)
 	JWT_SECRET="$(shell grep -E '^JWT_SECRET=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 'change-me-dev-only')" \
 	JWT_TTL="$(shell grep -E '^JWT_TTL=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo '1h')" \
 	EXTERNAL_NOTIFICATION_SECRET="$(shell grep -E '^EXTERNAL_NOTIFICATION_SECRET=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 'change-me-dev-only')" \
+	EXTERNAL_STATUS_UPDATE_SECRET="$(shell grep -E '^EXTERNAL_STATUS_UPDATE_SECRET=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 'change-me-dev-only-status')" \
 	$(GO) run ./cmd/api
 
 .PHONY: build

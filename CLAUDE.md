@@ -105,7 +105,9 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   `GENERATED ALWAYS AS IDENTITY`). Accessed via `pgx v5` (`pgxpool.Pool`), no ORM/query
   builder — one shared pool built by `internal/shared/database.NewPool` and injected into
   each feature's own `repository.go` from `cmd/api/main.go`.
-- **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), and `api`
+- **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), `api`,
+  `swagger-ui`, and `n8n` (the external status-update tool, `n8nio/n8n` pinned, workflow
+  imported from `tools/n8n/workflows/` on startup — `specs/service-order-status-update/`)
   services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)). `api` now
   requires `JWT_SECRET` to be set (compose fails fast via `${JWT_SECRET:?...}` if it's
   missing from `.env`).
@@ -115,7 +117,7 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   [.dockerignore](.dockerignore) (`go.mod`, `go.sum`, `cmd/`, `internal/` only — a new path
   the build needs must be re-included there and copied in the `Dockerfile`). Image versions
   (`alpine:3.24`, `adminer:6.1.1`, `swaggerapi/swagger-ui:v5.33.1`,
-  `migrate/migrate:v4.20.1`) are pinned on purpose: raise them as a reviewed change, never
+  `migrate/migrate:v4.20.1`, `n8nio/n8n:2.43.8`) are pinned on purpose: raise them as a reviewed change, never
   back to `:latest`.
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
@@ -333,7 +335,10 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
   validate their own possession-based tracking token instead of a JWT (RF12), and
   `POST /api/v1/service-orders/{id}/quote/decision`, which authenticates an external system
   by the `X-External-Notification-Secret` shared secret (`EXTERNAL_NOTIFICATION_SECRET`,
-  `specs/service-order-quote-decision/` §9).
+  `specs/service-order-quote-decision/` §9), and `POST /api/v1/service-orders/{id}/status`,
+  which authenticates the external status-update tool (the n8n workflow in `tools/n8n/`) by
+  its own, separate `X-External-Status-Secret` (`EXTERNAL_STATUS_UPDATE_SECRET`, must differ
+  from the quote secret — `specs/service-order-status-update/`).
 - **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
   defined by the service catalog listing), leaving room for pagination metadata later.
   Reuse this shape for new list endpoints instead of returning a bare JSON array.

@@ -118,8 +118,24 @@ func (fake *fakeRepository) findServiceByID(_ context.Context, id uuid.UUID) (*s
 	return ref, nil
 }
 
-func (fake *fakeRepository) StartDiagnosis(_ context.Context, order *ServiceOrder) error {
+func (fake *fakeRepository) StartDiagnosis(_ context.Context, order *ServiceOrder, notes string) error {
+	fake.recordTransition(order, "diagnosis_started", historyDescription(historyDiagnosisStarted, notes), StatusReceived)
 	return nil
+}
+
+// recordTransition appends the history entry the Postgres repository's
+// transition methods write in the same transaction, so service-level tests
+// can assert on it (specs/service-order-status-update/).
+func (fake *fakeRepository) recordTransition(order *ServiceOrder, event, description string, previous Status) {
+	fake.history[order.ID] = append(fake.history[order.ID], &ServiceOrderHistory{
+		ID:             uuid.New(),
+		ServiceOrderID: order.ID,
+		OccurredAt:     time.Now().UTC(),
+		Event:          event,
+		Description:    description,
+		PreviousStatus: previous,
+		NewStatus:      order.Status,
+	})
 }
 
 func (fake *fakeRepository) SaveQuote(_ context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
@@ -286,11 +302,13 @@ func (fake *fakeRepository) FinishExecution(_ context.Context, execution *Servic
 	return ErrServiceExecutionNotFound
 }
 
-func (fake *fakeRepository) FinalizeOrder(_ context.Context, order *ServiceOrder) error {
+func (fake *fakeRepository) FinalizeOrder(_ context.Context, order *ServiceOrder, notes string) error {
+	fake.recordTransition(order, "completion", historyDescription(historyOrderFinalized, notes), StatusInProgress)
 	return nil
 }
 
-func (fake *fakeRepository) DeliverOrder(_ context.Context, order *ServiceOrder) error {
+func (fake *fakeRepository) DeliverOrder(_ context.Context, order *ServiceOrder, notes string) error {
+	fake.recordTransition(order, "delivery", historyDescription(historyVehicleDelivered, notes), StatusCompleted)
 	return nil
 }
 

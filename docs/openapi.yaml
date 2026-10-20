@@ -1589,6 +1589,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/service-orders/{id}/status:
+    post:
+      tags:
+      - service-orders
+      summary: Update a service order's status from the external tool
+      description: 'External status-update channel (specs/service-order-status-update/,
+        Fase 2 F2-US05). Called by the n8n workflow in tools/n8n/ (or any tool holding
+        the secret). Authenticated ONLY by the shared secret in X-External-Status-Secret,
+        which is separate from the quote-decision secret; the administrative JWT is
+        neither required nor accepted as a substitute. The secret is checked before
+        the order or the body are looked at, and the body is validated before the
+        order is loaded. Only IN_DIAGNOSIS, COMPLETED and DELIVERED can be requested;
+        each one is delegated to the same use case, preconditions and transaction
+        as POST .../diagnosis, .../finalize and .../deliver respectively, so quote
+        approval can never be skipped and an order with pending executions cannot
+        be completed. Each success writes the same history entry as the dedicated
+        endpoint; optional notes are appended to that entry''s description
+        ("<event text> Notes: <notes>"). No failure changes the status or the history.
+
+        '
+      operationId: updateServiceOrderStatusExternal
+      security:
+      - externalStatusSecret: []
+      parameters:
+      - $ref: '#/components/parameters/ServiceOrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalStatusUpdateRequest'
+            examples:
+              diagnosis:
+                value:
+                  status: IN_DIAGNOSIS
+                  notes: Car on lift 2
+              completed:
+                value:
+                  status: COMPLETED
+              delivered:
+                value:
+                  status: DELIVERED
+                  notes: Picked up by owner
+      responses:
+        '200':
+          description: The transition was applied. Reduced result, just enough for
+            the tool to confirm the outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalStatusUpdateResponse'
+        '400':
+          description: 'Body is not valid JSON (code `BAD_REQUEST`), or `status` is
+            not one of IN_DIAGNOSIS/COMPLETED/DELIVERED, or `notes` is longer than 500
+            characters after trimming (code `VALIDATION_ERROR`, with `details`). Nothing
+            is changed.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: 'X-External-Status-Secret is missing or incorrect (code `INVALID_EXTERNAL_SECRET`),
+            including when the quote-decision secret or a JWT is sent instead. Nothing
+            is changed and nothing is revealed about the order.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No service order with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: 'The transition is not legal for the order''s current status
+            (code `INVALID_STATUS_TRANSITION`, e.g. DELIVERED on a RECEIVED order or
+            COMPLETED while AWAITING_APPROVAL), or COMPLETED was requested with a required
+            service execution still pending (code `EXECUTIONS_NOT_COMPLETED`) — the
+            same codes the dedicated endpoints return. Nothing is changed and no history
+            entry is written.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/service-orders/{id}/executions:
     post:
       tags:
@@ -2173,6 +2264,17 @@ components:
         Secret in cluster deployments); compared in constant time. Independent of
         the administrative JWT, which this route neither requires nor accepts (specs/service-order-quote-decision/design.md
         §5).
+
+        '
+    externalStatusSecret:
+      type: apiKey
+      in: header
+      name: X-External-Status-Secret
+      description: 'Shared secret the external status-update tool presents (POST
+        /api/v1/service-orders/{id}/status only). Configured server-side via EXTERNAL_STATUS_UPDATE_SECRET,
+        which must differ from EXTERNAL_NOTIFICATION_SECRET (the API refuses to start
+        otherwise); compared in constant time (specs/service-order-status-update/design.md
+        §3).
 
         '
   parameters:
@@ -3332,6 +3434,41 @@ components:
           enum:
           - approved
           - rejected
+    ExternalStatusUpdateRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - IN_DIAGNOSIS
+          - COMPLETED
+          - DELIVERED
+        notes:
+          type: string
+          maxLength: 500
+          description: Optional. Trimmed; persisted in the history entry of this transition.
+    ExternalStatusUpdateResponse:
+      type: object
+      required:
+      - id
+      - code
+      - previousStatus
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        previousStatus:
+          type: string
+          example: RECEIVED
+        status:
+          type: string
+          example: IN_DIAGNOSIS
     StartExecutionRequest:
       type: object
       required:

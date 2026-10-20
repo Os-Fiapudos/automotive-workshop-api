@@ -94,6 +94,8 @@ Changes on top of FP-33's file:
   stays on `8080`, and `API_PORT` only changes the host side of the mapping.
 - `db`, `migrate`, `seed`: unchanged. No `docker-entrypoint-initdb.d` mount comes back
   (BR9).
+- `n8n` (added by FP-30 while this feature was in review, pinned `n8nio/n8n:2.43.8`):
+  unchanged; the header lists its port.
 
 Startup order (what waits for what):
 
@@ -105,16 +107,18 @@ Startup order (what waits for what):
 | `api` | `db` healthy + `migrate` exit 0 | running, `healthy` (`/health`) |
 | `adminer` | `db` healthy | running |
 | `swagger-ui` | — | running |
+| `n8n` | `api` started | running |
 
-Secrets (BR8) keep the existing pattern: `${JWT_SECRET:?…}` and
-`${EXTERNAL_NOTIFICATION_SECRET:?…}` stop `docker compose` with the message naming the
+Secrets (BR8) keep the existing pattern: `${JWT_SECRET:?…}`,
+`${EXTERNAL_NOTIFICATION_SECRET:?…}` and `${EXTERNAL_STATUS_UPDATE_SECRET:?…}` (FP-30)
+stop `docker compose` with the message naming the
 variable; `RESEND_API_KEY`/`RESEND_FROM_EMAIL` default to empty (`${VAR:-}`), and
 `config.Load` enforces the pair.
 
 ## 4. `.env.example` (BR12)
 
 Already lists every variable Compose references (`POSTGRES_*`, `*_PORT`, `JWT_*`,
-`EXTERNAL_NOTIFICATION_SECRET`, `RESEND_*`, plus the commented `ADMIN_*` for
+`EXTERNAL_NOTIFICATION_SECRET`, `EXTERNAL_STATUS_UPDATE_SECRET`, `RESEND_*`, plus the commented `ADMIN_*` for
 `make bootstrap-admin`). This feature adds a short header saying which ones are required and
 labels the ports as host ports. `PORT` is deliberately absent (see §3).
 
@@ -167,7 +171,8 @@ touched:
 4. AC5/AC3/AC6 — `up -d` on an empty volume, `ps` (exit codes, `healthy`), Swagger UI and
    Adminer return 200, smoke test.
 5. AC7 — `restart`, smoke with `SMOKE_EXPECT_ORDER_ID`; `down` + `up -d`, again.
-6. AC8 — `docker compose config` without `JWT_SECRET`/`EXTERNAL_NOTIFICATION_SECRET`; `api`
+6. AC8 — `docker compose config` without `JWT_SECRET`/`EXTERNAL_NOTIFICATION_SECRET`/
+   `EXTERNAL_STATUS_UPDATE_SECRET`; `api`
    with `RESEND_API_KEY` and no sender; `api` with neither.
 7. AC10 — `go build`/`vet`/`test` in `golang:1.26-alpine`.
 8. AC11 — every `${VAR}` in `docker-compose.yml` is found in `.env.example`.

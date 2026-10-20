@@ -1,112 +1,155 @@
 # Design — Service Order Status Update via External Tool
 
-Satisfies: `requirements.md` (all sections). Assumes `requirements.md` §7's working scope
-(`IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED`) is confirmed; if a different status set is chosen
-instead, only §1's dispatch table changes, nothing else in this document.
+Satisfies: `requirements.md` (all sections), with §7's decisions applied.
 
-Assumes `specs/service-order-architecture-refactor/` has landed (ports/use cases under
-`usecase/`, handlers under `adapter/httpapi/`) — if this feature is implemented before that
-refactor, the same logic applies against the current flat package (`service.go`'s existing
-`StartDiagnosis`/`FinalizeOrder`/`DeliverOrder` methods) instead; §1's dispatch table is
-identical either way.
+`specs/service-order-architecture-refactor/` has not landed, so this is implemented against
+the current flat package (`internal/features/service-order/`), next to the existing
+`StartDiagnosis`/`FinalizeOrder`/`DeliverOrder` methods.
 
-## 1. Dispatch table (`usecase/status_update.go` or, pre-refactor, `service.go`)
+## 1. Use case — dispatch (`status_update_service.go`)
 
 ```go
-func (s *ServiceOrderService) UpdateStatusExternal(ctx context.Context, id uuid.UUID, targetStatus string, notes string) (*domain.ServiceOrder, error) {
-    switch targetStatus {
-    case string(domain.StatusInDiagnosis):
-        return s.StartDiagnosis(ctx, id)
-    case string(domain.StatusCompleted):
-        return s.FinalizeOrder(ctx, id)
-    case string(domain.StatusDelivered):
-        return s.DeliverOrder(ctx, id)
-    default:
-        return nil, ErrUnsupportedExternalStatus
+func (service *ServiceOrderService) UpdateStatusExternal(ctx context.Context, id uuid.UUID, targetStatus Status, notes string) (*StatusUpdateResult, error)
+```
+
+- `notes` is trimmed; more than 500 characters (runes) → `ErrInvalidStatusUpdateNotes`.
+- Dispatch:
+
+  | `targetStatus` | delegates to |
+  | --- | --- |
+  | `IN_DIAGNOSIS` | `startDiagnosis(ctx, id, notes)` |
+  | `COMPLETED` | `finalizeOrder(ctx, id, notes)` |
+  | `DELIVERED` | `deliverOrder(ctx, id, notes)` |
+  | anything else | `ErrUnsupportedExternalStatus` |
+
+- The public `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder` become thin wrappers that call
+  the same unexported core with `notes = ""`. There is still exactly one implementation of
+  each transition (lookup, status guard, `ensureRequiredExecutionsComplete`, transactional
+  write) — BR1/BR3 hold by construction.
+- Each unexported core returns `(order, previousStatus, error)`; `StatusUpdateResult`
+  carries the updated order plus that `PreviousStatus` (captured from the loaded order before
+  the transition), for the reduced response (BR8).
+
+No new validation of transition legality and no new persistence logic is added here.
+
+## 2. Persistence — notes in the history entry
+
+The repository methods `StartDiagnosis`, `FinalizeOrder` and `DeliverOrder` gain a
+`notes string` parameter. Each still inserts its history row in the same transaction as the
+status `UPDATE`; the `description` becomes `historyDescription(<fixed text>, notes)`:
+
+```go
+func historyDescription(base, notes string) string {
+    if notes == "" {
+        return base
     }
+    return base + " Notes: " + notes
 }
 ```
 
-`notes`, if present, is passed through to the underlying use case only where that use case
-already accepts a notes/description override for its history entry (none of the three do
-today — each writes a fixed description, e.g. `"Diagnosis started."`); if the underlying
-signatures stay fixed-description, `notes` is accepted on the request but not yet plumbed
-through, with a one-line comment pointing here, rather than changing three existing use
-cases' signatures as an unrequested side effect of this feature (`CLAUDE.md` §17).
+No schema change: `service_order_history.description` is already `TEXT NOT NULL`. The
+administrative endpoints always pass `""`, so their descriptions are byte-for-byte unchanged
+(AC10). The value is bound as a query parameter (no SQL concatenation).
 
-This function performs **no new validation and no new persistence** — it is purely a
-`string → existing use-case method` dispatch. Every precondition (status guard, transaction,
-history write) is the one the dispatched method already has; `requirements.md` BR1/BR3 are
-satisfied by construction (there is no second implementation to drift from the first).
-
-## 2. Authentication
+## 3. Authentication
 
 Same shape as `specs/service-order-quote-decision/design.md` §5.1/§5.3/§5.4, with its own,
 separate secret:
 
 - Header: `X-External-Status-Secret`.
-- Config: `EXTERNAL_STATUS_UPDATE_SECRET` env var, required at startup (`log.Fatalf` if
-  unset, same as `JWT_SECRET`/`EXTERNAL_NOTIFICATION_SECRET`), compared with
-  `crypto/subtle.ConstantTimeCompare`.
-- Kept as a **separate** secret from quote-decision's `EXTERNAL_NOTIFICATION_SECRET`
-  (`requirements.md` BR4) — the two represent different external integrations (a
-  quote-approval relay vs. a status-update tool) that may be different systems in practice
-  and should be revocable independently; sharing one secret would couple their rotation.
+- `ServiceOrderService.WithExternalStatusUpdateSecret(secret)` +
+  `AuthenticateExternalStatusUpdate(presented) bool` — both values SHA-256-hashed, then
+  `crypto/subtle.ConstantTimeCompare` (shared `secretMatches` helper with the
+  quote-decision check). An empty configured secret never authenticates anyone.
+- `cmd/api/main.go` reads `EXTERNAL_STATUS_UPDATE_SECRET` and `log.Fatalf`s if it is unset
+  **or equal to `EXTERNAL_NOTIFICATION_SECRET`** (BR4).
+- The route is registered **without** `requireAuth` (no JWT needed); the handler checks the
+  secret first.
 
-## 3. API layer
+## 4. API layer (`handler.go`, `status_update_dto.go`)
 
 ```go
-mux.Handle("POST /api/v1/service-orders/{id}/status", wrap(handler.updateStatusExternal))
+mux.HandleFunc("POST /api/v1/service-orders/{id}/status", handler.updateStatusExternal)
 ```
 
-Request: `{"status": string, "notes"?: string}`. Handler validates `status` is one of the
-three supported values (`400 VALIDATION_ERROR` otherwise, before even checking the secret
-vs. after — checking the secret *first* is still correct here, unlike leaking "order
-exists" information: this is a structural body-shape check, not information about a specific
-order, so no information-disclosure concern applies to ordering it after the secret check);
-calls `UpdateStatusExternal`; maps `ErrUnsupportedExternalStatus` to `400
-VALIDATION_ERROR`, every other error through the already-existing `writeServiceError`
-mapping (`specs/service-order-execution/design.md`'s/`specs/service-order-opening/design.md`'s
-existing table — `ErrInvalidStatusTransition` → 409, `ErrServiceOrderNotFound` → 404,
-already mapped, nothing new to add there).
+Handler order (each step stops on failure, none touches the order before step 1 passes):
 
-Response: the full `ServiceOrder` (same shape `GET /{id}` already returns), `200 OK` — an
-administrative/internal response shape is fine here since the caller is a trusted internal
-tool, not the customer (unlike the quote-decision external channel, which deliberately
-returns the reduced public DTO because its decision still ultimately originates from the
-customer).
+1. Secret check → `401 INVALID_EXTERNAL_SECRET`.
+2. `{id}` parse → `404` for a non-UUID (same as the other `{id}` routes).
+3. Decode `ExternalStatusUpdateRequest{Status string; Notes *string}` → `400` on bad JSON.
+4. `Validate()` → `400 VALIDATION_ERROR` with `details` for a status outside the contract or
+   notes over 500 characters (structural checks — no order lookup yet).
+5. `UpdateStatusExternal`; errors through the existing `writeServiceError` mapping
+   (`ErrServiceOrderNotFound` → 404, `ErrInvalidStatusTransition` → 409
+   `INVALID_STATUS_TRANSITION`, `ErrExecutionsNotCompleted` → 409
+   `EXECUTIONS_NOT_COMPLETED`), plus two new entries: `ErrUnsupportedExternalStatus` and
+   `ErrInvalidStatusUpdateNotes` → `400 VALIDATION_ERROR` (defense in depth — step 4 already
+   catches them).
 
-## 4. Configuration
+Response `200`: `{"id", "code", "previousStatus", "status"}` (`statusUpdateResponse`).
 
-`.env.example` gains `EXTERNAL_STATUS_UPDATE_SECRET=`. `cmd/api/main.go` reads it and fails
-fast if unset, same pattern as `EXTERNAL_NOTIFICATION_SECRET`
-(`specs/service-order-quote-decision/design.md` §5.4). In Kubernetes
-(`specs/kubernetes-deployment/`), a second key in the same `Secret` object that already
-holds `EXTERNAL_NOTIFICATION_SECRET`/`JWT_SECRET`/`DATABASE_URL`.
+`ServeMux` conflict check: `{id}/status` is a new literal segment under
+`/api/v1/service-orders/{id}/`; a handler unit test registers every route on a real mux
+(`RegisterRoutes`) so a pattern conflict would panic in CI (`specs/architecture.md`
+decision 18).
 
-## 5. Testing strategy
+## 5. Integration tool — n8n (`tools/n8n/`)
 
-- **Unit**: `UpdateStatusExternal` dispatch for each of the three supported statuses
-  (delegates correctly, returns `ErrUnsupportedExternalStatus` for anything else, including
-  `AWAITING_APPROVAL`/`IN_PROGRESS`/`CANCELED`/`RECEIVED`), using the same fakes
-  `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder`'s own existing unit tests already use.
-- **Integration**: one success case per supported status (asserting the same DB state and
-  history entry the existing dedicated endpoint's own integration test already asserts),
-  missing/wrong secret → `401` with zero side effects, unsupported status → `400`,
-  currently-illegal transition (e.g. `DELIVERED` requested on a still-`RECEIVED` order) →
-  same status/code `POST /{id}/deliver` already returns for that case, and a regression
-  check that the three existing endpoints are unaffected.
+- `docker-compose.yml` gains an `n8n` service (`n8nio/n8n:2.43.8`, pinned), port
+  `${N8N_PORT:-5678}`, with:
+  - `EXTERNAL_STATUS_UPDATE_SECRET` and `WORKSHOP_API_URL=http://api:8080` in its
+    environment, and `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` so the workflow reads them via
+    `$env` — the secret lives only in `.env`, never in the versioned workflow;
+  - `./tools/n8n/workflows` mounted read-only, imported and published on startup
+    (`n8n import:workflow` + `n8n publish:workflow` — n8n 2.x deprecated
+    `update:workflow --active`), so the setup is reproducible with no clicks in the editor.
+- Workflow `service-order-status-update.json`:
+  **Form Trigger** (`/form/service-order-status`; fields: order id, target status dropdown
+  with the three supported values, optional notes) → **HTTP Request** (`POST
+  {{$env.WORKSHOP_API_URL}}/api/v1/service-orders/{id}/status`, header
+  `X-External-Status-Secret: {{$env.EXTERNAL_STATUS_UPDATE_SECRET}}`, JSON body; "never
+  error" + full response so rejections are shown, not swallowed) → **Form ending** page
+  showing the HTTP status and response body. The form endpoint itself is the entry point
+  for another system too (it accepts a multipart POST of the same fields), so no separate
+  webhook trigger was added.
+- `tools/n8n/README.md` is the demo script (roteiro): setup, triggering each status,
+  checking the resulting history via `GET /api/v1/service-orders/{id}`, and the 409/400/401
+  rejections.
 
-## 6. Traceability
+## 6. Configuration
+
+`.env.example` gains `EXTERNAL_STATUS_UPDATE_SECRET=` (different default from the
+quote-decision one) and `N8N_PORT`. The `api` compose service requires it
+(`${EXTERNAL_STATUS_UPDATE_SECRET:?...}`); `make run` passes it through. In Kubernetes
+(`specs/kubernetes-deployment/`) it is one more key in the API `Secret`.
+
+## 7. Testing strategy
+
+- **Unit** (`status_update_service_test.go`, fake repository): one success per supported
+  status (status, previous status, history entry with/without notes); every unsupported
+  status → `ErrUnsupportedExternalStatus`; illegal transition → `ErrInvalidStatusTransition`
+  with no state/history change; pending executions → `ErrExecutionsNotCompleted`; notes
+  over 500 characters rejected, notes trimmed; secret authentication (match, mismatch,
+  unconfigured, quote secret rejected).
+- **Handler unit** (`status_update_handler_test.go`; the real-mux registration test stays in `handler_test.go`): 401 before lookup (missing, wrong, quote-decision
+  secret, JWT-only), 400 for unsupported status/long notes/bad JSON, 404, 409, 200 shape.
+- **Integration** (`internal/handlers_test/service_order_status_update_test.go`, real
+  Postgres): full lifecycle `RECEIVED → IN_DIAGNOSIS → … → COMPLETED → DELIVERED` through
+  this endpoint, history entries with notes; 401/400/409 with zero side effects (status and
+  history count unchanged); `EXECUTIONS_NOT_COMPLETED` parity with `/finalize`.
+
+## 8. Traceability
 
 | Requirement | Design section |
 | --- | --- |
 | BR1, BR3 (no new transition logic, dispatch only) | §1 |
-| BR2 (status named explicitly) | §3 |
-| BR4 (separate external secret) | §2, §4 |
-| BR5 (existing history write reused) | §1 |
-| BR6 (existing rejection semantics reused) | §1, §3 |
-| AC1–AC3 | §1, §3 |
-| AC4, AC5 | §3 |
-| AC6 | §2 |
-| AC7, AC8 | §1 |
+| BR2 (supported statuses) | §1, §4 |
+| BR4 (separate external secret, checked first) | §3, §4, §6 |
+| BR5, BR6 (history entry + notes) | §1, §2 |
+| BR7 (rejections) | §4 |
+| BR8 (reduced response) | §4 |
+| AC1–AC3, AC7 | §1, §2 |
+| AC4, AC5, AC8, AC9 | §4 |
+| AC6 | §3, §4 |
+| AC10 | §1, §2 |
+| AC11 | §5 |

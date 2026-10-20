@@ -4,50 +4,55 @@ Each task references the `design.md` section it implements.
 
 ## 1. Spec confirmation
 
-- [ ] Confirm `requirements.md` §7's status scope (`IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED`)
-      with whoever owns the Fase 2 requirement before starting implementation — `Status:
-      Proposed` becomes `Approved for implementation` once confirmed.
+- [x] Confirm `requirements.md` §7 (statuses, notes, response, tool) — resolved
+      2026-10-19, `Status: Approved for implementation`.
 
-## 2. Use-case layer (`design.md` §1)
+## 2. Use-case layer (`design.md` §1, §2)
 
-- [ ] Add `ErrUnsupportedExternalStatus` to the feature's domain/use-case errors.
-- [ ] Add `UpdateStatusExternal(ctx, id, targetStatus, notes)` dispatching to
-      `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder` (`design.md` §1) — no new persistence
-      or validation logic.
+- [x] Add `ErrUnsupportedExternalStatus` and `ErrInvalidStatusUpdateNotes`.
+- [x] Extract unexported `startDiagnosis`/`finalizeOrder`/`deliverOrder` cores taking
+      `notes`; public methods delegate with `""`.
+- [x] Add `UpdateStatusExternal(ctx, id, targetStatus, notes)` dispatch returning
+      `StatusUpdateResult` (order + previous status).
+- [x] Repository `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder` take `notes`, persisted
+      via `historyDescription` in the same transaction.
 
-## 3. API layer (`design.md` §2, §3)
+## 3. API layer (`design.md` §3, §4)
 
-- [ ] Register the new route against a real `*http.ServeMux` (`RegisterRoutes` call, no
-      database needed) and confirm no pattern-conflict panic — the `{id}/status` segment is
-      new and distinct from this package's other `{id}/<literal>` routes, but this project
-      has twice found `ServeMux` conflicts only by actually registering routes
-      (`specs/architecture.md` decision 18, `specs/service-order-query/design.md` §1.2), so
-      the check is repeated here rather than assumed safe.
-- [ ] `handler.go` (or `adapter/httpapi/status_update_handler.go` if
-      `specs/service-order-architecture-refactor/` has already landed): register
-      `POST /api/v1/service-orders/{id}/status`; constant-time secret check
-      (`X-External-Status-Secret`); decode/validate `{"status", "notes"?}`; call
-      `UpdateStatusExternal`; map `ErrUnsupportedExternalStatus` to `400
-      VALIDATION_ERROR`.
-- [ ] `cmd/api/main.go`: read `EXTERNAL_STATUS_UPDATE_SECRET`, `log.Fatalf` if unset, pass
-      into the handler/service construction (`design.md` §4).
-- [ ] `.env.example`: add `EXTERNAL_STATUS_UPDATE_SECRET=` (`design.md` §4).
+- [x] `WithExternalStatusUpdateSecret` / `AuthenticateExternalStatusUpdate`
+      (shared `secretMatches`).
+- [x] `POST /api/v1/service-orders/{id}/status` handler: secret → id → body → validate →
+      dispatch; reduced response.
+- [x] Map the two new errors to `400 VALIDATION_ERROR`.
+- [x] Real-mux registration test (no pattern conflict).
+- [x] `cmd/api/main.go`: read `EXTERNAL_STATUS_UPDATE_SECRET`, fail fast if unset or equal
+      to `EXTERNAL_NOTIFICATION_SECRET`.
 
-## 4. Tests (`design.md` §5)
+## 4. Tool (`design.md` §5, §6)
 
-- [ ] Unit tests: dispatch for each supported status; `ErrUnsupportedExternalStatus` for
-      every unsupported value.
-- [ ] Integration tests: one success case per supported status (DB state + history entry
-      parity with the existing dedicated endpoint), missing/wrong secret → `401`,
-      unsupported status → `400`, illegal transition → same status/code as the existing
-      dedicated endpoint, regression check on the three existing endpoints.
+- [x] `tools/n8n/workflows/service-order-status-update.json` (form + webhook → HTTP).
+- [x] `docker-compose.yml` `n8n` service with auto-import/activation; `api` requires the
+      new secret.
+- [x] `.env.example`, `Makefile` (`run`).
+- [x] `tools/n8n/README.md` demo script.
 
-## 5. Documentation
+## 5. Tests (`design.md` §7)
 
-- [ ] `docs/openapi.yaml`: document the new endpoint, its header, its three supported
-      status values, and its response shape.
+- [x] Unit: dispatch per status, unsupported statuses, illegal transition without side
+      effects, notes, authentication.
+- [x] Handler unit: 401/400/404/409/200.
+- [x] Integration: lifecycle via the endpoint, history with notes, zero side effects on
+      401/400/409.
 
-## 6. Verification
+## 6. Documentation
 
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...` pass.
-- [ ] Re-check AC1–AC8 in `requirements.md` §6 against the implementation.
+- [x] `docs/openapi.yaml`: endpoint, header, three status values, notes, reduced response,
+      error responses.
+- [x] README, `CLAUDE.md`, `specs/architecture.md` mentions of the new secret/route.
+
+## 7. Verification
+
+- [x] `go build ./...`, `go vet ./...`, `go test ./...` pass (with and without
+      `DATABASE_URL`).
+- [x] Re-check AC1–AC11 in `requirements.md` §6 against the implementation.
+- [x] End-to-end run of the n8n workflow against the compose stack.

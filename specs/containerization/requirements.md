@@ -22,8 +22,12 @@ changes the original in these places (each is called out where it applies):
 2. **Resend is an optional pair.** The original design made `RESEND_API_KEY` a required,
    fail-fast variable; that contradicts `specs/service-order-email-notification/` and
    `config.Load`, and the Confluence analysis (§2.1, "Resend obrigatório/opcional") settles it
-   as optional. `EXTERNAL_STATUS_UPDATE_SECRET`, listed by the original, is not read by any
-   implemented code, so it is not added (the original itself said "whichever … have landed").
+   as optional. `EXTERNAL_STATUS_UPDATE_SECRET`, listed by the original, was not read by any
+   implemented code on 2026-10-19, so this feature did not add it (the original itself said
+   "whichever … have landed"). **Update 2026-10-20:** FP-30 (PR #38,
+   `specs/service-order-status-update/`) implemented it and added it to Compose and
+   `.env.example` as required, together with the `n8n` service; BR7, BR8 and AC8 now list
+   them.
 3. **Integration with FP-33 (new).** The image keeps shipping `/bootstrap-admin`; the build
    context never includes `backups/` (FP-33's baseline dumps hold real data); Compose keeps a
    single schema-initialization path.
@@ -79,12 +83,13 @@ creates the schema, with the API waiting for it. The helper images (`adminer`,
    `internal/`. Never `.env`, `backups/`, Terraform state or variables, Kubernetes secrets,
    `.git`, or coverage/security outputs — including files added to the repository later.
 7. **Compose.** From a fresh clone, `cp .env.example .env && docker compose up -d` starts
-   `db` → `migrate` → `api`, plus `seed`, `adminer` and `swagger-ui`; the API starts only
+   `db` → `migrate` → `api`, plus `seed`, `adminer`, `swagger-ui` and `n8n` (FP-30); the API starts only
    after migrations succeed (FP-33) and reaches `healthy`. Swagger UI serves
    `docs/openapi.yaml`; the API collections (`bruno/`, `docs/postman-collection.json`,
    `docs/insomnia-collection.json`) are documented. The startup order, what each service
    waits for, and every host port are documented.
-8. **Secrets.** Required secrets (`JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET`) make
+8. **Secrets.** Required secrets (`JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET`, and
+   `EXTERNAL_STATUS_UPDATE_SECRET` since FP-30) make
    `docker compose` stop with a message naming the variable when absent, and the API keeps
    failing fast on its own. `RESEND_API_KEY`/`RESEND_FROM_EMAIL` stay an optional pair:
    neither set disables the e-mail, a key without a sender stops the API at startup.
@@ -129,7 +134,8 @@ Terraform (FP-35), any Go code, the Postgres major version.
 7. After `docker compose restart`, and again after `docker compose down` + `up -d` (no
    `-v`): `api` is `healthy`, the smoke test passes, and the service order created in AC6 is
    still returned.
-8. Without `JWT_SECRET` (or `EXTERNAL_NOTIFICATION_SECRET`), `docker compose` refuses to
+8. Without `JWT_SECRET` (or `EXTERNAL_NOTIFICATION_SECRET`, or
+   `EXTERNAL_STATUS_UPDATE_SECRET`), `docker compose` refuses to
    start and names the variable; with `RESEND_API_KEY` but no `RESEND_FROM_EMAIL` the API
    exits with a clear message; with neither Resend variable the API starts.
 9. `/bootstrap-admin` still runs from the image as the non-root user.
@@ -152,7 +158,8 @@ Terraform (FP-35), any Go code, the Postgres major version.
 5. **Helper image versions**: `adminer:6.1.1` and `swaggerapi/swagger-ui:v5.33.1` — the most
    recent releases at least two weeks old on 2026-10-19; `postgres:16-alpine` keeps the
    major pinned (the schema targets PostgreSQL 16) and takes patch updates;
-   `migrate/migrate:v4.20.1` stays as FP-33 pinned it.
+   `migrate/migrate:v4.20.1` stays as FP-33 pinned it, and `n8nio/n8n:2.43.8` as FP-30
+   pinned it.
 6. **Smoke test uses the seed's fixed IDs** (customer, vehicle, service) by default, so it
    targets the local stack; the IDs and credentials can be overridden by environment
    variables. The CD smoke test in the cluster, where the seed never runs (FP-33 BR11),

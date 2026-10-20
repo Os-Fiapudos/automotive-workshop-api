@@ -110,16 +110,20 @@ type ServiceOrderRepository interface {
 	// sees the raw value; the database only ever stores its hash.
 	Create(ctx context.Context, order *ServiceOrder) (trackingToken string, err error)
 
-	// Added by specs/service-order-diagnosis-quote/.
-	StartDiagnosis(ctx context.Context, order *ServiceOrder) error
+	// Added by specs/service-order-diagnosis-quote/. StartDiagnosis,
+	// FinalizeOrder and DeliverOrder take notes since
+	// specs/service-order-status-update/ (design.md §2): when non-empty it is
+	// appended to the history entry's fixed description; the administrative
+	// endpoints always pass "".
+	StartDiagnosis(ctx context.Context, order *ServiceOrder, notes string) error
 	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
 	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
 
 	// Added by specs/service-order-execution/.
 	StartExecution(ctx context.Context, execution *ServiceExecution) error
 	FinishExecution(ctx context.Context, execution *ServiceExecution) error
-	FinalizeOrder(ctx context.Context, order *ServiceOrder) error
-	DeliverOrder(ctx context.Context, order *ServiceOrder) error
+	FinalizeOrder(ctx context.Context, order *ServiceOrder, notes string) error
+	DeliverOrder(ctx context.Context, order *ServiceOrder, notes string) error
 
 	// Added by specs/service-order-quote-decision/.
 

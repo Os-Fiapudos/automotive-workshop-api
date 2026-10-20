@@ -151,11 +151,13 @@ cp .env.example .env
 > - `JWT_SECRET=change-me-dev-only-please-generate-a-real-random-value`
 > - `JWT_TTL=1h`
 > - `EXTERNAL_NOTIFICATION_SECRET=change-me-dev-only-external-notification-secret`
+> - `EXTERNAL_STATUS_UPDATE_SECRET=change-me-dev-only-external-status-update-secret` (obrigatório e diferente do anterior)
+> - `N8N_PORT=5678`
 > - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (opcionais, sempre em par): habilitam o e-mail de
 >   "orçamento disponível" via Resend. Sem a chave, a notificação fica desabilitada (no-op); chave
 >   sem remetente impede a API de iniciar.
 >
-> **Obrigatórias:** `JWT_SECRET` e `EXTERNAL_NOTIFICATION_SECRET`. Sem qualquer uma delas, o
+> **Obrigatórias:** `JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET` e `EXTERNAL_STATUS_UPDATE_SECRET`. Sem qualquer uma delas, o
 > `docker compose` se recusa a subir e diz qual variável falta (ex.: `required variable
 > JWT_SECRET is missing a value`). As portas (`*_PORT`) são as do seu computador; dentro dos
 > containers elas não mudam.
@@ -182,6 +184,7 @@ O Docker iniciará os serviços nesta ordem:
 4. **`api`** (Go 1.26): inicializa a API na porta `8080` depois que o banco está saudável e as migrations terminam com sucesso; fica `healthy` quando `GET /health` responde.
 5. **`swagger-ui`** (`v5.33.1`): Interface interativa com a documentação OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)) na porta `8082`.
 6. **`adminer`** (`6.1.1`): Interface web para navegação e consultas no PostgreSQL na porta `8081`, depois que o banco está saudável.
+7. **`n8n`** (`2.43.8`): ferramenta externa de atualização de status da OS na porta `5678`, iniciada depois da API; importa e publica o workflow de [tools/n8n/](tools/n8n/README.md) a cada subida.
 
 > `migrate` e `seed` aparecem como `Exited (0)` em `docker compose ps -a` — é o esperado. Para ver o que aplicaram: `docker compose logs migrate seed`.
 
@@ -194,7 +197,7 @@ O [Dockerfile](Dockerfile) é multi-stage ([specs/containerization/](specs/conta
 - Roda como **usuário não root** `app` (UID/GID `10001`), sem permissão de escrita nos binários.
 - **`HEALTHCHECK`** chama `GET /health` a cada 10 s; `docker compose ps` mostra `(healthy)`.
 - O [.dockerignore](.dockerignore) é uma lista de permitidos: só `go.mod`, `go.sum`, `cmd/` e `internal/` entram no contexto de build. `.env`, `backups/`, estado do Terraform e qualquer arquivo novo ficam de fora.
-- As versões das imagens (`alpine`, `adminer`, `swagger-ui`, `migrate`) são fixadas de propósito; atualize-as revisando a spec, não trocando para `latest`.
+- As versões das imagens (`alpine`, `adminer`, `swagger-ui`, `migrate`, `n8n`) são fixadas de propósito; atualize-as revisando a spec, não trocando para `latest`.
 
 ---
 
@@ -239,6 +242,7 @@ O script usa por padrão a porta `API_PORT` do `.env` e os IDs fixos do seed; to
 | :--- | :--- | :--- |
 | **API REST** | `http://localhost:8080` | Ponto de entrada da API. |
 | **Swagger UI** | `http://localhost:8082` | Documentação interativa completa (OpenAPI 3.0). As collections (Bruno, Postman, Insomnia) estão em [Coleções para Testes](#coleções-para-testes-bruno-postman-e-insomnia). |
+| **n8n** | `http://localhost:5678/form/service-order-status` | Ferramenta de atualização de status da OS pelo operador ([roteiro](tools/n8n/README.md)). |
 | **Adminer (DB Web)** | `http://localhost:8081` | Gerenciador do Postgres (Servidor: `db`, Usuário: `workshop`, Senha: `workshop`, Base: `automotive_workshop`). |
 | **Postgres Database** | `localhost:5432` | Conexão direta com o banco de dados. |
 
@@ -364,12 +368,13 @@ ADMIN_EMAIL=admin@oficina.example ADMIN_PASSWORD='uma-senha-forte-aqui' make boo
 
 ## Documentação dos Endpoints da API
 
-A API possui **48 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
+A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
 
 ### Modelos de Autenticação:
 - **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
 - **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
 - **`X-External-Notification-Secret`**: Canal de sistema externo para decisão de orçamento; não usa JWT e exige o segredo compartilhado configurado em `EXTERNAL_NOTIFICATION_SECRET`.
+- **`X-External-Status-Secret`**: Canal da ferramenta externa (n8n) de atualização de status da OS; não usa JWT e exige o segredo `EXTERNAL_STATUS_UPDATE_SECRET`, separado do segredo de orçamento.
 - **`Pública`**: Rotas abertas sem necessidade de credenciais.
 
 ---
@@ -434,6 +439,7 @@ A API possui **48 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 | `GET` | `/api/v1/service-orders/{id}/quote` | JWT | Consulta o orçamento vinculado à OS. |
 | `POST` | `/api/v1/service-orders/{id}/quote/send` | JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
 | `POST` | `/api/v1/service-orders/{id}/quote/decision` | Segredo externo | Sistema externo notifica a decisão do cliente (`{"decision":"approved"\|"rejected"}` → `IN_PROGRESS`/`CANCELED`); `409` se já decidido. |
+| `POST` | `/api/v1/service-orders/{id}/status` | Segredo de status | Ferramenta externa (n8n) avança a OS para `IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED` com `notes` opcional gravada no histórico; `409` se a transição for ilegal, `400` fora do contrato. |
 | `POST` | `/api/v1/service-orders/{id}/executions` | JWT | Registra o início de execução de um serviço específico da OS. |
 | `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | JWT | Registra a conclusão da execução do serviço. |
 | `POST` | `/api/v1/service-orders/{id}/finalize` | JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |

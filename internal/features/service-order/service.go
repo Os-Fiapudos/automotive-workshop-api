@@ -62,12 +62,15 @@ type requestedProductRef struct {
 // externalNotificationSecret authenticates the external quote-decision
 // channel (specs/service-order-quote-decision/design.md §5) — set once at
 // wiring time via WithExternalNotificationSecret; left empty, that channel
-// rejects every caller.
+// rejects every caller. externalStatusUpdateSecret does the same for the
+// external status-update channel (specs/service-order-status-update/
+// design.md §3), set via WithExternalStatusUpdateSecret.
 type ServiceOrderService struct {
 	repository                 ServiceOrderRepository
 	lookups                    serviceOrderLookups
 	notifier                   QuoteNotifier
 	externalNotificationSecret string
+	externalStatusUpdateSecret string
 }
 
 func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOrderLookups, notifier QuoteNotifier) *ServiceOrderService {
@@ -83,6 +86,15 @@ func NewServiceOrderService(repository ServiceOrderRepository, lookups serviceOr
 // without changing that constructor's signature for every existing caller.
 func (service *ServiceOrderService) WithExternalNotificationSecret(secret string) *ServiceOrderService {
 	service.externalNotificationSecret = secret
+	return service
+}
+
+// WithExternalStatusUpdateSecret sets the shared secret the external
+// status-update endpoint authenticates against
+// (specs/service-order-status-update/design.md §3), chaining the same way as
+// WithExternalNotificationSecret.
+func (service *ServiceOrderService) WithExternalStatusUpdateSecret(secret string) *ServiceOrderService {
+	service.externalStatusUpdateSecret = secret
 	return service
 }
 

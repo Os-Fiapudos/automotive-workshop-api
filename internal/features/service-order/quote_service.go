@@ -2,8 +2,6 @@ package serviceorder
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"log"
 	"strings"
@@ -16,20 +14,30 @@ import (
 // StartDiagnosis transitions a service order from RECEIVED to
 // IN_DIAGNOSIS (requirements.md §3.1).
 func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+	order, _, err := service.startDiagnosis(ctx, serviceOrderID, "")
+	return order, err
+}
+
+// startDiagnosis is the single core behind StartDiagnosis and the external
+// status update (specs/service-order-status-update/design.md §1): notes, if
+// non-empty, is appended to the history entry. It also returns the status
+// the order had before the transition.
+func (service *ServiceOrderService) startDiagnosis(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	previousStatus := order.Status
 
 	if err := order.startDiagnosis(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
-	if err := service.repository.StartDiagnosis(ctx, order); err != nil {
-		return nil, err
+	if err := service.repository.StartDiagnosis(ctx, order, notes); err != nil {
+		return nil, "", err
 	}
 
-	return order, nil
+	return order, previousStatus, nil
 }
 
 // ComposeQuote replaces the service order's quote with the given items and
@@ -177,12 +185,7 @@ func (service *ServiceOrderService) DecideQuoteExternal(ctx context.Context, ser
 // length of the secret leaks through timing. An unconfigured (empty) secret
 // never authenticates anyone.
 func (service *ServiceOrderService) AuthenticateExternalNotification(presented string) bool {
-	if service.externalNotificationSecret == "" || presented == "" {
-		return false
-	}
-	expected := sha256.Sum256([]byte(service.externalNotificationSecret))
-	actual := sha256.Sum256([]byte(presented))
-	return subtle.ConstantTimeCompare(expected[:], actual[:]) == 1
+	return secretMatches(service.externalNotificationSecret, presented)
 }
 
 // resolveOrderByTrackingToken resolves the order by code + tracking token
