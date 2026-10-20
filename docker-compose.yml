@@ -8,15 +8,48 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-automotive_workshop}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    # No docker-entrypoint-initdb.d scripts: the schema is created only by the
+    # migrate service below (specs/database-migrations/, one initialization path).
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./docs/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  # One-shot: applies migrations/ before the API starts. A failure (e.g. a Fase 1
+  # volume, which must be adopted with `make migrate-baseline` first) stops
+  # `docker compose up` and the API is not started.
+  migrate:
+    image: migrate/migrate:v4.20.1 # keep in sync with MIGRATE_IMAGE in scripts/migrate.sh
+    command:
+      - -path=/migrations
+      - -database
+      - postgres://${POSTGRES_USER:-workshop}:${POSTGRES_PASSWORD:-workshop}@db:5432/${POSTGRES_DB:-automotive_workshop}?sslmode=disable
+      - up
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # One-shot: development sample data and users (docs/seed.sql, idempotent),
+  # after the migrations, on every `up`. Nothing waits on it, so a seed failure
+  # never keeps the API down.
+  seed:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-workshop}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-workshop}
+      PGDATABASE: ${POSTGRES_DB:-automotive_workshop}
+    command: ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "/seed/seed.sql"]
+    volumes:
+      - ./docs/seed.sql:/seed/seed.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
   adminer:
     image: adminer:latest
@@ -43,6 +76,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   # External status-update tool (specs/service-order-status-update/, FP-30):
   # imports and publishes tools/n8n/workflows on every start, so the

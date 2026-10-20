@@ -53,11 +53,14 @@ jobs:
         with:
           go-version: "1.26"
           cache: false
-      # The seed is a prerequisite, not a convenience: it inserts the administrative user
-      # the auth integration tests log in as. Schema without seed produced 74 failures.
-      - name: Apply schema and seed
+      # The schema comes from the same migration chain every environment uses
+      # (specs/database-migrations/ BR7); scripts/migrate.sh reaches the service on
+      # localhost:5432 through --network host. The seed is a prerequisite, not a
+      # convenience: it inserts the administrative user the auth integration tests log
+      # in as. Schema without seed produced 74 failures.
+      - name: Apply migrations and seed
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/schema.sql
+          scripts/migrate.sh up
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f docs/seed.sql
       - name: Measure and enforce coverage
         run: scripts/coverage.sh
@@ -68,6 +71,17 @@ jobs:
         with:
           name: coverage
           path: coverage/
+
+  # specs/database-migrations/design.md §8: on throwaway containers, checks that the
+  # migration chain equals docs/schema.sql, re-runs as a no-op, reverts cleanly, adopts a
+  # Fase 1 database without losing data, refuses a database that matches no version, and
+  # fails closed (and recovers) on a broken migration.
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify the migration chain
+        run: scripts/migrate.sh verify
 
   # Satisfies RNF09: dependency analysis (govulncheck) and SAST (gosec).
   security:

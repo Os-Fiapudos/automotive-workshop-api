@@ -34,13 +34,9 @@ error: DATABASE_URL is not set.
 The integration tests in internal/handlers_test/ skip themselves without a database, so
 coverage measured without one understates the real figure and cannot satisfy RNF06.
 
-Start the database, apply the schema and the seed, then re-run:
+Start the database (Compose applies the migrations and the seed), then re-run:
 
-  docker compose up -d db
-  docker compose cp docs/schema.sql db:/tmp/schema.sql
-  docker compose cp docs/seed.sql   db:/tmp/seed.sql
-  docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/schema.sql
-  docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
+  docker compose up -d db migrate seed
 
   export DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable'
   export JWT_SECRET=dev-secret

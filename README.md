@@ -23,10 +23,11 @@
 4. [Tecnologias, Bibliotecas e Dependências](#tecnologias-bibliotecas-e-dependências)
 5. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
 6. [Credenciais de Teste e Dados Iniciais (Seed)](#credenciais-de-teste-e-dados-iniciais-seed)
-7. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
-8. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
-9. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
-10. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
+7. [Migrações do Banco de Dados](#migrações-do-banco-de-dados)
+8. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
+9. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
+10. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
+11. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
 
 ---
 
@@ -171,11 +172,15 @@ docker compose up -d
 make start
 ```
 
-O Docker iniciará 4 serviços automaticamente:
-1. **`db`** (PostgreSQL 16): Aplica os scripts de schema (`docs/schema.sql`) e carga inicial (`docs/seed.sql`) na inicialização do volume.
-2. **`api`** (Go 1.26): Constrói e inicializa a API na porta `8080` assim que o banco estiver saudável (`healthcheck`).
-3. **`swagger-ui`**: Interface interativa com a documentação OpenAPI 3.0 na porta `8082`.
-4. **`adminer`**: Interface web para navegação e consultas no PostgreSQL na porta `8081`.
+O Docker iniciará os serviços nesta ordem:
+1. **`db`** (PostgreSQL 16): o banco, vazio na primeira subida — ele **não** cria o schema sozinho.
+2. **`migrate`** (golang-migrate, executa e termina): aplica as [migrations](#migrações-do-banco-de-dados) pendentes de `migrations/` assim que o banco está saudável. Se falhar, `docker compose up` termina com erro e a API **não** sobe.
+3. **`seed`** (executa e termina): aplica os dados de exemplo de `docs/seed.sql` depois das migrations, a cada `up` (é idempotente). Uma falha no seed não impede a API de subir.
+4. **`api`** (Go 1.26): inicializa a API na porta `8080` depois que as migrations terminam com sucesso.
+5. **`swagger-ui`**: Interface interativa com a documentação OpenAPI 3.0 na porta `8082`.
+6. **`adminer`**: Interface web para navegação e consultas no PostgreSQL na porta `8081`.
+
+> `migrate` e `seed` aparecem como `Exited (0)` em `docker compose ps -a` — é o esperado. Para ver o que aplicaram: `docker compose logs migrate seed`.
 
 ---
 
@@ -219,8 +224,10 @@ curl http://localhost:8080/health
 | **Ver logs da API e serviços** | `make logs` | `docker compose logs -f` |
 | **Parar os containers** | `make stop` | `docker compose stop` |
 | **Derrubar containers** | `make down` | `docker compose down` |
-| **Resetar banco do zero (apaga dados + reseed)** | `make reset` | `docker compose down -v && docker compose up -d` |
-| **Reaplicar dados de seed** | `make seed` | `docker compose cp docs/seed.sql db:/tmp/seed.sql && docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql` |
+| **Resetar banco do zero (apaga dados + migrations + seed)** | `make reset` | `docker compose down -v && docker compose up -d` |
+| **Reaplicar dados de seed** | `make seed` | `docker compose up seed` |
+| **Aplicar migrations pendentes** | `make migrate-up` | `docker compose up migrate` |
+| **Ver versão do schema** | `make migrate-version` | — |
 | **Testar login via curl** | `make login` | *(via curl no endpoint `/api/v1/auth/login`)* |
 | **Abrir terminal psql no banco** | `make psql` | `docker compose exec db psql -U workshop -d automotive_workshop` |
 
@@ -228,12 +235,101 @@ curl http://localhost:8080/health
 
 ## Credenciais de Teste e Dados Iniciais (Seed)
 
-O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](docs/seed.sql)) contendo clientes, veículos, produtos, serviços, ordens de serviço e usuários administrativos:
+No ambiente local (Docker Compose), o serviço `seed` aplica automaticamente, depois das migrations, os dados de exemplo ([docs/seed.sql](docs/seed.sql)) contendo clientes, veículos, produtos, serviços, ordens de serviço e usuários administrativos:
 
 | Usuário / E-mail | Senha | Perfil |
 | :--- | :--- | :--- |
 | `admin@workshop.local` | `admin123` | Administrador da Oficina |
 | `soat-architecture@workshop.local` | `soat-architecture` | Administrador / Avaliação SOAT |
+
+> Essas senhas são públicas e só valem para desenvolvimento local e testes. Ambientes implantados (Kubernetes/CI) **não** rodam o seed: o administrador é criado pelo [bootstrap de administrador](#bootstrap-do-usuário-administrador) com credenciais vindas de um Secret.
+
+---
+
+## Migrações do Banco de Dados
+
+O schema é criado e evoluído **somente** por migrations versionadas em [`migrations/`](migrations/), aplicadas com o [golang-migrate](https://github.com/golang-migrate/migrate) `v4.20.1` a partir da imagem Docker oficial (nada a instalar além do Docker). A mesma cadeia de migrations roda no Compose, na CI e no Job do Kubernetes. Spec: [specs/database-migrations/](specs/database-migrations/).
+
+- `0001_init` é a **baseline**: o schema exato da Fase 1. Ela se recusa a rodar num banco que já tem tabelas (veja [Adotar um banco existente](#adotar-um-banco-existente-fase-1)).
+- [`docs/schema.sql`](docs/schema.sql) continua sendo a **referência legível** do schema completo, mas nenhum ambiente o executa mais. A CI confere que as migrations produzem exatamente esse schema.
+- Todos os comandos abaixo também existem como [`scripts/migrate.sh`](scripts/migrate.sh) (`up`, `version`, `create`, `down`, `baseline`, `verify`), que funciona contra qualquer `DATABASE_URL`.
+
+### Criar uma migration
+
+```bash
+make migrate-create name=add_vehicle_color   # cria migrations/NNNN_add_vehicle_color.up.sql e .down.sql
+```
+
+1. Escreva o `.up.sql` e o `.down.sql` (o down desfaz exatamente o up).
+2. Atualize `docs/schema.sql` **no mesmo commit** para o schema resultante.
+3. Rode `make migrate-verify` (o mesmo teste do job `migrations` da CI).
+
+Regras: nunca edite uma migration que já foi aplicada em algum lugar (crie outra); não use `BEGIN`/`COMMIT` nem comandos que não rodam em transação (ex.: `CREATE INDEX CONCURRENTLY`). Cada migration roda inteira numa transação, e é isso que garante que uma falha não deixa nada pela metade.
+
+### Aplicar
+
+```bash
+docker compose up -d      # aplica as pendentes antes de subir a API
+make migrate-up           # ou só as migrations, com o banco já rodando
+make migrate-version      # versão atual (ex.: "2")
+```
+
+Rodar de novo sem nada pendente responde `no change` e não altera nada.
+
+### Adotar um banco existente (Fase 1)
+
+Um volume criado na Fase 1 já tem as tabelas (criadas pelo antigo `docker-entrypoint-initdb.d`), mas não tem o controle de versão. Na primeira vez que você subir o Compose, o serviço `migrate` recusa e a API não sobe — **nada é alterado**. No final de `docker compose logs migrate` aparece `0001_init refused: this database already has tables...`. Para adotar o banco:
+
+```bash
+make start-db            # o banco precisa estar rodando
+make migrate-baseline    # backup + comprovação de equivalência + registra a versão
+docker compose up -d     # aplica as migrations posteriores (ex.: 0002) e sobe a API
+```
+
+O `baseline`:
+1. faz um backup (`pg_dump -Fc`) em `backups/<banco>-<data>.dump` (fora do Git) e confere que ele pode ser lido;
+2. compara o schema do banco (`pg_dump --schema-only`) com o schema de **cada** versão das migrations, montada num Postgres descartável;
+3. só registra a versão se o schema bater **exatamente** com uma delas. Nenhum `CREATE` é executado de novo e nenhum dado é tocado.
+
+Se não bater com nenhuma versão, ele mostra as diferenças e não registra nada. Um caso conhecido é um volume criado antes de 26/08/2026, com os status da OS ainda em português. Nesse caso, ajuste o banco com os `ALTER TYPE ... RENAME VALUE` documentados em `docs/schema.sql` (seção de enums) e rode o `baseline` de novo. Para um banco onde nada disso importa, recriar do zero também resolve: `make reset` (**apaga os dados**).
+
+### Quando uma migration falha
+
+1. A migration que falhou é desfeita por inteiro (ela roda numa transação), então o banco continua na versão anterior. Ele fica marcado como *dirty*, e todo `up` seguinte recusa com `Dirty database version N` — inclusive no deploy, que para antes do rollout.
+2. Corrija a causa. Se a migration nunca rodou com sucesso em lugar nenhum, corrija o arquivo. Se já rodou em algum ambiente, deixe-a como está e crie uma migration corretiva.
+3. `make migrate-baseline` (ou `scripts/migrate.sh baseline`) — faz backup, comprova que o schema é o da versão anterior e registra essa versão como limpa.
+4. `make migrate-up`.
+
+Nenhum passo apaga dados, e não existe comando para "forçar" uma versão sem comprovação.
+
+### Reverter (só em banco descartável)
+
+```bash
+make migrate-down MIGRATE_CONFIRM_DOWN=yes   # reverte 1 migration
+```
+
+O `down` apaga as tabelas e os dados que a migration criou. Por isso ele exige a confirmação explícita e serve só para desenvolvimento ou teste em banco descartável. Num ambiente com dados que importam, a correção é: backup + nova migration corretiva.
+
+### Verificar a cadeia inteira
+
+```bash
+make migrate-verify   # ~1 min; usa só containers descartáveis, nunca o seu banco
+```
+
+Confere: banco vazio migrado ≡ `docs/schema.sql`; segunda execução sem mudança; `down` de tudo e `up` de novo; adoção de um banco da Fase 1 com dados preservados; recusa de um banco que não bate com nenhuma versão; e falha controlada com recuperação. É o que roda no job `migrations` da CI.
+
+### Bootstrap do usuário administrador
+
+Um banco recém-criado fora do ambiente local (Kubernetes, CI) não recebe o seed, e a API só tem o endpoint de login, sem cadastro de usuário. O comando `/bootstrap-admin`, que vem na mesma imagem da API, cria o administrador a partir de variáveis de ambiente:
+
+```bash
+ADMIN_EMAIL=admin@oficina.example ADMIN_PASSWORD='uma-senha-forte-aqui' make bootstrap-admin
+# no cluster: Job com a imagem da API, command ["/bootstrap-admin"], variáveis vindas de um Secret
+```
+
+- `ADMIN_EMAIL` e `ADMIN_PASSWORD` são obrigatórios (senha de 12 a 72 bytes). `ADMIN_NAME` é opcional (padrão `Administrator`).
+- A senha é convertida em hash bcrypt dentro do comando: só o hash chega ao banco, e nem senha nem hash aparecem na saída.
+- É idempotente: se já existe um usuário com esse e-mail, nada muda (a senha existente **não** é trocada). Pode rodar em todo deploy.
 
 ---
 
@@ -382,8 +478,10 @@ Executa `govulncheck` e `gosec` fixados em versões sem poluir o `go.mod`:
 ```text
 automotive-workshop-api/
 ├── cmd/
-│   └── api/
-│       └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
+│   ├── api/
+│   │   └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
+│   └── bootstrap-admin/            # Comando que cria o admin num banco recém-migrado
+├── migrations/                     # Migrations versionadas (golang-migrate): 0001 = baseline da Fase 1
 ├── internal/
 │   ├── features/                   # Fatias verticais (Vertical Slice Architecture)
 │   │   ├── auth/                   # Autenticação administrativa e login JWT
@@ -405,15 +503,16 @@ automotive-workshop-api/
 ├── bruno/                          # Coleção de requisições para o cliente Bruno
 ├── docs/                           # Documentação arquitetural, OpenAPI, Postman e Schemas SQL
 │   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (48 rotas)
-│   ├── schema.sql                  # Schema DDL completo do PostgreSQL
-│   ├── seed.sql                    # Dados de carga inicial para desenvolvimento e testes
+│   ├── schema.sql                  # Referência do schema completo (gerado pelas migrations; conferido na CI)
+│   ├── seed.sql                    # Dados de exemplo para desenvolvimento local e testes
 │   ├── postman-collection.json     # Coleção Postman v2.1
 │   └── insomnia-collection.json    # Coleção Insomnia v4
-├── scripts/                        # Scripts de automação de cobertura e segurança
+├── scripts/                        # Scripts de automação
 │   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
+│   ├── migrate.sh                  # Migrations: up, version, create, down, baseline, verify
 │   └── security-scan.sh            # Varredura com gosec e govulncheck
 ├── .env.example                    # Modelo de configuração de ambiente
-├── docker-compose.yml              # Orquestração local (API + Postgres + Swagger + Adminer)
+├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer)
 ├── Dockerfile                      # Build multistage da API em Go
 ├── Makefile                        # Atalhos de comandos para desenvolvimento
 └── go.mod                          # Módulo Go e dependências
