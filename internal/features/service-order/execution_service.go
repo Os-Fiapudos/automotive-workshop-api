@@ -69,32 +69,42 @@ func (service *ServiceOrderService) FinishExecution(ctx context.Context, service
 // execution — one per distinct service line item of its approved quote — is
 // complete (BR5, design.md §2.3).
 func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+	order, _, err := service.finalizeOrder(ctx, serviceOrderID, "")
+	return order, err
+}
+
+// finalizeOrder is the single core behind FinalizeOrder and the external
+// status update (specs/service-order-status-update/design.md §1): notes, if
+// non-empty, is appended to the history entry. It also returns the status
+// the order had before the transition.
+func (service *ServiceOrderService) finalizeOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if order.Status != StatusInProgress {
-		return nil, ErrInvalidStatusTransition
+		return nil, "", ErrInvalidStatusTransition
 	}
+	previousStatus := order.Status
 
 	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, serviceOrderID)
 	if err != nil && !errors.Is(err, ErrQuoteNotFound) {
-		return nil, err
+		return nil, "", err
 	}
 
 	if quote != nil {
 		if err := service.ensureRequiredExecutionsComplete(ctx, order.ID, quote); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 
 	if err := order.finalize(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if err := service.repository.FinalizeOrder(ctx, order); err != nil {
-		return nil, err
+	if err := service.repository.FinalizeOrder(ctx, order, notes); err != nil {
+		return nil, "", err
 	}
-	return order, nil
+	return order, previousStatus, nil
 }
 
 // ensureRequiredExecutionsComplete implements BR5: every distinct service id
@@ -132,16 +142,26 @@ func (service *ServiceOrderService) ensureRequiredExecutionsComplete(ctx context
 
 // DeliverOrder transitions a COMPLETED order to DELIVERED (BR7).
 func (service *ServiceOrderService) DeliverOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+	order, _, err := service.deliverOrder(ctx, serviceOrderID, "")
+	return order, err
+}
+
+// deliverOrder is the single core behind DeliverOrder and the external
+// status update (specs/service-order-status-update/design.md §1): notes, if
+// non-empty, is appended to the history entry. It also returns the status
+// the order had before the transition.
+func (service *ServiceOrderService) deliverOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	previousStatus := order.Status
 
 	if err := order.deliver(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if err := service.repository.DeliverOrder(ctx, order); err != nil {
-		return nil, err
+	if err := service.repository.DeliverOrder(ctx, order, notes); err != nil {
+		return nil, "", err
 	}
-	return order, nil
+	return order, previousStatus, nil
 }

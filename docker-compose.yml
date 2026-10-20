@@ -35,6 +35,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
       JWT_TTL: ${JWT_TTL:-1h}
       EXTERNAL_NOTIFICATION_SECRET: ${EXTERNAL_NOTIFICATION_SECRET:?EXTERNAL_NOTIFICATION_SECRET is required - set it in .env}
+      EXTERNAL_STATUS_UPDATE_SECRET: ${EXTERNAL_STATUS_UPDATE_SECRET:?EXTERNAL_STATUS_UPDATE_SECRET is required - set it in .env}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:
@@ -42,6 +43,36 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # External status-update tool (specs/service-order-status-update/, FP-30):
+  # imports and publishes tools/n8n/workflows on every start, so the
+  # integration is reproducible with no manual setup. The workflow reads the
+  # API URL and secret from this environment ($env), never from the
+  # versioned JSON. Operator form: http://localhost:5678/form/service-order-status
+  n8n:
+    image: n8nio/n8n:2.43.8
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        n8n import:workflow --separate --input=/workflows &&
+        n8n publish:workflow --id=fp30StatusUpdate &&
+        exec n8n start
+    environment:
+      WORKSHOP_API_URL: http://api:8080
+      EXTERNAL_STATUS_UPDATE_SECRET: ${EXTERNAL_STATUS_UPDATE_SECRET:?EXTERNAL_STATUS_UPDATE_SECRET is required - set it in .env}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: America/Sao_Paulo
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./tools/n8n/workflows:/workflows:ro
+    depends_on:
+      - api
 
   swagger-ui:
     image: swaggerapi/swagger-ui:latest
@@ -55,3 +86,4 @@ services:
 
 volumes:
   db_data:
+  n8n_data:

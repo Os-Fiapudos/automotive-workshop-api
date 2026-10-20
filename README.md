@@ -150,6 +150,8 @@ cp .env.example .env
 > - `JWT_SECRET=change-me-dev-only-please-generate-a-real-random-value`
 > - `JWT_TTL=1h`
 > - `EXTERNAL_NOTIFICATION_SECRET=change-me-dev-only-external-notification-secret`
+> - `EXTERNAL_STATUS_UPDATE_SECRET=change-me-dev-only-external-status-update-secret` (obrigatório e diferente do anterior)
+> - `N8N_PORT=5678`
 > - `RESEND_API_KEY` e `RESEND_FROM_EMAIL` (opcionais, sempre em par): habilitam o e-mail de
 >   "orçamento disponível" via Resend. Sem a chave, a notificação fica desabilitada (no-op); chave
 >   sem remetente impede a API de iniciar.
@@ -203,6 +205,7 @@ curl http://localhost:8080/health
 | :--- | :--- | :--- |
 | **API REST** | `http://localhost:8080` | Ponto de entrada da API. |
 | **Swagger UI** | `http://localhost:8082` | Documentação interativa completa (OpenAPI 3.0). |
+| **n8n** | `http://localhost:5678/form/service-order-status` | Ferramenta de atualização de status da OS pelo operador ([roteiro](tools/n8n/README.md)). |
 | **Adminer (DB Web)** | `http://localhost:8081` | Gerenciador do Postgres (Servidor: `db`, Usuário: `workshop`, Senha: `workshop`, Base: `automotive_workshop`). |
 | **Postgres Database** | `localhost:5432` | Conexão direta com o banco de dados. |
 
@@ -236,12 +239,13 @@ O banco é inicializado automaticamente com dados de exemplo ([docs/seed.sql](do
 
 ## Documentação dos Endpoints da API
 
-A API possui **48 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
+A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
 
 ### Modelos de Autenticação:
 - **`JWT (Bearer)`**: Requer cabeçalho `Authorization: Bearer <token>` obtido através do login administrativo.
 - **`X-Tracking-Token`**: Rota pública do cliente; não aceita JWT administrativo e exige o cabeçalho `X-Tracking-Token: <token>` emitido exclusivamente na abertura da OS.
 - **`X-External-Notification-Secret`**: Canal de sistema externo para decisão de orçamento; não usa JWT e exige o segredo compartilhado configurado em `EXTERNAL_NOTIFICATION_SECRET`.
+- **`X-External-Status-Secret`**: Canal da ferramenta externa (n8n) de atualização de status da OS; não usa JWT e exige o segredo `EXTERNAL_STATUS_UPDATE_SECRET`, separado do segredo de orçamento.
 - **`Pública`**: Rotas abertas sem necessidade de credenciais.
 
 ---
@@ -306,6 +310,7 @@ A API possui **48 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 | `GET` | `/api/v1/service-orders/{id}/quote` | JWT | Consulta o orçamento vinculado à OS. |
 | `POST` | `/api/v1/service-orders/{id}/quote/send` | JWT | Registra o envio do orçamento ao cliente (`IN_DIAGNOSIS → AWAITING_APPROVAL`). |
 | `POST` | `/api/v1/service-orders/{id}/quote/decision` | Segredo externo | Sistema externo notifica a decisão do cliente (`{"decision":"approved"\|"rejected"}` → `IN_PROGRESS`/`CANCELED`); `409` se já decidido. |
+| `POST` | `/api/v1/service-orders/{id}/status` | Segredo de status | Ferramenta externa (n8n) avança a OS para `IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED` com `notes` opcional gravada no histórico; `409` se a transição for ilegal, `400` fora do contrato. |
 | `POST` | `/api/v1/service-orders/{id}/executions` | JWT | Registra o início de execução de um serviço específico da OS. |
 | `POST` | `/api/v1/service-orders/{id}/executions/{executionId}/finish` | JWT | Registra a conclusão da execução do serviço. |
 | `POST` | `/api/v1/service-orders/{id}/finalize` | JWT | Finaliza a OS (`IN_PROGRESS → COMPLETED`) após concluir as execuções. |

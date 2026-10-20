@@ -49,7 +49,7 @@ func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Co
 // FinalizeOrder moves order to COMPLETED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // StartDiagnosis.
-func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *ServiceOrder) error {
+func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'completion', $2, 'IN_PROGRESS', $3)`,
-		order.ID, "Service order finalized.", string(order.Status),
+		order.ID, historyDescription(historyOrderFinalized, notes), string(order.Status),
 	); err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 // DeliverOrder moves order to DELIVERED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // FinalizeOrder.
-func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *ServiceOrder) error {
+func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'delivery', $2, 'COMPLETED', $3)`,
-		order.ID, "Vehicle delivered to customer.", string(order.Status),
+		order.ID, historyDescription(historyVehicleDelivered, notes), string(order.Status),
 	); err != nil {
 		return err
 	}

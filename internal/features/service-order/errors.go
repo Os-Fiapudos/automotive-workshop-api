@@ -116,6 +116,15 @@ var (
 	// (specs/service-order-quote-decision/requirements.md AC18, 400).
 	ErrInvalidQuoteDecision = errors.New("decision must be approved or rejected")
 
+	// ErrUnsupportedExternalStatus is returned by UpdateStatusExternal when
+	// the requested status is not one the external status-update channel
+	// accepts (specs/service-order-status-update/requirements.md BR2, 400).
+	ErrUnsupportedExternalStatus = errors.New("status must be IN_DIAGNOSIS, COMPLETED or DELIVERED")
+
+	// ErrInvalidStatusUpdateNotes is returned by UpdateStatusExternal when
+	// notes exceed maxStatusUpdateNotesLength after trimming (BR6, 400).
+	ErrInvalidStatusUpdateNotes = errors.New("notes must be at most 500 characters")
+
 	// ErrEmptyStockUsage is returned when a stock usage request has no items
 	// (specs/service-order-stock-usage/).
 	ErrEmptyStockUsage = errors.New("stock usage must include at least one item")

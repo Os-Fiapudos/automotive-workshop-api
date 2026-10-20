@@ -1,0 +1,22 @@
+meta {
+  name: External Status Update
+  type: http
+  seq: 19
+}
+
+post {
+  url: {{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/status
+  body: json
+  auth: none
+}
+
+headers {
+  X-External-Status-Secret: {{externalStatusSecret}}
+}
+
+body:json {
+  {
+    "status": "IN_DIAGNOSIS",
+    "notes": "Car on lift 2"
+  }
+}

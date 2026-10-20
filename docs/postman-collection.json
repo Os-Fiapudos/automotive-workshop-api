@@ -474,7 +474,7 @@
               "path": [
                 "api",
                 "v1",
-                "produtos"
+                "products"
               ]
             },
             "description": "type is PART or SUPPLY. code is optional (auto-generated when omitted).",
@@ -515,7 +515,7 @@
               "path": [
                 "api",
                 "v1",
-                "produtos"
+                "products"
               ],
               "query": [
                 {
@@ -557,7 +557,7 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}"
               ]
             }
@@ -582,7 +582,7 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}"
               ]
             },
@@ -611,7 +611,7 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}"
               ]
             },
@@ -637,10 +637,10 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}",
-                "estoque",
-                "ajustes"
+                "stock",
+                "adjustments"
               ]
             },
             "description": "type accepts ENTRY/ENTRADA/IN or EXIT/SAIDA/OUT.",
@@ -669,9 +669,9 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}",
-                "estoque"
+                "stock"
               ]
             }
           },
@@ -690,9 +690,9 @@
               "path": [
                 "api",
                 "v1",
-                "produtos",
+                "products",
                 "{{productId}}",
-                "movimentacoes"
+                "movements"
               ],
               "query": [
                 {
@@ -1167,6 +1167,49 @@
           "response": []
         },
         {
+          "name": "External status update (n8n tool)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-External-Status-Secret",
+                "value": "{{externalStatusSecret}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"status\": \"IN_DIAGNOSIS\", \"notes\": \"Car on lift 2\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/service-orders/{{serviceOrderId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "service-orders",
+                "{{serviceOrderId}}",
+                "status"
+              ]
+            },
+            "description": "External status-update tool channel (specs/service-order-status-update). Authenticated only by X-External-Status-Secret (must equal the API's EXTERNAL_STATUS_UPDATE_SECRET, distinct from the quote secret) - no JWT. status: IN_DIAGNOSIS | COMPLETED | DELIVERED; notes optional (<=500 chars, saved in history). 200 {id, code, previousStatus, status}; 401 bad secret; 400 out of contract; 404 unknown order; 409 illegal transition / pending executions.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
           "name": "List service orders",
           "request": {
             "method": "GET",
@@ -1325,7 +1368,7 @@
             "description": "Body is optional: omit it entirely to close the execution at the server time.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"endedAt\": \"2026-08-24T18:30:00Z\"\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1680,6 +1723,10 @@
     {
       "key": "externalNotificationSecret",
       "value": "change-me-dev-only-external-notification-secret"
+    },
+    {
+      "key": "externalStatusSecret",
+      "value": "change-me-dev-only-external-status-update-secret"
     }
   ]
 }

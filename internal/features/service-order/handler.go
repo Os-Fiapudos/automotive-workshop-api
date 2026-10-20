@@ -31,6 +31,11 @@ const trackingTokenHeader = "X-Tracking-Token"
 // (specs/service-order-quote-decision/design.md §5.1).
 const externalNotificationSecretHeader = "X-External-Notification-Secret"
 
+// externalStatusSecretHeader carries the shared secret the external
+// status-update tool authenticates with — a different secret from the
+// quote-decision one (specs/service-order-status-update/design.md §3).
+const externalStatusSecretHeader = "X-External-Status-Secret" // #nosec G101 -- HTTP header name, not a credential
+
 // RegisterRoutes registers every Service Order Opening/Diagnosis/Quote
 // endpoint on mux, using the same Go 1.22 method-aware ServeMux pattern as
 // every other feature (see specs/service-order-opening/design.md §1.5).
@@ -71,6 +76,12 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	// authenticates it with X-External-Notification-Secret instead, before
 	// touching the order (design.md §5.1/§5.3).
 	mux.HandleFunc("POST /api/v1/service-orders/{id}/quote/decision", handler.decideQuoteExternal)
+
+	// Added by specs/service-order-status-update/ (Fase 2): an external tool
+	// (the n8n workflow in tools/n8n/) triggers IN_DIAGNOSIS/COMPLETED/
+	// DELIVERED. Not wrapped in requireAuth for the same reason as the route
+	// above; the handler checks X-External-Status-Secret first (design.md §3).
+	mux.HandleFunc("POST /api/v1/service-orders/{id}/status", handler.updateStatusExternal)
 
 	// Added by specs/service-order-query/ (RNF02: every route here requires
 	// a valid JWT, unlike the create route above). {id} accepts either a
@@ -280,6 +291,41 @@ func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r
 	}
 
 	writeJSON(w, http.StatusOK, toQuoteDecisionResponse(order, quote))
+}
+
+// updateStatusExternal handles POST /api/v1/service-orders/{id}/status
+// (specs/service-order-status-update/design.md §4). The secret is checked
+// before {id} or the body are looked at, and the body is validated before
+// the order is loaded, so a 401/400 never reveals or changes anything.
+func (handler *serviceOrderHandler) updateStatusExternal(w http.ResponseWriter, r *http.Request) {
+	if !handler.service.AuthenticateExternalStatusUpdate(r.Header.Get(externalStatusSecretHeader)) {
+		apierror.Write(w, apierror.Unauthorized("INVALID_EXTERNAL_SECRET", "external status secret is missing or invalid"))
+		return
+	}
+
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		apierror.Write(w, apierror.NotFound("service order not found"))
+		return
+	}
+
+	request, apiError := decodeJSON[ExternalStatusUpdateRequest](r)
+	if apiError != nil {
+		apierror.Write(w, apiError)
+		return
+	}
+	if details := request.Validate(); len(details) > 0 {
+		apierror.Write(w, apierror.Validation("invalid status update", details...))
+		return
+	}
+
+	result, err := handler.service.UpdateStatusExternal(r.Context(), id, Status(request.Status), request.Notes)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toStatusUpdateResponse(result))
 }
 
 // list handles GET /api/v1/service-orders (specs/service-order-query/,
