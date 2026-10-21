@@ -3,21 +3,21 @@ package main
 import (
 	"testing"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/notifier"
 	"automotive-workshop-api/internal/shared/config"
 )
 
 func TestBuildQuoteNotifierWithoutKeyIsNoOp(t *testing.T) {
-	notifier := buildQuoteNotifier(config.Config{}, nil)
-	if _, ok := notifier.(serviceorder.NoOpQuoteNotifier); !ok {
-		t.Fatalf("got %T, want NoOpQuoteNotifier", notifier)
+	got := buildQuoteNotifier(config.Config{}, nil)
+	if _, ok := got.(notifier.NoOpQuoteNotifier); !ok {
+		t.Fatalf("got %T, want NoOpQuoteNotifier", got)
 	}
 }
 
 func TestBuildQuoteNotifierWithKeyIsResend(t *testing.T) {
-	notifier := buildQuoteNotifier(config.Config{ResendAPIKey: "re_key", ResendFromEmail: "oficina@example.com"}, nil)
-	if _, ok := notifier.(*serviceorder.ResendQuoteNotifier); !ok {
-		t.Fatalf("got %T, want *ResendQuoteNotifier", notifier)
+	got := buildQuoteNotifier(config.Config{ResendAPIKey: "re_key", ResendFromEmail: "oficina@example.com"}, nil)
+	if _, ok := got.(*notifier.ResendQuoteNotifier); !ok {
+		t.Fatalf("got %T, want *ResendQuoteNotifier", got)
 	}
 }
 
@@ -33,7 +33,7 @@ func TestComposeFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := buildQuoteNotifier(cfg, nil).(serviceorder.NoOpQuoteNotifier); !ok {
+	if _, ok := buildQuoteNotifier(cfg, nil).(notifier.NoOpQuoteNotifier); !ok {
 		t.Fatal("unset env must compose the no-op notifier")
 	}
 
@@ -43,7 +43,29 @@ func TestComposeFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := buildQuoteNotifier(cfg, nil).(*serviceorder.ResendQuoteNotifier); !ok {
+	if _, ok := buildQuoteNotifier(cfg, nil).(*notifier.ResendQuoteNotifier); !ok {
 		t.Fatal("configured env must compose the Resend notifier")
+	}
+}
+
+// TestBuildServiceOrderUseCases checks the composition root wires every use
+// case and hands each external channel its own secret
+// (specs/service-order-architecture-refactor/design.md §9.3). No method that
+// reaches the repository is called, so a nil repository is enough.
+func TestBuildServiceOrderUseCases(t *testing.T) {
+	useCases := buildServiceOrderUseCases(nil, notifier.NoOpQuoteNotifier{}, "quote-secret", "status-secret")
+
+	if useCases.Opening == nil || useCases.Lifecycle == nil || useCases.Quotes == nil || useCases.Executions == nil ||
+		useCases.Queries == nil || useCases.StockUsage == nil || useCases.Metrics == nil {
+		t.Fatalf("every use case must be composed: %+v", useCases)
+	}
+	if !useCases.Quotes.AuthenticateExternalNotification("quote-secret") {
+		t.Fatal("the quote-decision secret must reach Quotes")
+	}
+	if !useCases.Lifecycle.AuthenticateExternalStatusUpdate("status-secret") {
+		t.Fatal("the status-update secret must reach Lifecycle")
+	}
+	if useCases.Lifecycle.AuthenticateExternalStatusUpdate("quote-secret") {
+		t.Fatal("the secrets must not be swapped")
 	}
 }

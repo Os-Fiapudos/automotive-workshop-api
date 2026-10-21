@@ -11,19 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ProductRepository defines persistence operations for the Product aggregate.
-type ProductRepository interface {
-	Create(ctx context.Context, product *Product) error
-	FindByID(ctx context.Context, id uuid.UUID) (*Product, error)
-	FindByCode(ctx context.Context, code int64) (*Product, error)
-	ExistsByCode(ctx context.Context, code int64, excludeID *uuid.UUID) (bool, error)
-	List(ctx context.Context, page, pageSize int, productType *Type, status *Status) ([]*Product, int, error)
-	Update(ctx context.Context, product *Product) error
-	AdjustStock(ctx context.Context, id uuid.UUID, movement *StockMovement) (*Product, error)
-	ListMovements(ctx context.Context, productID uuid.UUID, page, pageSize int) ([]*StockMovement, int, error)
-	IsUsedInQuotesOrOrders(ctx context.Context, id uuid.UUID) (bool, error)
-}
-
 const postgresUniqueViolation = "23505"
 const codeUniqueConstraint = "ux_products_code"
 

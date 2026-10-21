@@ -10,25 +10,25 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 )
 
 // startAndFinishExecution starts an execution of serviceID on order and
 // finishes it endedAfter later, returning the started execution.
-func startAndFinishExecution(t *testing.T, server, authToken, orderID, serviceID string, endedAfter time.Duration) serviceorder.ServiceExecutionResponse {
+func startAndFinishExecution(t *testing.T, server, authToken, orderID, serviceID string, endedAfter time.Duration) httpapi.ServiceExecutionResponse {
 	t.Helper()
 
 	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+orderID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, startResp.StatusCode)
-	var started serviceorder.ServiceExecutionResponse
+	var started httpapi.ServiceExecutionResponse
 	decodeBody(t, startResp, &started)
 
 	endedAt := started.StartedAt.Add(endedAfter)
 	finishResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+orderID+"/executions/"+started.ID+"/finish",
 		map[string]any{"endedAt": endedAt.Format(time.RFC3339)}, authToken)
 	require.Equal(t, http.StatusOK, finishResp.StatusCode)
-	var finished serviceorder.ServiceExecutionResponse
+	var finished httpapi.ServiceExecutionResponse
 	decodeBody(t, finishResp, &finished)
 	return finished
 }
@@ -54,7 +54,7 @@ func TestAverageExecutionTimeAveragesCompletedExecutions(t *testing.T) {
 		nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var body serviceorder.AverageExecutionTimeResponse
+	var body httpapi.AverageExecutionTimeResponse
 	decodeBody(t, resp, &body)
 	require.Len(t, body.Services, 1)
 	assert.Equal(t, serviceID, body.Services[0].ServiceID)
@@ -73,7 +73,7 @@ func TestAverageExecutionTimeNoDataReturnsEmptyList(t *testing.T) {
 		nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var body serviceorder.AverageExecutionTimeResponse
+	var body httpapi.AverageExecutionTimeResponse
 	decodeBody(t, resp, &body)
 	assert.Empty(t, body.Services)
 }
@@ -92,7 +92,7 @@ func TestAverageExecutionTimeFiltersByDateRange(t *testing.T) {
 		nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var body serviceorder.AverageExecutionTimeResponse
+	var body httpapi.AverageExecutionTimeResponse
 	decodeBody(t, resp, &body)
 	assert.Empty(t, body.Services)
 }

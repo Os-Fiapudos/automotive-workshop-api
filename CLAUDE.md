@@ -138,6 +138,10 @@ internal/features/          → one folder per business feature (vertical slice)
   features/service-catalog/ → implemented slice: handler + service + repository + model
                                (service catalog CRUD over /api/v1/services; unit- and
                                integration-tested)
+  features/service-order/   → implemented slice in Clean Architecture layers (section 9.1):
+                               domain/, usecase/ (ports.go), adapter/{postgres,httpapi,
+                               notifier}/; architecture_test.go enforces the dependency
+                               rule (specs/service-order-architecture-refactor/)
   features/user/            → placeholder slice: only has doc.go, no implementation yet.
                                NOTE: unrelated to auth's `users` database table — this is a
                                distinct, not-yet-specified future feature; don't conflate them.
@@ -172,6 +176,17 @@ etc.). This is the pattern declared in [README.md](README.md), now implemented e
 by `internal/features/auth/`, `internal/features/customer/`, and
 `internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
+
+**Clean Architecture inside a slice (since 2026-10-21, F2-US01)**: `service-order` keeps
+the vertical slice — one folder, `internal/features/service-order/` — but organizes it
+internally in layers whose dependencies only point inward: `domain/` (aggregate,
+transitions, errors; standard library + `uuid` only) ← `usecase/` (use cases and the
+narrow ports they declare in `ports.go`) ← `adapter/postgres`, `adapter/httpapi`,
+`adapter/notifier` (pgx, HTTP and e-mail). Composition happens in `cmd/api`
+(`wiring.go`). The other implemented features keep the flat layout; that their packages
+mix HTTP, SQL and rules is recorded technical debt, not a pattern to copy — see
+[docs/architecture-dependency-map.md](docs/architecture-dependency-map.md) and
+[specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/).
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
 pool, shared by every feature), authentication middleware (`internal/shared/middleware`),
@@ -242,14 +257,21 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
+- `internal/features/service-order/architecture_test.go` — the dependency-rule check: it
+  resolves the transitive import graph with `go list -deps` and fails if `domain`/`usecase`
+  reach `net/http`, `encoding/json`, `pgx`, `apierror`/`httpx`, an adapter or a library
+  outside their allowlist, or if an adapter depends on another adapter or feature. It is
+  a plain test, so `go test ./...` (and CI's `build` job) runs it.
 - `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
   CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
   versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
   [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
   are recorded in [docs/security-report.md](docs/security-report.md).
 - `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
-  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
-  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+  `product`, and `service-order-tracking`; `service-order` is gated as one aggregate over
+  `service-order/...`, so its sub-packages can never drop out of the gate), run in CI by
+  the `coverage` job against a real Postgres. It fails when `DATABASE_URL` is unset rather
+  than measuring skipped tests.
 - `scripts/migrate.sh verify` — run in CI by the `migrations` job (and locally by
   `make migrate-verify`): on throwaway containers, checks the migration chain against
   `docs/schema.sql`, re-run/no-op, full down/up, Fase 1 adoption with data preserved,
@@ -355,6 +377,15 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
    Do not create cross-cutting technical packages (`internal/handlers/`, `internal/models/`,
    global `internal/services/`) — that breaks the vertical slice organization already
    adopted.
+   A feature that has explicitly adopted Clean Architecture or a Hexagonal layering
+   (currently: `service-order` only, see `specs/service-order-architecture-refactor/`) may
+   organize its internal files into `domain/`, `usecase/`, and `adapter/<name>/`
+   sub-packages, as long as the whole feature still lives under one
+   `internal/features/<name>/` folder and no cross-feature import is introduced. This is
+   additive to, not a replacement for, the vertical-slice rule: the slice is still the
+   feature folder; the sub-packages are internal to it. Ports are declared by their
+   consumer (`usecase/`), never in an adapter, and the dependency direction is enforced
+   by the feature's `architecture_test.go`.
 2. **No direct coupling between features.** A feature must not import internal packages of
    another feature directly. If two features need to share logic or types, that logic must
    move up to `internal/shared/`. (Both `auth` and `customer` today only import
@@ -373,7 +404,8 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
 - Every new feature is born from a specification in `specs/` (see section 17) — not
   directly from code.
 - Follow the vertical slice pattern (section 9): handler, service, repository, and model
-  together in `internal/features/<feature>/`.
+  together in `internal/features/<feature>/` — or, for a feature that adopts Clean
+  Architecture, the layered sub-packages of section 9.1.
 - Reuse what already exists in `internal/shared/` before duplicating logic; if something new
   is genuinely cross-cutting, it goes into `internal/shared/`, not repeated in each feature.
   (Exception currently in effect: the error envelope — see section 8 — until that's

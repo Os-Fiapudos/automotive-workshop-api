@@ -17,7 +17,8 @@ import (
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/shared/middleware"
 	"automotive-workshop-api/internal/shared/token"
 )
@@ -54,15 +55,13 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	customerRepository := customer.NewPostgresCustomerRepository(pool)
 	customerService := customer.NewCustomerService(customerRepository)
 
-	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil).
-		WithExternalNotificationSecret(testExternalNotificationSecret).
-		WithExternalStatusUpdateSecret(testExternalStatusSecret)
+	serviceOrderRepository := orderpostgres.NewRepository(pool)
+	serviceOrderUseCases := newServiceOrderUseCases(serviceOrderRepository, testExternalNotificationSecret, testExternalStatusSecret)
 
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	customer.RegisterRoutes(router, customerService, requireAuth)
-	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+	httpapi.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
@@ -217,7 +216,7 @@ func TestServiceOrderCreateSuccess(t *testing.T) {
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	serviceID := insertService(t, pool)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID},
@@ -225,7 +224,7 @@ func TestServiceOrderCreateSuccess(t *testing.T) {
 	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var created serviceorder.Response
+	var created httpapi.Response
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 
@@ -261,7 +260,7 @@ func TestServiceOrderCreateRequiresAuth(t *testing.T) {
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, "")
@@ -275,13 +274,13 @@ func TestServiceOrderCreateByDocumentAndPlate(t *testing.T) {
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, plate, true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerDocument: createdCustomer.Document,
 		LicensePlate:     plate,
 	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var created serviceorder.Response
+	var created httpapi.Response
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 	assert.Equal(t, vehicleID, created.Vehicle.ID)
@@ -296,7 +295,7 @@ func TestServiceOrderCreateRejectsInactiveCustomer(t *testing.T) {
 	deactivateResp := doAuthJSON(t, http.MethodDelete, server+"/api/v1/customers/"+createdCustomer.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, deactivateResp.StatusCode)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, authToken)
@@ -309,7 +308,7 @@ func TestServiceOrderCreateRejectsInactiveVehicle(t *testing.T) {
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), false)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, authToken)
@@ -323,7 +322,7 @@ func TestServiceOrderCreateRejectsVehicleFromAnotherCustomer(t *testing.T) {
 	secondCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, secondCustomer.ID, randomLicensePlate(), true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: firstCustomer.ID,
 		VehicleID:  vehicleID,
 	}, authToken)
@@ -336,7 +335,7 @@ func TestServiceOrderCreateRejectsUnknownRequestedService(t *testing.T) {
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, "PQR1S23", true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{"00000000-0000-0000-0000-000000000000"},
@@ -359,7 +358,7 @@ func TestServiceOrderCreateRollsBackOnPartialFailure(t *testing.T) {
 
 	before := countServiceOrdersForVehicle(t, pool, vehicleID)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID, serviceID},
@@ -427,18 +426,18 @@ func TestServiceOrderCreateWithRequestedProducts(t *testing.T) {
 	firstStockBefore := productStock(t, pool, firstProductID)
 	secondStockBefore := productStock(t, pool, secondProductID)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID},
-		RequestedProducts: []serviceorder.RequestedProductRequest{
+		RequestedProducts: []httpapi.RequestedProductRequest{
 			{ProductID: firstProductID, Quantity: 2},
 			{ProductID: secondProductID, Quantity: 50}, // above current stock: availability is not checked at opening
 		},
 	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var created serviceorder.Response
+	var created httpapi.Response
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 
@@ -477,10 +476,10 @@ func TestServiceOrderCreateWithRequestedProductsRequiresAuth(t *testing.T) {
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	productID := insertProduct(t, pool, 10, true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:        createdCustomer.ID,
 		VehicleID:         vehicleID,
-		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
+		RequestedProducts: []httpapi.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
 	}, "")
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	assert.Zero(t, countServiceOrdersForVehicle(t, pool, vehicleID))
@@ -493,10 +492,10 @@ func TestServiceOrderCreateRejectsUnknownRequestedProduct(t *testing.T) {
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:        createdCustomer.ID,
 		VehicleID:         vehicleID,
-		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: uuid.NewString(), Quantity: 1}},
+		RequestedProducts: []httpapi.RequestedProductRequest{{ProductID: uuid.NewString(), Quantity: 1}},
 	}, authToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	assert.Equal(t, "PRODUCT_NOT_FOUND", errorCode(t, resp))
@@ -510,10 +509,10 @@ func TestServiceOrderCreateRejectsInactiveRequestedProduct(t *testing.T) {
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	productID := insertProduct(t, pool, 10, false)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:        createdCustomer.ID,
 		VehicleID:         vehicleID,
-		RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
+		RequestedProducts: []httpapi.RequestedProductRequest{{ProductID: productID, Quantity: 1}},
 	}, authToken)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	assert.Equal(t, "PRODUCT_NOT_FOUND", errorCode(t, resp))
@@ -528,10 +527,10 @@ func TestServiceOrderCreateRejectsNonPositiveRequestedProductQuantity(t *testing
 	productID := insertProduct(t, pool, 10, true)
 
 	for _, quantity := range []int{0, -2} {
-		resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+		resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 			CustomerID:        createdCustomer.ID,
 			VehicleID:         vehicleID,
-			RequestedProducts: []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: quantity}},
+			RequestedProducts: []httpapi.RequestedProductRequest{{ProductID: productID, Quantity: quantity}},
 		}, authToken)
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "quantity %d", quantity)
 		assert.Equal(t, "VALIDATION_ERROR", errorCode(t, resp))
@@ -568,10 +567,10 @@ func TestServiceOrderCreateRejectsDuplicateRequestedProduct(t *testing.T) {
 	productID := insertProduct(t, pool, 10, true)
 	stockBefore := productStock(t, pool, productID)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
-		RequestedProducts: []serviceorder.RequestedProductRequest{
+		RequestedProducts: []httpapi.RequestedProductRequest{
 			{ProductID: productID, Quantity: 1},
 			{ProductID: productID, Quantity: 2},
 		},
@@ -612,11 +611,11 @@ func TestServiceOrderCreateWithRequestedProductsRollsBackOnPartialFailure(t *tes
 	productID := insertProduct(t, pool, 10, true)
 	stockBefore := productStock(t, pool, productID)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID, serviceID},
-		RequestedProducts:   []serviceorder.RequestedProductRequest{{ProductID: productID, Quantity: 3}},
+		RequestedProducts:   []httpapi.RequestedProductRequest{{ProductID: productID, Quantity: 3}},
 	}, authToken)
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
@@ -628,19 +627,19 @@ func TestServiceOrderCreateWithRequestedProductsRollsBackOnPartialFailure(t *tes
 // createServiceOrder creates a service order through the real API and
 // returns its full response, for use as a fixture by the diagnosis/quote
 // tests below.
-func createServiceOrder(t *testing.T, server string, pool *pgxpool.Pool) serviceorder.Response {
+func createServiceOrder(t *testing.T, server string, pool *pgxpool.Pool) httpapi.Response {
 	t.Helper()
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, loginAsAdmin(t, server))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var created serviceorder.Response
+	var created httpapi.Response
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 	return created
@@ -722,7 +721,7 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 	resp = doAuthJSON(t, http.MethodPut, server+"/api/v1/service-orders/"+order.ID+"/quote", body, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var quote serviceorder.QuoteResponse
+	var quote httpapi.QuoteResponse
 	decodeBody(t, resp, &quote)
 	assert.InDelta(t, 2*35.90+80.00, quote.TotalAmount, 0.0001)
 	require.Len(t, quote.Items, 2)
@@ -740,7 +739,7 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 	// GET must return the same quote.
 	getResp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID+"/quote", nil, authToken)
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
-	var fetched serviceorder.QuoteResponse
+	var fetched httpapi.QuoteResponse
 	decodeBody(t, getResp, &fetched)
 	assert.InDelta(t, quote.TotalAmount, fetched.TotalAmount, 0.0001)
 
@@ -817,7 +816,7 @@ func TestServiceOrderComposeQuoteSnapshotSurvivesCatalogChange(t *testing.T) {
 
 	getResp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID+"/quote", nil, authToken)
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
-	var fetched serviceorder.QuoteResponse
+	var fetched httpapi.QuoteResponse
 	decodeBody(t, getResp, &fetched)
 
 	require.Len(t, fetched.Items, 1)
@@ -861,7 +860,7 @@ func TestServiceOrderListNoFilterOrdersOldestFirstWithinStatus(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?pageSize=100", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	require.GreaterOrEqual(t, len(list.Data), 2)
@@ -908,7 +907,7 @@ func TestServiceOrderListDefaultOrderPrioritizesStatusAndExcludesTerminal(t *tes
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?pageSize=500", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	positions := make(map[string]int, len(list.Data))
@@ -916,7 +915,7 @@ func TestServiceOrderListDefaultOrderPrioritizesStatusAndExcludesTerminal(t *tes
 		positions[item.ID] = i
 	}
 
-	for _, terminal := range []serviceorder.Response{completed, delivered, canceled} {
+	for _, terminal := range []httpapi.Response{completed, delivered, canceled} {
 		_, present := positions[terminal.ID]
 		assert.False(t, present, "terminal order %s must not appear in the default listing", terminal.ID)
 	}
@@ -942,7 +941,7 @@ func TestServiceOrderListExplicitTerminalStatusFilterReturnsMatchingOrders(t *te
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=COMPLETED&pageSize=500", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	var ids []string
@@ -959,7 +958,7 @@ func TestServiceOrderListFiltersByCode(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+fmt.Sprintf("/api/v1/service-orders?code=%d", target.Code), nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	require.Len(t, list.Data, 1)
@@ -975,7 +974,7 @@ func TestServiceOrderListFiltersByStatus(t *testing.T) {
 
 	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?status=IN_DIAGNOSIS&pageSize=100", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	var ids []string
@@ -990,12 +989,12 @@ func TestServiceOrderListFiltersByCustomerDocument(t *testing.T) {
 	pool, server, authToken := testServiceOrderServer(t)
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
-	var target serviceorder.Response
+	var target httpapi.Response
 	decodeBody(t, resp, &target)
 	cleanupServiceOrder(t, pool, target.ID)
 
@@ -1003,7 +1002,7 @@ func TestServiceOrderListFiltersByCustomerDocument(t *testing.T) {
 
 	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?document="+createdCustomer.Document+"&pageSize=100", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	require.Len(t, list.Data, 1)
@@ -1017,7 +1016,7 @@ func TestServiceOrderListFiltersByLicensePlate(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?licensePlate="+target.Vehicle.LicensePlate, nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	require.Len(t, list.Data, 1)
@@ -1033,7 +1032,7 @@ func TestServiceOrderListFiltersByCreatedRange(t *testing.T) {
 	resp := doAuthJSON(t, http.MethodGet,
 		server+"/api/v1/service-orders?createdFrom="+url.QueryEscape(from)+"&createdTo="+url.QueryEscape(to), nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var list serviceorder.ListResponse
+	var list httpapi.ListResponse
 	decodeBody(t, resp, &list)
 
 	var ids []string
@@ -1068,7 +1067,7 @@ func TestServiceOrderListPagination(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders?page=1&pageSize=2", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var firstPage serviceorder.ListResponse
+	var firstPage httpapi.ListResponse
 	decodeBody(t, resp, &firstPage)
 	assert.Len(t, firstPage.Data, 2)
 	assert.Equal(t, 1, firstPage.Page)
@@ -1090,7 +1089,7 @@ func TestServiceOrderDetailByIDFullLifecycle(t *testing.T) {
 
 	resp = doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var detail serviceorder.DetailResponse
+	var detail httpapi.DetailResponse
 	decodeBody(t, resp, &detail)
 
 	assert.Equal(t, order.ID, detail.ID)
@@ -1107,7 +1106,7 @@ func TestServiceOrderDetailByIDBeforeDiagnosis(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID, nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var detail serviceorder.DetailResponse
+	var detail httpapi.DetailResponse
 	decodeBody(t, resp, &detail)
 
 	assert.Equal(t, "RECEIVED", detail.Status)
@@ -1122,7 +1121,7 @@ func TestServiceOrderDetailByCodeMatchesDetailByID(t *testing.T) {
 
 	resp := doAuthJSON(t, http.MethodGet, server+fmt.Sprintf("/api/v1/service-orders/%d", order.Code), nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var byCode serviceorder.DetailResponse
+	var byCode httpapi.DetailResponse
 	decodeBody(t, resp, &byCode)
 
 	assert.Equal(t, order.ID, byCode.ID)
@@ -1175,7 +1174,7 @@ func approveQuote(t *testing.T, pool *pgxpool.Pool, orderID string) {
 // diagnosis + quote composition (one service line item), then jumps it to
 // IN_PROGRESS with its quote APPROVED, returning the order and the service
 // id its quote requires an execution for (BR5).
-func createOrderInExecutionWithRequiredService(t *testing.T, server string, pool *pgxpool.Pool, authToken string) (serviceorder.Response, string) {
+func createOrderInExecutionWithRequiredService(t *testing.T, server string, pool *pgxpool.Pool, authToken string) (httpapi.Response, string) {
 	t.Helper()
 
 	order := createServiceOrder(t, server, pool)
@@ -1202,7 +1201,7 @@ func TestServiceExecutionStartSuccess(t *testing.T) {
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var execution serviceorder.ServiceExecutionResponse
+	var execution httpapi.ServiceExecutionResponse
 	decodeBody(t, resp, &execution)
 	assert.Equal(t, order.ID, execution.ServiceOrderID)
 	assert.Equal(t, serviceID, execution.ServiceID)
@@ -1239,14 +1238,14 @@ func TestServiceExecutionFinishSuccess(t *testing.T) {
 	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, startResp.StatusCode)
-	var started serviceorder.ServiceExecutionResponse
+	var started httpapi.ServiceExecutionResponse
 	decodeBody(t, startResp, &started)
 
 	// No body: the server must default endedAt to now (design.md §2.5).
 	finishResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions/"+started.ID+"/finish", nil, authToken)
 	require.Equal(t, http.StatusOK, finishResp.StatusCode)
 
-	var finished serviceorder.ServiceExecutionResponse
+	var finished httpapi.ServiceExecutionResponse
 	decodeBody(t, finishResp, &finished)
 	require.NotNil(t, finished.EndedAt)
 	assert.False(t, finished.EndedAt.Before(finished.StartedAt))
@@ -1260,7 +1259,7 @@ func TestServiceExecutionFinishRejectsEndBeforeStart(t *testing.T) {
 	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, startResp.StatusCode)
-	var started serviceorder.ServiceExecutionResponse
+	var started httpapi.ServiceExecutionResponse
 	decodeBody(t, startResp, &started)
 
 	before := started.StartedAt.Add(-1 * time.Hour)
@@ -1289,7 +1288,7 @@ func TestServiceOrderFinalizeRequiresCompletedExecutions(t *testing.T) {
 	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, startResp.StatusCode)
-	var started serviceorder.ServiceExecutionResponse
+	var started httpapi.ServiceExecutionResponse
 	decodeBody(t, startResp, &started)
 
 	finalizeResp = doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
@@ -1301,7 +1300,7 @@ func TestServiceOrderFinalizeRequiresCompletedExecutions(t *testing.T) {
 	finalizeResp = doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/finalize", nil, authToken)
 	require.Equal(t, http.StatusOK, finalizeResp.StatusCode)
 
-	var finalized serviceorder.Response
+	var finalized httpapi.Response
 	decodeBody(t, finalizeResp, &finalized)
 	assert.Equal(t, "COMPLETED", finalized.Status)
 
@@ -1334,7 +1333,7 @@ func TestServiceOrderDeliverSuccess(t *testing.T) {
 	deliverResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/deliver", nil, authToken)
 	require.Equal(t, http.StatusOK, deliverResp.StatusCode)
 
-	var delivered serviceorder.Response
+	var delivered httpapi.Response
 	decodeBody(t, deliverResp, &delivered)
 	assert.Equal(t, "DELIVERED", delivered.Status)
 
@@ -1386,7 +1385,7 @@ func TestRegisterStockUsageSuccess(t *testing.T) {
 		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 3}}}, authToken)
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var body serviceorder.StockMovementListResponse
+	var body httpapi.StockMovementListResponse
 	decodeBody(t, resp, &body)
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, productID, body.Items[0].ProductID)
@@ -1557,7 +1556,7 @@ func TestListStockMovementsReturnsRegisteredUsage(t *testing.T) {
 	listResp := doAuthJSON(t, http.MethodGet, server+"/api/v1/service-orders/"+order.ID+"/stock-movements", nil, authToken)
 	require.Equal(t, http.StatusOK, listResp.StatusCode)
 
-	var body serviceorder.StockMovementListResponse
+	var body httpapi.StockMovementListResponse
 	decodeBody(t, listResp, &body)
 	require.Len(t, body.Items, 1)
 	assert.Equal(t, 2, body.Items[0].Quantity)
@@ -1574,7 +1573,7 @@ func TestReverseStockMovementSuccess(t *testing.T) {
 	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
 		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 4}}}, authToken)
 	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
-	var registered serviceorder.StockMovementListResponse
+	var registered httpapi.StockMovementListResponse
 	decodeBody(t, registerResp, &registered)
 	require.Len(t, registered.Items, 1)
 	require.Equal(t, 6, productStock(t, pool, productID))
@@ -1583,7 +1582,7 @@ func TestReverseStockMovementSuccess(t *testing.T) {
 		server+"/api/v1/service-orders/"+order.ID+"/stock-movements/"+registered.Items[0].ID+"/reversal", nil, authToken)
 	require.Equal(t, http.StatusCreated, reverseResp.StatusCode)
 
-	var reversal serviceorder.StockMovementResponse
+	var reversal httpapi.StockMovementResponse
 	decodeBody(t, reverseResp, &reversal)
 	assert.Equal(t, "ENTRY", reversal.Type)
 	require.NotNil(t, reversal.ReversedMovementID)
@@ -1608,7 +1607,7 @@ func TestReverseStockMovementRejectsSecondReversal(t *testing.T) {
 	registerResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/stock-movements",
 		map[string]any{"items": []map[string]any{{"productId": productID, "quantity": 4}}}, authToken)
 	require.Equal(t, http.StatusCreated, registerResp.StatusCode)
-	var registered serviceorder.StockMovementListResponse
+	var registered httpapi.StockMovementListResponse
 	decodeBody(t, registerResp, &registered)
 
 	firstReversal := doAuthJSON(t, http.MethodPost,
