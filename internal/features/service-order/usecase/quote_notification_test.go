@@ -101,3 +101,20 @@ func TestSendQuoteSucceedsWhenCustomerLookupFails(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, notifier.calls)
 }
+
+// TestSendQuoteWithoutNotifierStillSends covers NewQuotes' nil-Notifier
+// default: a customer with an e-mail reaches the notification step, which
+// must silently do nothing rather than fail or panic.
+func TestSendQuoteWithoutNotifierStillSends(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestServices(repo, nil)
+	email := "cliente@example.com"
+	order := seedQuoteReadyOrder(t, repo, service, &email)
+	logs := captureLog(t)
+
+	quote, err := service.SendQuote(context.Background(), order.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, quote.SentAt)
+	assert.Equal(t, domain.StatusAwaitingApproval, order.Status)
+	assert.Contains(t, logs.String(), "sent")
+}
