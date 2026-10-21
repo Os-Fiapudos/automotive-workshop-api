@@ -1,4 +1,4 @@
-package serviceorder
+package httpapi
 
 import (
 	"automotive-workshop-api/internal/features/service-order/usecase"

@@ -1,4 +1,4 @@
-package serviceorder
+package httpapi
 
 import (
 	"testing"

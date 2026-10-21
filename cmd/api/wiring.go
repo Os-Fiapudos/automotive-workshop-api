@@ -3,7 +3,8 @@ package main
 import (
 	"net/http"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
+	"automotive-workshop-api/internal/features/service-order/adapter/notifier"
 	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/features/service-order/usecase"
 	"automotive-workshop-api/internal/shared/config"
@@ -15,17 +16,17 @@ import (
 // the composition is testable.
 func buildQuoteNotifier(configuration config.Config, httpClient *http.Client) usecase.QuoteNotifier {
 	if configuration.ResendAPIKey == "" {
-		return serviceorder.NoOpQuoteNotifier{}
+		return notifier.NoOpQuoteNotifier{}
 	}
-	return serviceorder.NewResendQuoteNotifier(configuration.ResendAPIKey, configuration.ResendFromEmail, httpClient)
+	return notifier.NewResendQuoteNotifier(configuration.ResendAPIKey, configuration.ResendFromEmail, httpClient)
 }
 
 // buildServiceOrderUseCases composes the service-order use cases: the one
 // Postgres repository satisfies every persistence port, each constructor
 // receiving it through the narrow port it declares
 // (specs/service-order-architecture-refactor/design.md §9.3).
-func buildServiceOrderUseCases(repository *orderpostgres.Repository, notifier usecase.QuoteNotifier, externalNotificationSecret, externalStatusUpdateSecret string) serviceorder.UseCases {
-	return serviceorder.UseCases{
+func buildServiceOrderUseCases(repository *orderpostgres.Repository, quoteNotifier usecase.QuoteNotifier, externalNotificationSecret, externalStatusUpdateSecret string) httpapi.UseCases {
+	return httpapi.UseCases{
 		Opening: usecase.NewOpening(repository, repository, repository, repository, repository),
 		Lifecycle: usecase.NewLifecycle(repository, repository, repository, repository).
 			WithExternalStatusUpdateSecret(externalStatusUpdateSecret),
@@ -36,7 +37,7 @@ func buildServiceOrderUseCases(repository *orderpostgres.Repository, notifier us
 			Products:      repository,
 			Catalog:       repository,
 			Customers:     repository,
-			Notifier:      notifier,
+			Notifier:      quoteNotifier,
 		}).WithExternalNotificationSecret(externalNotificationSecret),
 		Executions: usecase.NewExecutions(repository, repository, repository),
 		Queries:    usecase.NewQueries(repository, repository, repository, repository, repository, repository),

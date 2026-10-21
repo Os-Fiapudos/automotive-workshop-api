@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 )
 
 // Integration tests for POST /api/v1/service-orders/{id}/status
@@ -136,7 +136,7 @@ func TestStatusUpdateFullLifecycle(t *testing.T) {
 	startResp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/executions",
 		map[string]any{"serviceId": serviceID}, authToken)
 	require.Equal(t, http.StatusCreated, startResp.StatusCode)
-	var started serviceorder.ServiceExecutionResponse
+	var started httpapi.ServiceExecutionResponse
 	decodeBody(t, startResp, &started)
 
 	statusBefore, historyBefore := readOrderStatusAndHistory(t, pool, order.ID)

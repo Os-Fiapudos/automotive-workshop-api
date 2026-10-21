@@ -1,4 +1,4 @@
-package serviceorder
+package notifier
 
 import (
 	"context"

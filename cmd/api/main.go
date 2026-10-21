@@ -15,8 +15,8 @@ import (
 	"automotive-workshop-api/internal/features/customer"
 	"automotive-workshop-api/internal/features/product"
 	servicecatalog "automotive-workshop-api/internal/features/service-catalog"
-	serviceorder "automotive-workshop-api/internal/features/service-order"
 	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/features/vehicle"
 	"automotive-workshop-api/internal/shared/config"
@@ -146,7 +146,7 @@ func main() {
 	// it let an unauthenticated caller confirm a CPF/CNPJ was a registered
 	// customer and open orders in their name — see
 	// docs/owasp-vulnerability-and-coverage-report.md VULN-02.
-	serviceorder.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
+	httpapi.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
 
 	// Service Order Tracking (specs/service-order-tracking, RF12): a
 	// customer-facing route that deliberately never requires the
