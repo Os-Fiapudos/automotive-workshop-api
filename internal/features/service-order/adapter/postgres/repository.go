@@ -1,4 +1,4 @@
-package serviceorder
+package postgres
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -13,14 +13,14 @@ import (
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
-// PostgresServiceOrderRepository implements ServiceOrderRepository and
-// serviceOrderLookups against pgx.
-type PostgresServiceOrderRepository struct {
+// Repository implements every persistence port declared in
+// usecase/ports.go against pgx — assertions.go checks that at compile time.
+type Repository struct {
 	pool *pgxpool.Pool
 }
 
-func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrderRepository {
-	return &PostgresServiceOrderRepository{pool: pool}
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
 }
 
 // Create persists order, its requested services and products, its creation
@@ -30,7 +30,7 @@ func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrder
 // fails, everything is rolled back — the API never leaves a service order
 // without its creation history entry or its tracking token, or a requested
 // service link without the order it belongs to.
-func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *domain.ServiceOrder) (string, error) {
+func (repository *Repository) Create(ctx context.Context, order *domain.ServiceOrder) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -91,13 +91,13 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 	return rawToken, nil
 }
 
-func (repository *PostgresServiceOrderRepository) FindCustomerByID(ctx context.Context, id uuid.UUID) (*usecase.CustomerRef, error) {
+func (repository *Repository) FindCustomerByID(ctx context.Context, id uuid.UUID) (*usecase.CustomerRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE id = $1`, id)
 	return scanCustomerRef(row)
 }
 
-func (repository *PostgresServiceOrderRepository) FindCustomerByDocument(ctx context.Context, normalizedDocument string) (*usecase.CustomerRef, error) {
+func (repository *Repository) FindCustomerByDocument(ctx context.Context, normalizedDocument string) (*usecase.CustomerRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE document = $1`, normalizedDocument)
 	return scanCustomerRef(row)
@@ -114,13 +114,13 @@ func scanCustomerRef(row pgx.Row) (*usecase.CustomerRef, error) {
 	return ref, nil
 }
 
-func (repository *PostgresServiceOrderRepository) FindVehicleByID(ctx context.Context, id uuid.UUID) (*usecase.VehicleRef, error) {
+func (repository *Repository) FindVehicleByID(ctx context.Context, id uuid.UUID) (*usecase.VehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE id = $1`, id)
 	return scanVehicleRef(row)
 }
 
-func (repository *PostgresServiceOrderRepository) FindVehicleByPlate(ctx context.Context, plate string) (*usecase.VehicleRef, error) {
+func (repository *Repository) FindVehicleByPlate(ctx context.Context, plate string) (*usecase.VehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE license_plate = $1`, plate)
 	return scanVehicleRef(row)
@@ -138,10 +138,10 @@ func scanVehicleRef(row pgx.Row) (*usecase.VehicleRef, error) {
 	return ref, nil
 }
 
-// findMissingServiceIDs reports which of ids do not exist in the services
+// FindMissingServiceIDs reports which of ids do not exist in the services
 // catalog, so the caller can reject the request naming exactly what's
 // missing (requirements.md §3.7).
-func (repository *PostgresServiceOrderRepository) FindMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+func (repository *Repository) FindMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -173,13 +173,13 @@ func (repository *PostgresServiceOrderRepository) FindMissingServiceIDs(ctx cont
 	return missing, nil
 }
 
-// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// FindServiceOrderByCodeWithTrackingToken implements usecase.TrackedOrderFinder
 // (specs/service-order-quote-decision/design.md): the order is resolved by
 // code first, so an unknown code always maps to ErrServiceOrderNotFound
 // regardless of the token; only then is tokenHash checked against that
 // order's active tracking token, mirroring
 // service-order-tracking.PostgresTrackingRepository.FindByCodeAndTokenHash.
-func (repository *PostgresServiceOrderRepository) FindServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
+func (repository *Repository) FindServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
 	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
@@ -209,11 +209,11 @@ func (repository *PostgresServiceOrderRepository) FindServiceOrderByCodeWithTrac
 	return order, nil
 }
 
-// findServicesByIDs loads the display data (code, name) for a set of
+// FindServicesByIDs loads the display data (code, name) for a set of
 // service ids, used to build the response after Create commits — a read,
 // not a write, so it does not need to run inside Create's transaction
 // (design.md §4.2).
-func (repository *PostgresServiceOrderRepository) FindServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*usecase.ServiceRef, error) {
+func (repository *Repository) FindServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*usecase.ServiceRef, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}

@@ -18,6 +18,7 @@ import (
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
 	serviceorder "automotive-workshop-api/internal/features/service-order"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/shared/middleware"
 	"automotive-workshop-api/internal/shared/token"
 )
@@ -54,7 +55,7 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	customerRepository := customer.NewPostgresCustomerRepository(pool)
 	customerService := customer.NewCustomerService(customerRepository)
 
-	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
+	serviceOrderRepository := orderpostgres.NewRepository(pool)
 	serviceOrderUseCases := newServiceOrderUseCases(serviceOrderRepository, testExternalNotificationSecret, testExternalStatusSecret)
 
 	router := http.NewServeMux()

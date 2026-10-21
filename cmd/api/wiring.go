@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	serviceorder "automotive-workshop-api/internal/features/service-order"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/features/service-order/usecase"
 	"automotive-workshop-api/internal/shared/config"
 )
@@ -23,7 +24,7 @@ func buildQuoteNotifier(configuration config.Config, httpClient *http.Client) us
 // Postgres repository satisfies every persistence port, each constructor
 // receiving it through the narrow port it declares
 // (specs/service-order-architecture-refactor/design.md §9.3).
-func buildServiceOrderUseCases(repository *serviceorder.PostgresServiceOrderRepository, notifier usecase.QuoteNotifier, externalNotificationSecret, externalStatusUpdateSecret string) serviceorder.UseCases {
+func buildServiceOrderUseCases(repository *orderpostgres.Repository, notifier usecase.QuoteNotifier, externalNotificationSecret, externalStatusUpdateSecret string) serviceorder.UseCases {
 	return serviceorder.UseCases{
 		Opening: usecase.NewOpening(repository, repository, repository, repository, repository),
 		Lifecycle: usecase.NewLifecycle(repository, repository, repository, repository).

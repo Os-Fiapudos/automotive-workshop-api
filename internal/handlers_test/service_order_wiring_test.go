@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	serviceorder "automotive-workshop-api/internal/features/service-order"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/features/service-order/usecase"
 )
 
@@ -9,7 +10,7 @@ import (
 // cmd/api/wiring.go's buildServiceOrderUseCases does, minus the e-mail
 // notifier (specs/service-order-architecture-refactor/design.md §9.3). An
 // empty secret leaves that external channel rejecting every caller.
-func newServiceOrderUseCases(repository *serviceorder.PostgresServiceOrderRepository, externalNotificationSecret, externalStatusUpdateSecret string) serviceorder.UseCases {
+func newServiceOrderUseCases(repository *orderpostgres.Repository, externalNotificationSecret, externalStatusUpdateSecret string) serviceorder.UseCases {
 	return serviceorder.UseCases{
 		Opening: usecase.NewOpening(repository, repository, repository, repository, repository),
 		Lifecycle: usecase.NewLifecycle(repository, repository, repository, repository).

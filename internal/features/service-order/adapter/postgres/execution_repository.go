@@ -1,4 +1,4 @@
-package serviceorder
+package postgres
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -13,7 +13,7 @@ import (
 // its database-assigned StartedAt (design.md §2.6). A single INSERT needs no
 // transaction — nothing else is written alongside it (starting an execution
 // does not change the order's status, requirements.md BR8).
-func (repository *PostgresServiceOrderRepository) StartExecution(ctx context.Context, execution *domain.ServiceExecution) error {
+func (repository *Repository) StartExecution(ctx context.Context, execution *domain.ServiceExecution) error {
 	return repository.pool.QueryRow(ctx,
 		`INSERT INTO audit_services (id, service_order_id, service_id)
 		 VALUES ($1, $2, $3)
@@ -30,8 +30,8 @@ func (repository *PostgresServiceOrderRepository) StartExecution(ctx context.Con
 // concurrent finish of the same execution, same pattern as StartDiagnosis's
 // status guard — zero rows affected is treated as
 // ErrServiceExecutionAlreadyFinished, since existence was already confirmed
-// by findServiceExecutionByID earlier in the same request.
-func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Context, execution *domain.ServiceExecution) error {
+// by FindServiceExecutionByID earlier in the same request.
+func (repository *Repository) FinishExecution(ctx context.Context, execution *domain.ServiceExecution) error {
 	err := repository.pool.QueryRow(ctx,
 		`UPDATE audit_services SET ended_at = COALESCE($2, now())
 		 WHERE id = $1 AND ended_at IS NULL
@@ -50,7 +50,7 @@ func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Co
 // FinalizeOrder moves order to COMPLETED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // StartDiagnosis.
-func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
+func (repository *Repository) FinalizeOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 // DeliverOrder moves order to DELIVERED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // FinalizeOrder.
-func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
+func (repository *Repository) DeliverOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -111,10 +111,10 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 	return tx.Commit(ctx)
 }
 
-// findServiceExecutionByID loads a single execution, scoped to
+// FindServiceExecutionByID loads a single execution, scoped to
 // serviceOrderID so a client cannot finish another order's execution by
 // guessing its id.
-func (repository *PostgresServiceOrderRepository) FindServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
+func (repository *Repository) FindServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
 	execution := &domain.ServiceExecution{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
@@ -130,10 +130,10 @@ func (repository *PostgresServiceOrderRepository) FindServiceExecutionByID(ctx c
 	return execution, nil
 }
 
-// findServiceExecutionsByServiceOrderID loads every execution recorded for
+// FindServiceExecutionsByServiceOrderID loads every execution recorded for
 // an order, used by FinalizeOrder to check the required-executions rule
 // (design.md §2.3).
-func (repository *PostgresServiceOrderRepository) FindServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
+func (repository *Repository) FindServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
 		 FROM audit_services WHERE service_order_id = $1`, serviceOrderID)

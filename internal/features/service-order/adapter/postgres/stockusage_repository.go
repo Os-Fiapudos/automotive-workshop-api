@@ -1,4 +1,4 @@
-package serviceorder
+package postgres
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// RegisterStockUsage implements ServiceOrderRepository
+// RegisterStockUsage implements usecase.StockLedger
 // (specs/service-order-stock-usage/design.md §4.1): re-confirms the order is
 // IN_PROGRESS, then deducts every item's quantity from its product and
 // records one EXIT StockMovement per item, all in one transaction (RNF07,
@@ -21,7 +21,7 @@ import (
 // internal/features/product/repository.go's AdjustStock already established
 // for this exact race (BR8): Postgres serializes concurrent UPDATEs of the
 // same row, so a concurrent call can never observe a stale balance.
-func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []usecase.StockUsageItem) ([]*domain.StockMovement, error) {
+func (repository *Repository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []usecase.StockUsageItem) ([]*domain.StockMovement, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -102,12 +102,12 @@ func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context
 	return movements, nil
 }
 
-// ReverseStockMovement implements ServiceOrderRepository (design.md §4.2):
+// ReverseStockMovement implements usecase.StockLedger (design.md §4.2):
 // loads the original movement scoped to orderID (so a client cannot reverse
 // another order's movement by guessing its id), confirms it is an
 // unreversed EXIT, re-credits the product, and inserts the linked inverse
 // ENTRY movement, all in one transaction (RNF07, BR9).
-func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error) {
+func (repository *Repository) ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -177,10 +177,10 @@ func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx conte
 	return reversal, nil
 }
 
-// ListStockMovements implements ServiceOrderRepository (design.md §4.3) — a
-// read, no transaction needed, same reasoning findServicesByIDs already
+// ListStockMovements implements usecase.StockLedger (design.md §4.3) — a
+// read, no transaction needed, same reasoning FindServicesByIDs already
 // applies.
-func (repository *PostgresServiceOrderRepository) ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error) {
+func (repository *Repository) ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, product_id, service_order_id, type, quantity, previous_stock, new_stock, reason, reversed_movement_id, occurred_at
 		 FROM stock_movements WHERE service_order_id = $1 ORDER BY occurred_at DESC`, orderID)

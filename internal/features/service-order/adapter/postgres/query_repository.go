@@ -1,4 +1,4 @@
-package serviceorder
+package postgres
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -11,10 +11,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// findServiceOrderByCode loads a ServiceOrder by its sequential code,
-// findServiceOrderByID's counterpart for the code branch of
+// FindServiceOrderByCode loads a ServiceOrder by its sequential code,
+// FindServiceOrderByID's counterpart for the code branch of
 // GET /api/v1/service-orders/{id} (design.md §1.2).
-func (repository *PostgresServiceOrderRepository) FindServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error) {
+func (repository *Repository) FindServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error) {
 	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
@@ -30,12 +30,12 @@ func (repository *PostgresServiceOrderRepository) FindServiceOrderByCode(ctx con
 	return order, nil
 }
 
-// findRequestedServices loads the display data for every service requested
+// FindRequestedServices loads the display data for every service requested
 // when serviceOrderID was opened, joining service_order_requested_services
-// against services directly — unlike findServicesByIDs (used by the create
+// against services directly — unlike FindServicesByIDs (used by the create
 // flow, which already has the ids in memory), a detail view loaded back from
 // the database only has the order's id (design.md §1.7).
-func (repository *PostgresServiceOrderRepository) FindRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*usecase.ServiceRef, error) {
+func (repository *Repository) FindRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*usecase.ServiceRef, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT s.id, s.code, s.name
 		 FROM service_order_requested_services r
@@ -57,9 +57,9 @@ func (repository *PostgresServiceOrderRepository) FindRequestedServices(ctx cont
 	return refs, rows.Err()
 }
 
-// findHistoryByServiceOrderID loads a service order's full status-change
+// FindHistoryByServiceOrderID loads a service order's full status-change
 // trail, oldest first (requirements.md BR4).
-func (repository *PostgresServiceOrderRepository) FindHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
+func (repository *Repository) FindHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, occurred_at, event, description, previous_status, new_status
 		 FROM service_order_history
@@ -82,7 +82,7 @@ func (repository *PostgresServiceOrderRepository) FindHistoryByServiceOrderID(ct
 	return history, rows.Err()
 }
 
-// listServiceOrders retrieves a filtered, paginated page of service orders
+// ListServiceOrders retrieves a filtered, paginated page of service orders
 // joined with their customer/vehicle (design.md §1.3/§1.4). Every filter is
 // optional and combined with AND. When filter.Status is nil, the default,
 // no-filter view excludes COMPLETED/DELIVERED/CANCELED and orders by status
@@ -90,7 +90,7 @@ func (repository *PostgresServiceOrderRepository) FindHistoryByServiceOrderID(ct
 // oldest first; when filter.Status is set, every row already shares one
 // status, so both the exclusion and the priority CASE are skipped in favor
 // of plain oldest-first (requirements.md BR3, AC12/AC13).
-func (repository *PostgresServiceOrderRepository) ListServiceOrders(ctx context.Context, filter usecase.ListFilter, page, pageSize int) ([]*usecase.ServiceOrderListItem, int, error) {
+func (repository *Repository) ListServiceOrders(ctx context.Context, filter usecase.ListFilter, page, pageSize int) ([]*usecase.ServiceOrderListItem, int, error) {
 	offset := (page - 1) * pageSize
 
 	query := `

@@ -1,11 +1,11 @@
-package serviceorder
+package postgres
 
 import (
 	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 )
 
-// findAverageExecutionTimeByService implements the aggregate query behind
+// FindAverageExecutionTimeByService implements the aggregate query behind
 // GET /api/v1/service-orders/metrics/average-execution-time
 // (specs/service-order-metrics/design.md §1.6). Only completed executions
 // (ended_at IS NOT NULL) participate — the same condition satisfies both
@@ -14,7 +14,7 @@ import (
 // (specs/service-order-execution/design.md §1.3). A service with no
 // qualifying execution is absent from the result (INNER JOIN), not returned
 // with a zero count (requirements.md BR4/BR6).
-func (repository *PostgresServiceOrderRepository) FindAverageExecutionTimeByService(ctx context.Context, filter usecase.MetricsFilter) ([]*usecase.ServiceMetric, error) {
+func (repository *Repository) FindAverageExecutionTimeByService(ctx context.Context, filter usecase.MetricsFilter) ([]*usecase.ServiceMetric, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT s.id, s.code, s.name,
 		        COUNT(*) AS execution_count,
