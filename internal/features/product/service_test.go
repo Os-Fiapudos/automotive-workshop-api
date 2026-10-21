@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"automotive-workshop-api/internal/shared/money"
 )
 
 func TestProductService(t *testing.T) {
@@ -16,7 +18,7 @@ func TestProductService(t *testing.T) {
 		repo := newFakeRepository()
 		service := NewProductService(repo)
 
-		p, err := service.Create(ctx, nil, "Pastilha de Freio", "Pastilha dianteira", 120.00, 15, "PART")
+		p, err := service.Create(ctx, nil, "Pastilha de Freio", "Pastilha dianteira", 12000, 15, "PART")
 		require.NoError(t, err)
 		assert.NotEqual(t, uuid.Nil, p.ID)
 		assert.Greater(t, p.Code, int64(0))
@@ -28,11 +30,11 @@ func TestProductService(t *testing.T) {
 		service := NewProductService(repo)
 
 		code := int64(500)
-		p1, err := service.Create(ctx, &code, "Vela de Ignição", "Vela iridium", 45.00, 30, "PART")
+		p1, err := service.Create(ctx, &code, "Vela de Ignição", "Vela iridium", 4500, 30, "PART")
 		require.NoError(t, err)
 		assert.Equal(t, int64(500), p1.Code)
 
-		_, err = service.Create(ctx, &code, "Outra Vela", "Vela simples", 25.00, 10, "PART")
+		_, err = service.Create(ctx, &code, "Outra Vela", "Vela simples", 2500, 10, "PART")
 		assert.ErrorIs(t, err, ErrDuplicateCode)
 	})
 
@@ -40,7 +42,7 @@ func TestProductService(t *testing.T) {
 		repo := newFakeRepository()
 		service := NewProductService(repo)
 
-		p, err := service.Create(ctx, nil, "Filtro de Ar", "Filtro motor", 50.00, 10, "PART")
+		p, err := service.Create(ctx, nil, "Filtro de Ar", "Filtro motor", 5000, 10, "PART")
 		require.NoError(t, err)
 
 		// Reject direct stock modification via update (RNF07)
@@ -50,11 +52,11 @@ func TestProductService(t *testing.T) {
 
 		// Successful cadastral update
 		newName := "Filtro de Ar Esportivo"
-		newPrice := 65.00
+		newPrice := money.Cents(6500)
 		updated, err := service.Update(ctx, p.ID, UpdateInput{Name: &newName, UnitPrice: &newPrice})
 		require.NoError(t, err)
 		assert.Equal(t, "Filtro de Ar Esportivo", updated.Name)
-		assert.Equal(t, 65.00, updated.UnitPrice)
+		assert.Equal(t, money.Cents(6500), updated.UnitPrice)
 		assert.Equal(t, 10, updated.CurrentStock) // stock untouched
 	})
 
@@ -62,7 +64,7 @@ func TestProductService(t *testing.T) {
 		repo := newFakeRepository()
 		service := NewProductService(repo)
 
-		p, err := service.Create(ctx, nil, "Fluido de Freio DOT4", "Fluido 500ml", 25.00, 5, "SUPPLY")
+		p, err := service.Create(ctx, nil, "Fluido de Freio DOT4", "Fluido 500ml", 2500, 5, "SUPPLY")
 		require.NoError(t, err)
 
 		deactivated, err := service.Deactivate(ctx, p.ID)
@@ -74,7 +76,7 @@ func TestProductService(t *testing.T) {
 		repo := newFakeRepository()
 		service := NewProductService(repo)
 
-		p, err := service.Create(ctx, nil, "Amortecedor", "Traseiro", 150.00, 10, "PART")
+		p, err := service.Create(ctx, nil, "Amortecedor", "Traseiro", 15000, 10, "PART")
 		require.NoError(t, err)
 
 		// Entry adjustment (+5)
@@ -96,7 +98,7 @@ func TestProductService(t *testing.T) {
 		repo := newFakeRepository()
 		service := NewProductService(repo)
 
-		p, err := service.Create(ctx, nil, "Correia Dentada", "Correia", 80.00, 5, "PART")
+		p, err := service.Create(ctx, nil, "Correia Dentada", "Correia", 8000, 5, "PART")
 		require.NoError(t, err)
 
 		_, _, err = service.AdjustStock(ctx, p.ID, "EXIT", 10, "Saída excessiva")
@@ -118,7 +120,7 @@ func TestProductServiceLookups(t *testing.T) {
 		service := NewProductService(repo)
 
 		code := int64(777)
-		created, err := service.Create(ctx, &code, "Bateria 60Ah", "Bateria selada", 480.00, 4, "PART")
+		created, err := service.Create(ctx, &code, "Bateria 60Ah", "Bateria selada", 48000, 4, "PART")
 		require.NoError(t, err)
 
 		found, err := service.GetByCode(ctx, 777)
@@ -157,9 +159,9 @@ func TestProductServiceListFilters(t *testing.T) {
 	repo := newFakeRepository()
 	service := NewProductService(repo)
 
-	_, err := service.Create(ctx, nil, "Óleo 5W30", "Sintético", 55.00, 20, "SUPPLY")
+	_, err := service.Create(ctx, nil, "Óleo 5W30", "Sintético", 5500, 20, "SUPPLY")
 	require.NoError(t, err)
-	part, err := service.Create(ctx, nil, "Disco de Freio", "Ventilado", 220.00, 6, "PART")
+	part, err := service.Create(ctx, nil, "Disco de Freio", "Ventilado", 22000, 6, "PART")
 	require.NoError(t, err)
 
 	t.Run("filters by type", func(t *testing.T) {
@@ -206,7 +208,7 @@ func TestProductServiceUpdateBranches(t *testing.T) {
 	newProduct := func(t *testing.T) (*ProductService, *Product) {
 		t.Helper()
 		service := NewProductService(newFakeRepository())
-		created, err := service.Create(ctx, nil, "Pastilha", "Dianteira", 100.00, 10, "PART")
+		created, err := service.Create(ctx, nil, "Pastilha", "Dianteira", 10000, 10, "PART")
 		require.NoError(t, err)
 		return service, created
 	}
@@ -220,7 +222,7 @@ func TestProductServiceUpdateBranches(t *testing.T) {
 
 	t.Run("negative unit price is rejected", func(t *testing.T) {
 		service, created := newProduct(t)
-		negative := -1.00
+		negative := money.Cents(-100)
 		_, err := service.Update(ctx, created.ID, UpdateInput{UnitPrice: &negative})
 		assert.ErrorIs(t, err, ErrInvalidUnitPrice)
 	})
@@ -277,7 +279,7 @@ func TestProductServiceAdjustStockBranches(t *testing.T) {
 
 	t.Run("quantity must be positive", func(t *testing.T) {
 		service := NewProductService(newFakeRepository())
-		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 3000, 10, "PART")
 		require.NoError(t, err)
 
 		_, _, err = service.AdjustStock(ctx, created.ID, "ENTRY", 0, "Motivo")
@@ -286,7 +288,7 @@ func TestProductServiceAdjustStockBranches(t *testing.T) {
 
 	t.Run("reason is required", func(t *testing.T) {
 		service := NewProductService(newFakeRepository())
-		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 3000, 10, "PART")
 		require.NoError(t, err)
 
 		_, _, err = service.AdjustStock(ctx, created.ID, "ENTRY", 5, "   ")
@@ -295,7 +297,7 @@ func TestProductServiceAdjustStockBranches(t *testing.T) {
 
 	t.Run("inactive product cannot be adjusted", func(t *testing.T) {
 		service := NewProductService(newFakeRepository())
-		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 30.00, 10, "PART")
+		created, err := service.Create(ctx, nil, "Filtro", "Filtro de óleo", 3000, 10, "PART")
 		require.NoError(t, err)
 		_, err = service.Deactivate(ctx, created.ID)
 		require.NoError(t, err)
@@ -312,17 +314,17 @@ func TestProductServiceCreateValidations(t *testing.T) {
 	service := NewProductService(newFakeRepository())
 
 	t.Run("unknown type is rejected", func(t *testing.T) {
-		_, err := service.Create(ctx, nil, "Peça", "Descrição", 10.00, 1, "GADGET")
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", 1000, 1, "GADGET")
 		assert.ErrorIs(t, err, ErrInvalidType)
 	})
 
 	t.Run("negative unit price is rejected", func(t *testing.T) {
-		_, err := service.Create(ctx, nil, "Peça", "Descrição", -1.00, 1, "PART")
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", -100, 1, "PART")
 		assert.ErrorIs(t, err, ErrInvalidUnitPrice)
 	})
 
 	t.Run("negative initial stock is rejected", func(t *testing.T) {
-		_, err := service.Create(ctx, nil, "Peça", "Descrição", 10.00, -1, "PART")
+		_, err := service.Create(ctx, nil, "Peça", "Descrição", 1000, -1, "PART")
 		assert.ErrorIs(t, err, ErrInvalidStock)
 	})
 }

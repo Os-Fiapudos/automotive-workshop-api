@@ -77,6 +77,12 @@ var (
 	// greater than zero.
 	ErrInvalidQuantity = errors.New("item quantity must be greater than zero")
 
+	// ErrQuoteAmountOutOfRange is returned when an item total (unit price ×
+	// quantity) or the quote total would exceed 9999999999.99, the limit of
+	// the NUMERIC(12,2) columns they are stored in
+	// (specs/monetary-value-precision/).
+	ErrQuoteAmountOutOfRange = errors.New("quote amount exceeds the maximum of 9999999999.99")
+
 	// ErrProductNotFound is returned when a quote item references a product
 	// id that does not exist in the catalog.
 	ErrProductNotFound = errors.New("product not found")

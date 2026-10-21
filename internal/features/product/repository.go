@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"automotive-workshop-api/internal/shared/database"
 )
 
 // ProductRepository defines persistence operations for the Product aggregate.
@@ -65,7 +67,7 @@ func (repository *PostgresProductRepository) Create(ctx context.Context, product
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING code, created_at, updated_at`
 		err = repository.pool.QueryRow(ctx, query,
-			product.ID, product.Code, product.Name, product.Description, product.UnitPrice, product.CurrentStock, string(product.Type), string(product.Status),
+			product.ID, product.Code, product.Name, product.Description, database.NumericFromCents(product.UnitPrice), product.CurrentStock, string(product.Type), string(product.Status),
 		).Scan(&product.Code, &product.CreatedAt, &product.UpdatedAt)
 	} else {
 		query := `
@@ -73,7 +75,7 @@ func (repository *PostgresProductRepository) Create(ctx context.Context, product
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
 			RETURNING code, created_at, updated_at`
 		err = repository.pool.QueryRow(ctx, query,
-			product.ID, product.Name, product.Description, product.UnitPrice, product.CurrentStock, string(product.Type), string(product.Status),
+			product.ID, product.Name, product.Description, database.NumericFromCents(product.UnitPrice), product.CurrentStock, string(product.Type), string(product.Status),
 		).Scan(&product.Code, &product.CreatedAt, &product.UpdatedAt)
 	}
 
@@ -190,7 +192,7 @@ func (repository *PostgresProductRepository) List(ctx context.Context, page, pag
 		product := &Product{}
 		var typeStr, statusStr string
 		if err := rows.Scan(
-			&product.ID, &product.Code, &product.Name, &product.Description, &product.UnitPrice, &product.CurrentStock, &typeStr, &statusStr,
+			&product.ID, &product.Code, &product.Name, &product.Description, database.ScanCents(&product.UnitPrice), &product.CurrentStock, &typeStr, &statusStr,
 			&product.CreatedAt, &product.UpdatedAt, &total,
 		); err != nil {
 			return nil, 0, err
@@ -224,7 +226,7 @@ func (repository *PostgresProductRepository) Update(ctx context.Context, product
 		RETURNING updated_at`
 
 	err := repository.pool.QueryRow(ctx, query,
-		product.ID, product.Name, product.Description, product.UnitPrice, string(product.Type), string(product.Status),
+		product.ID, product.Name, product.Description, database.NumericFromCents(product.UnitPrice), string(product.Type), string(product.Status),
 	).Scan(&product.UpdatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -388,7 +390,7 @@ func scanProduct(row pgx.Row) (*Product, error) {
 	var typeStr, statusStr string
 
 	err := row.Scan(
-		&product.ID, &product.Code, &product.Name, &product.Description, &product.UnitPrice, &product.CurrentStock, &typeStr, &statusStr,
+		&product.ID, &product.Code, &product.Name, &product.Description, database.ScanCents(&product.UnitPrice), &product.CurrentStock, &typeStr, &statusStr,
 		&product.CreatedAt, &product.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

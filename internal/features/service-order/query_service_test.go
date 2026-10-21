@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // seedListOrder builds and registers a ready-to-list order for customerID/
@@ -232,7 +234,7 @@ func TestGetDetailAssemblesEveryField(t *testing.T) {
 		ID: uuid.New(), ServiceOrderID: order.ID, Event: "quote_composed",
 		PreviousStatus: StatusInDiagnosis, NewStatus: StatusAwaitingApproval,
 	})
-	repo.quotes[order.ID] = &Quote{ID: uuid.New(), ServiceOrderID: order.ID, Status: QuoteStatusPending, TotalAmount: 150}
+	repo.quotes[order.ID] = &Quote{ID: uuid.New(), ServiceOrderID: order.ID, Status: QuoteStatusPending, TotalAmount: 15000}
 
 	detail, err := service.GetDetail(context.Background(), order.ID)
 	require.NoError(t, err)
@@ -243,7 +245,7 @@ func TestGetDetailAssemblesEveryField(t *testing.T) {
 	assert.Equal(t, requestedServiceID, detail.RequestedServices[0].ID)
 	require.Len(t, detail.History, 2)
 	require.NotNil(t, detail.Quote)
-	assert.Equal(t, 150.0, detail.Quote.TotalAmount)
+	assert.Equal(t, money.Cents(15000), detail.Quote.TotalAmount)
 }
 
 func TestGetDetailQuoteNilBeforeComposition(t *testing.T) {

@@ -10,6 +10,10 @@ env:
   GOSEC_VERSION: v2.28.0
   # govulncheck reports standard-library advisories for the toolchain it runs on, so the
   # scanner job must use the same Go line as the project (kept in sync with go.mod).
+  # Every setup-go step sets check-latest: true: without it, "1.26" resolves to whatever
+  # 1.26 patch the runner image has cached, which lags behind security releases (on
+  # 2026-10-21 the cached go1.26.9 failed the gate on a crypto/x509 advisory fixed in
+  # go1.26.10).
   SCANNER_GO_VERSION: "1.26"
 
 jobs:
@@ -20,6 +24,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+          check-latest: true
           cache: false
       - run: go build ./...
       - run: go vet ./...
@@ -52,6 +57,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+          check-latest: true
           cache: false
       # The schema comes from the same migration chain every environment uses
       # (specs/database-migrations/ BR7); scripts/migrate.sh reaches the service on
@@ -91,6 +97,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.SCANNER_GO_VERSION }}
+          check-latest: true
           cache: false
       - name: Dependency and vulnerability analysis (govulncheck)
         run: |

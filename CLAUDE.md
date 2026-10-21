@@ -87,6 +87,14 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   (`go.mod` `go 1.26.0`; CI `go-version: "1.26"` resolves to the latest 1.26 patch;
   `SCANNER_GO_VERSION` follows; Dockerfile `golang:1.26-alpine`). Notes above that mention
   1.25 are records of the decision at the time.
+  **Fixed on 2026-10-21**: "resolves to the latest 1.26 patch" only holds with
+  `check-latest: true` on every `actions/setup-go` step — without it, setup-go reuses the
+  1.26 patch cached in the runner image. The cached go1.26.9 failed the `security` job on a
+  `crypto/x509` advisory fixed in go1.26.10 (reachable from `cmd/api`'s
+  `server.ListenAndServe`), so all three jobs now set `check-latest: true`. Locally,
+  `govulncheck` reports for the installed toolchain: keep it on the latest 1.26 patch (or run
+  `GOTOOLCHAIN=go1.26.10 scripts/security-scan.sh`), and rebuild the image with
+  `docker compose build --pull` so `golang:1.26-alpine` is not a stale cached patch.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
   see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
   by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
@@ -142,12 +150,16 @@ internal/features/          → one folder per business feature (vertical slice)
                                NOTE: unrelated to auth's `users` database table — this is a
                                distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                               database (pgx pool), token (JWT), middleware (auth),
+                               database (pgx pool + money.Cents <-> NUMERIC conversion),
+                               token (JWT), middleware (auth),
                                httpx (JSON writer + error envelope, used by auth),
                                apierror (JSON error envelope, used by customer and
                                servicecatalog — see section 8 for why there are currently two
                                and what that means for new code)
-                               document (CPF/CNPJ), config (env var loading)
+                               document (CPF/CNPJ), config (env var loading),
+                               money (exact Cents value type for every price/total:
+                               JSON + bounded arithmetic, stdlib only — never float64;
+                               specs/monetary-value-precision/)
 internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
                                customer_test.go, service_catalog_test.go), each skipped
                                independently when DATABASE_URL is unset

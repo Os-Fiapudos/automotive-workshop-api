@@ -47,7 +47,7 @@ func (notifier *ResendQuoteNotifier) NotifyQuoteSent(ctx context.Context, notifi
 		return nil
 	}
 
-	total := strings.Replace(fmt.Sprintf("%.2f", notification.TotalAmount), ".", ",", 1)
+	total := strings.Replace(notification.TotalAmount.String(), ".", ",", 1)
 	body, err := json.Marshal(map[string]any{
 		"from":    notifier.fromEmail,
 		"to":      []string{notification.RecipientEmail},

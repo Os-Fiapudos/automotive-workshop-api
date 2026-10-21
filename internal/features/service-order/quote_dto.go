@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // quoteItemRequest is a single line of a ComposeQuoteRequest. Exactly one of
@@ -67,12 +68,12 @@ func (request ComposeQuoteRequest) toInputs() []QuoteItemInput {
 
 // quoteItemResponse is a QuoteItem's JSON representation.
 type quoteItemResponse struct {
-	ProductID   string  `json:"productId,omitempty"`
-	ServiceID   string  `json:"serviceId,omitempty"`
-	Description string  `json:"description"`
-	Quantity    int     `json:"quantity"`
-	UnitPrice   float64 `json:"unitPrice"`
-	Total       float64 `json:"total"`
+	ProductID   string      `json:"productId,omitempty"`
+	ServiceID   string      `json:"serviceId,omitempty"`
+	Description string      `json:"description"`
+	Quantity    int         `json:"quantity"`
+	UnitPrice   money.Cents `json:"unitPrice"`
+	Total       money.Cents `json:"total"`
 }
 
 // QuoteResponse is the JSON representation of a Quote. Version/SentAt/
@@ -81,7 +82,7 @@ type QuoteResponse struct {
 	ID             string              `json:"id"`
 	Code           int64               `json:"code"`
 	ServiceOrderID string              `json:"serviceOrderId"`
-	TotalAmount    float64             `json:"totalAmount"`
+	TotalAmount    money.Cents         `json:"totalAmount"`
 	Status         string              `json:"status"`
 	Version        int                 `json:"version"`
 	Items          []quoteItemResponse `json:"items"`

@@ -6,6 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"automotive-workshop-api/internal/shared/database"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // productRef is the minimal product-catalog data needed to price and
@@ -19,7 +22,7 @@ type productRef struct {
 	Code        int64
 	Name        string
 	Description string
-	UnitPrice   float64
+	UnitPrice   money.Cents
 	Active      bool
 }
 
@@ -48,7 +51,7 @@ func (repository *PostgresServiceOrderRepository) findActiveProductByID(ctx cont
 	ref := &productRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, unit_price, status = 'ACTIVE' FROM products WHERE id = $1`, id,
-	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.UnitPrice, &ref.Active)
+	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, database.ScanCents(&ref.UnitPrice), &ref.Active)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound
@@ -65,7 +68,7 @@ func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Co
 	ref := &serviceRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, price FROM services WHERE id = $1`, id,
-	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.Price)
+	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, database.ScanCents(&ref.Price))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRequestedServiceNotFound
@@ -117,7 +120,7 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 // status — specs/service-order-quote-decision/ moved the
 // IN_DIAGNOSIS -> AWAITING_APPROVAL transition to SendQuote, since that
 // feature introduced an explicit "send" step distinct from composition.
-func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
+func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total money.Cents) (*Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -130,7 +133,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 		 VALUES ($1, $2)
 		 ON CONFLICT (service_order_id) DO UPDATE SET total_amount = EXCLUDED.total_amount, version = quotes.version + 1
 		 RETURNING id, code, status, version, generated_at, sent_at, sent_version, responded_at, created_at, updated_at`,
-		order.ID, total,
+		order.ID, database.NumericFromCents(total),
 	).Scan(&quote.ID, &quote.Code, &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -149,7 +152,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_products (quote_id, product_id, quantity, applied_description, applied_unit_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				quote.ID, item.ProductID, item.Quantity, item.Description, item.UnitPrice, item.Total,
+				quote.ID, item.ProductID, item.Quantity, item.Description, database.NumericFromCents(item.UnitPrice), database.NumericFromCents(item.Total),
 			); err != nil {
 				return nil, err
 			}
@@ -157,7 +160,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_services (quote_id, service_id, quantity, applied_description, applied_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				quote.ID, item.ServiceID, item.Quantity, item.Description, item.UnitPrice, item.Total,
+				quote.ID, item.ServiceID, item.Quantity, item.Description, database.NumericFromCents(item.UnitPrice), database.NumericFromCents(item.Total),
 			); err != nil {
 				return nil, err
 			}
@@ -305,7 +308,7 @@ func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx 
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, total_amount, status, version, generated_at, sent_at, sent_version, responded_at, created_at, updated_at
 		 FROM quotes WHERE service_order_id = $1`, serviceOrderID,
-	).Scan(&quote.ID, &quote.Code, &quote.TotalAmount, &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
+	).Scan(&quote.ID, &quote.Code, database.ScanCents(&quote.TotalAmount), &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrQuoteNotFound
@@ -321,7 +324,7 @@ func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx 
 	}
 	for productRows.Next() {
 		item := QuoteItem{Kind: QuoteItemProduct}
-		if err := productRows.Scan(&item.ProductID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
+		if err := productRows.Scan(&item.ProductID, &item.Quantity, &item.Description, database.ScanCents(&item.UnitPrice), database.ScanCents(&item.Total)); err != nil {
 			productRows.Close()
 			return nil, err
 		}
@@ -340,7 +343,7 @@ func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx 
 	}
 	for serviceRows.Next() {
 		item := QuoteItem{Kind: QuoteItemService}
-		if err := serviceRows.Scan(&item.ServiceID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
+		if err := serviceRows.Scan(&item.ServiceID, &item.Quantity, &item.Description, database.ScanCents(&item.UnitPrice), database.ScanCents(&item.Total)); err != nil {
 			serviceRows.Close()
 			return nil, err
 		}
