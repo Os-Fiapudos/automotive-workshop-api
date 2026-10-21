@@ -82,3 +82,19 @@ start a later numbered section before the previous one's suite is green (`design
       and against a freshly recreated local Postgres volume.
 - [ ] No file outside `internal/features/service-order/`, `CLAUDE.md`, and
       `specs/architecture.md` changed by this feature (confirm via `git diff --stat`).
+
+## 10. F2-US01 additions (`requirements.md` §7, `design.md` §9)
+
+- [ ] Inventory of `auth`, `customer`, `vehicle`, `product`, `service-catalog`,
+      `service-order-tracking` (file and package level) and the before/after dependency map
+      in `docs/architecture-dependency-map.md` (`requirements.md` §7.1).
+- [ ] Move the repository port of `customer`, `vehicle`, `product` from `repository.go` to
+      `service.go` (`requirements.md` §7.2) — suite green.
+- [ ] Status update, quote notifier and Resend adapter placed per `requirements.md` §7.3.
+- [ ] `scripts/coverage.sh` gates `service-order/...` as one aggregate (`requirements.md`
+      §7.4); pre-refactor baseline recorded.
+- [ ] `architecture_test.go` checks transitive dependencies with `go list -deps`
+      (`requirements.md` §7.5); verified to fail when a forbidden import is introduced.
+- [ ] `AGENTS.md` updated identically to `CLAUDE.md` (`requirements.md` §7.6).
+- [ ] Collections (`docs/postman-collection.json`, `docs/insomnia-collection.json`,
+      `bruno/`) still match the routes — no route, method or body changed.
