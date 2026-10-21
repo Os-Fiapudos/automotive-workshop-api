@@ -74,21 +74,23 @@ start a later numbered section before the previous one's suite is green (`design
 
 ## 9. Regression verification
 
-- [ ] Every acceptance criterion in the six `service-order-*` specs listed in
+- [x] Every acceptance criterion in the six `service-order-*` specs listed in
       `requirements.md` §5 item 3, re-checked against the refactored code.
-      **Unit level done**: the 157 pre-refactor tests are all present and green (plus 3
-      new architecture tests); routes, JWT wrapping, JSON tags, error-to-status mapping and
-      handler status codes were diffed against `afeeb1e` and are identical. **Pending**: the
-      integration suite in `internal/handlers_test/` against Postgres (CI).
-- [ ] `scripts/coverage.sh` against a real Postgres — `service-order` coverage no lower
+      The 157 pre-refactor tests are all present and green (plus 3 architecture tests);
+      routes, JWT wrapping, JSON tags, error-to-status mapping and handler status codes are
+      identical to `afeeb1e`. The full integration suite passed against a fresh local
+      Postgres (2026-10-21). `TestRepositoryTransitionGuardsRejectStaleOrders` was added:
+      the SQL status guards (RNF07) were only reached by chance through the concurrent
+      HTTP test, and are now exercised deterministically.
+- [x] `scripts/coverage.sh` against a real Postgres — `service-order` coverage no lower
       than its pre-refactor baseline.
-      **Pending: CI `coverage` job.** Unit-only reference measured locally: 41.1%
-      (664/1617) before, 41.3% (671/1625) after. The with-database baseline is the
-      `coverage` artifact of CI on `develop` at `c6e4677`, the commit this branch starts from.
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...` pass, both without `DATABASE_URL`
+      Fresh local Postgres, same script: **before** (`c6e4677`) 85.5% (1383/1617),
+      stable across 3 runs; **after** 85.9% (1396/1625). A first after-run gave 85.4%
+      (1387/1625): the refactor adds 8 statements, and the SQL decision guard and the nil
+      notifier default were only covered by chance. Deterministic tests now cover them, with
+      no change to the gate.
+- [x] `go build ./...`, `go vet ./...`, `go test ./...` pass, both without `DATABASE_URL`
       and against a freshly recreated local Postgres volume.
-      **Done without `DATABASE_URL` (all green); pending: the run against Postgres (CI
-      `coverage` job on the PR).**
 - [x] ~~No file outside `internal/features/service-order/`, `CLAUDE.md`, and
       `specs/architecture.md` changed by this feature (confirm via `git diff --stat`).~~
       Superseded by `requirements.md` §7.2: outside the slice only `cmd/api`,
@@ -110,3 +112,9 @@ start a later numbered section before the previous one's suite is green (`design
 - [x] `AGENTS.md` updated identically to `CLAUDE.md` (`requirements.md` §7.6).
 - [x] Collections (`docs/postman-collection.json`, `docs/insomnia-collection.json`,
       `bruno/`) still match the routes — no route, method or body changed.
+      The Postman collection (50 requests, newman 6.2.1) was run on a fresh database against
+      the API image built from `c6e4677` and from this branch. All 50 status codes and
+      response-body shapes are identical. `make smoke` passed on this branch's image.
+      Pre-existing collection issue, out of scope: it deactivates the customer before
+      creating the vehicle (`409 CUSTOMER_INACTIVE`), so its service-order requests run
+      with empty ids on both versions.
