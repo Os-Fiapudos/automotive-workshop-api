@@ -12,21 +12,6 @@ import (
 	"automotive-workshop-api/internal/shared/document"
 )
 
-// CustomerRepository is the persistence boundary for the Customer aggregate.
-// It is defined next to its only consumer (CustomerService) rather than in a
-// separate "contracts" package — see specs/customer-management/design.md
-// §1.1/§1.3.
-type CustomerRepository interface {
-	Create(ctx context.Context, customer *Customer) error
-	FindByID(ctx context.Context, id uuid.UUID) (*Customer, error)
-	FindByDocument(ctx context.Context, normalizedDocument string) (*Customer, error)
-	// ExistsByDocument reports whether normalizedDocument already belongs to
-	// a customer other than excludeID (nil to check against every customer).
-	ExistsByDocument(ctx context.Context, normalizedDocument string, excludeID *uuid.UUID) (bool, error)
-	List(ctx context.Context, page, pageSize int) ([]*Customer, int, error)
-	Update(ctx context.Context, customer *Customer) error
-}
-
 // postgresUniqueViolation is the SQLSTATE Postgres returns for any unique
 // index/constraint violation. SQLSTATE alone doesn't say *which* constraint
 // was violated — see mapUniqueViolation below, which reads
