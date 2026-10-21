@@ -142,12 +142,16 @@ internal/features/          → one folder per business feature (vertical slice)
                                NOTE: unrelated to auth's `users` database table — this is a
                                distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                               database (pgx pool), token (JWT), middleware (auth),
+                               database (pgx pool + money.Cents <-> NUMERIC conversion),
+                               token (JWT), middleware (auth),
                                httpx (JSON writer + error envelope, used by auth),
                                apierror (JSON error envelope, used by customer and
                                servicecatalog — see section 8 for why there are currently two
                                and what that means for new code)
-                               document (CPF/CNPJ), config (env var loading)
+                               document (CPF/CNPJ), config (env var loading),
+                               money (exact Cents value type for every price/total:
+                               JSON + bounded arithmetic, stdlib only — never float64;
+                               specs/monetary-value-precision/)
 internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
                                customer_test.go, service_catalog_test.go), each skipped
                                independently when DATABASE_URL is unset

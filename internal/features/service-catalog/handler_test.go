@@ -66,7 +66,7 @@ func TestCreateHandlerCreated(t *testing.T) {
 		t.Fatalf("status = %d, want 201; body: %s", rec.Code, rec.Body.String())
 	}
 	body := decodeService(t, rec)
-	if body.Code != 1001 || body.Name != "Oil Change" || body.Price != 150.5 || *body.EstimatedTime != 30 || !body.Active {
+	if body.Code != 1001 || body.Name != "Oil Change" || body.Price != 15050 || *body.EstimatedTime != 30 || !body.Active {
 		t.Fatalf("body = %+v", body)
 	}
 }
@@ -125,6 +125,47 @@ func TestCreateHandlerValidationCarriesFieldDetail(t *testing.T) {
 	}
 	if len(body.Error.Details) != 1 || body.Error.Details[0].Field != "price" {
 		t.Fatalf("details = %+v", body.Error.Details)
+	}
+}
+
+// specs/monetary-value-precision/: a price with more than two decimal places
+// or beyond NUMERIC(12,2) is rejected as a validation error on "price" —
+// never rounded — while a non-number price stays INVALID_BODY as before.
+func TestPriceRejectionPolicy(t *testing.T) {
+	cases := map[string]struct{ method, target, payload, wantCode string }{
+		"create three decimals": {"POST", "/api/v1/services", `{"name":"Oil Change","price":19.999}`, "VALIDATION_ERROR"},
+		"create above limit":    {"POST", "/api/v1/services", `{"name":"Oil Change","price":10000000000}`, "VALIDATION_ERROR"},
+		"update three decimals": {"PATCH", "/api/v1/services/" + seededService().ID, `{"price":0.001}`, "VALIDATION_ERROR"},
+		"create string price":   {"POST", "/api/v1/services", `{"name":"Oil Change","price":"19.90"}`, "INVALID_BODY"},
+	}
+	for name, testCase := range cases {
+		mux := newTestMux(newFakeStore(seededService()))
+		rec := do(mux, testCase.method, testCase.target, testCase.payload)
+		if rec.Code != 400 {
+			t.Fatalf("%s: status = %d, want 400; body: %s", name, rec.Code, rec.Body.String())
+		}
+		if code := decodeErrorCode(t, rec); code != testCase.wantCode {
+			t.Fatalf("%s: error code = %q, want %s", name, code, testCase.wantCode)
+		}
+		if testCase.wantCode == "VALIDATION_ERROR" && !strings.Contains(rec.Body.String(), `"field":"price"`) {
+			t.Fatalf("%s: no price detail in body: %s", name, rec.Body.String())
+		}
+	}
+}
+
+// The price leaves the API in the same text a float64 field produced
+// (19.90 -> 19.9, 0.1 -> 0.1, the column limit unchanged).
+func TestPriceWireFormatUnchanged(t *testing.T) {
+	cases := map[string]string{"19.90": `"price":19.9,`, "0.1": `"price":0.1,`, "100.00": `"price":100,`, "9999999999.99": `"price":9999999999.99,`}
+	for sent, want := range cases {
+		mux := newTestMux(newFakeStore())
+		rec := do(mux, "POST", "/api/v1/services", `{"name":"Oil Change","price":`+sent+`}`)
+		if rec.Code != 201 {
+			t.Fatalf("%s: status = %d, want 201; body: %s", sent, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("%s: body %s does not contain %s", sent, rec.Body.String(), want)
+		}
 	}
 }
 
@@ -219,7 +260,7 @@ func TestUpdateHandler(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 	body := decodeService(t, rec)
-	if body.Description != "Full synthetic." || body.Price != 180.5 || *body.EstimatedTime != 45 {
+	if body.Description != "Full synthetic." || body.Price != 18050 || *body.EstimatedTime != 45 {
 		t.Fatalf("body = %+v", body)
 	}
 	if body.Name != "Oil Change" {

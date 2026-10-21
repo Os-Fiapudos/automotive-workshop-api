@@ -70,7 +70,13 @@ func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrd
 	if err := validateQuoteItems(items); err != nil {
 		return nil, err
 	}
-	total := calculateTotal(items)
+	if err := priceQuoteItems(items); err != nil {
+		return nil, err
+	}
+	total, err := calculateTotal(items)
+	if err != nil {
+		return nil, err
+	}
 
 	return service.repository.SaveQuote(ctx, order, items, total)
 }
@@ -239,9 +245,10 @@ func (service *ServiceOrderService) GetQuote(ctx context.Context, serviceOrderID
 	return service.repository.FindQuoteByServiceOrderID(ctx, serviceOrderID)
 }
 
-// resolveQuoteItems resolves and prices every raw input against the
-// catalog, building the immutable snapshot each QuoteItem persists
-// (requirements.md §3.5, §3.11, §3.12).
+// resolveQuoteItems resolves every raw input against the catalog, building
+// the immutable snapshot each QuoteItem persists (requirements.md §3.5,
+// §3.11, §3.12). It copies each item's UnitPrice; Total is computed later by
+// priceQuoteItems, once quantities are validated.
 func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, inputs []QuoteItemInput) ([]QuoteItem, error) {
 	items := make([]QuoteItem, 0, len(inputs))
 	for _, input := range inputs {
@@ -264,7 +271,6 @@ func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, input
 				Description: product.Description,
 				Quantity:    input.Quantity,
 				UnitPrice:   product.UnitPrice,
-				Total:       float64(input.Quantity) * product.UnitPrice,
 			})
 
 		case QuoteItemService:
@@ -282,7 +288,6 @@ func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, input
 				Description: catalogService.Description,
 				Quantity:    input.Quantity,
 				UnitPrice:   catalogService.Price,
-				Total:       float64(input.Quantity) * catalogService.Price,
 			})
 		}
 	}

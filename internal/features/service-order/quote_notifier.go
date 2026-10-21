@@ -1,6 +1,10 @@
 package serviceorder
 
-import "context"
+import (
+	"context"
+
+	"automotive-workshop-api/internal/shared/money"
+)
 
 // QuoteNotification is the data a QuoteNotifier needs to tell a customer their
 // quote is available. It is an explicit DTO rather than the ServiceOrder
@@ -10,7 +14,7 @@ import "context"
 // stored only as a hash and cannot be rebuilt here.
 type QuoteNotification struct {
 	OrderCode      int64
-	TotalAmount    float64
+	TotalAmount    money.Cents
 	RecipientEmail string
 }
 

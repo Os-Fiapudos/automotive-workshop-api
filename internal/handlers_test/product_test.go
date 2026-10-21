@@ -21,6 +21,7 @@ import (
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/product"
 	"automotive-workshop-api/internal/shared/middleware"
+	"automotive-workshop-api/internal/shared/money"
 	"automotive-workshop-api/internal/shared/token"
 )
 
@@ -115,7 +116,7 @@ func TestProductUnauthenticatedReturns401(t *testing.T) {
 	// Attempt POST without token
 	resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:      "Filtro Sem Auth",
-		UnitPrice: ptr(10.0),
+		UnitPrice: ptr(money.Cents(1000)),
 		Type:      "PART",
 	}, "")
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -132,7 +133,7 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	partResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Amortecedor Dianteiro",
 		Description:  "Amortecedor pressurizado",
-		UnitPrice:    ptr(250.00),
+		UnitPrice:    ptr(money.Cents(25000)),
 		CurrentStock: ptr(12),
 		Type:         "PART",
 	}, token)
@@ -144,7 +145,7 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	assert.Equal(t, "Amortecedor Dianteiro", createdPart.Name)
 	assert.Equal(t, "PART", createdPart.Type)
 	assert.Equal(t, "ACTIVE", createdPart.Status)
-	assert.Equal(t, 250.00, createdPart.UnitPrice)
+	assert.Equal(t, money.Cents(25000), createdPart.UnitPrice)
 	assert.Equal(t, 12, createdPart.CurrentStock)
 	assert.NotZero(t, createdPart.Code)
 
@@ -152,7 +153,7 @@ func TestProductFullCRUDFlow(t *testing.T) {
 	supplyResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Graxa de LÃ­tio",
 		Description:  "Pote 1kg",
-		UnitPrice:    ptr(35.50),
+		UnitPrice:    ptr(money.Cents(3550)),
 		CurrentStock: ptr(8),
 		Type:         "SUPPLY",
 	}, token)
@@ -178,13 +179,13 @@ func TestProductFullCRUDFlow(t *testing.T) {
 
 	patchResp := doAuthJSON(t, http.MethodPatch, server.URL+"/api/v1/products/"+createdPart.ID, product.UpdateRequest{
 		Name:      ptr("Amortecedor Dianteiro Turbo"),
-		UnitPrice: ptr(275.00),
+		UnitPrice: ptr(money.Cents(27500)),
 	}, token)
 	require.Equal(t, http.StatusOK, patchResp.StatusCode)
 	var updated product.Response
 	decodeBody(t, patchResp, &updated)
 	assert.Equal(t, "Amortecedor Dianteiro Turbo", updated.Name)
-	assert.Equal(t, 275.00, updated.UnitPrice)
+	assert.Equal(t, money.Cents(27500), updated.UnitPrice)
 	assert.Equal(t, 12, updated.CurrentStock) // stock unchanged
 
 	// 5. List products
@@ -215,7 +216,7 @@ func TestStockAdjustmentFlow(t *testing.T) {
 	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Ã“leo de CÃ¢mbio",
 		Description:  "Fluido sintÃ©tico",
-		UnitPrice:    ptr(55.00),
+		UnitPrice:    ptr(money.Cents(5500)),
 		CurrentStock: ptr(10),
 		Type:         "SUPPLY",
 	}, token)
@@ -287,7 +288,7 @@ func TestStockAdjustmentConcurrency(t *testing.T) {
 	createResp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Produto Concorrente",
 		Description:  "Teste de concorrÃªncia de estoque",
-		UnitPrice:    ptr(100.00),
+		UnitPrice:    ptr(money.Cents(10000)),
 		CurrentStock: ptr(10),
 		Type:         "PART",
 	}, token)
@@ -348,7 +349,7 @@ func TestProductDuplicateCodeReturns409(t *testing.T) {
 		Code:         &customCode,
 		Name:         "Produto CÃ³digo Fixo 1",
 		Description:  "Desc 1",
-		UnitPrice:    ptr(10.0),
+		UnitPrice:    ptr(money.Cents(1000)),
 		CurrentStock: ptr(5),
 		Type:         "PART",
 	}, token)
@@ -361,7 +362,7 @@ func TestProductDuplicateCodeReturns409(t *testing.T) {
 		Code:         &customCode,
 		Name:         "Produto CÃ³digo Fixo 2",
 		Description:  "Desc 2",
-		UnitPrice:    ptr(20.0),
+		UnitPrice:    ptr(money.Cents(2000)),
 		CurrentStock: ptr(10),
 		Type:         "SUPPLY",
 	}, token)
@@ -379,7 +380,7 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	t.Run("negative unit price", func(t *testing.T) {
 		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 			Name:         "PreÃ§o Negativo",
-			UnitPrice:    ptr(-10.0),
+			UnitPrice:    ptr(money.Cents(-1000)),
 			CurrentStock: ptr(5),
 			Type:         "PART",
 		}, token)
@@ -389,7 +390,7 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	t.Run("negative stock", func(t *testing.T) {
 		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 			Name:         "Estoque Negativo",
-			UnitPrice:    ptr(10.0),
+			UnitPrice:    ptr(money.Cents(1000)),
 			CurrentStock: ptr(-5),
 			Type:         "PART",
 		}, token)
@@ -399,7 +400,7 @@ func TestProductRejectsInvalidInputs(t *testing.T) {
 	t.Run("invalid type", func(t *testing.T) {
 		resp := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 			Name:         "Tipo InvÃ¡lido",
-			UnitPrice:    ptr(10.0),
+			UnitPrice:    ptr(money.Cents(1000)),
 			CurrentStock: ptr(5),
 			Type:         "SERVICO",
 		}, token)
@@ -541,7 +542,7 @@ func createProductFixture(t *testing.T, server *httptest.Server, pool *pgxpool.P
 	response := doAuthJSON(t, http.MethodPost, server.URL+"/api/v1/products", product.CreateRequest{
 		Name:         "Fixture " + strconv.Itoa(rand.Intn(1000000)),
 		Description:  "Created by the integration suite",
-		UnitPrice:    ptr(99.90),
+		UnitPrice:    ptr(money.Cents(9990)),
 		CurrentStock: ptr(stock),
 		Type:         productType,
 	}, token)

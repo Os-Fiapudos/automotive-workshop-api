@@ -37,7 +37,7 @@ func TestResendNotifierSendsOneEmail(t *testing.T) {
 	var requests []capturedRequest
 	notifier := NewResendQuoteNotifier("re_secret", "oficina@example.com", fakeResendClient(200, nil, &requests))
 
-	err := notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 42, TotalAmount: 450.5, RecipientEmail: "cliente@example.com"})
+	err := notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 42, TotalAmount: 45050, RecipientEmail: "cliente@example.com"})
 	require.NoError(t, err)
 
 	require.Len(t, requests, 1)

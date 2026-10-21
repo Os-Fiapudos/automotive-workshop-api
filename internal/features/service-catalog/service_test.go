@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // fakeStore is an in-memory Store keyed by id, enough to exercise the business
@@ -117,7 +119,7 @@ func (s *fakeStore) Deactivate(_ context.Context, id string) error {
 }
 
 func seededService() *Service {
-	return &Service{ID: "11111111-1111-1111-1111-111111111111", Code: 10, Name: "Oil Change", Price: 80, Active: true}
+	return &Service{ID: "11111111-1111-1111-1111-111111111111", Code: 10, Name: "Oil Change", Price: 8000, Active: true}
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -125,11 +127,11 @@ func ptr[T any](v T) *T { return &v }
 // FR1/AC1: a service can be registered with code, name, and price.
 func TestCreateWithCodeNameAndPrice(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	created, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(1001)), Name: "Oil Change", Price: 150})
+	created, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(1001)), Name: "Oil Change", Price: 15000})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if created.Code != 1001 || created.Name != "Oil Change" || created.Price != 150 || !created.Active {
+	if created.Code != 1001 || created.Name != "Oil Change" || created.Price != 15000 || !created.Active {
 		t.Fatalf("created = %+v", created)
 	}
 }
@@ -137,7 +139,7 @@ func TestCreateWithCodeNameAndPrice(t *testing.T) {
 // D1: without a code, the store generates one.
 func TestCreateWithoutCode(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	created, err := catalog.Create(context.Background(), NewService{Name: "Wheel Alignment", Price: 90})
+	created, err := catalog.Create(context.Background(), NewService{Name: "Wheel Alignment", Price: 9000})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -150,7 +152,7 @@ func TestCreateWithoutCode(t *testing.T) {
 func TestCreateRequiresName(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
 	for _, name := range []string{"", "   "} {
-		_, err := catalog.Create(context.Background(), NewService{Name: name, Price: 10})
+		_, err := catalog.Create(context.Background(), NewService{Name: name, Price: 1000})
 		var validation ValidationError
 		if !errors.As(err, &validation) {
 			t.Fatalf("name %q: err = %v, want ValidationError", name, err)
@@ -161,7 +163,7 @@ func TestCreateRequiresName(t *testing.T) {
 // BR3/AC3: a negative price is rejected.
 func TestCreateRejectsNegativePrice(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	_, err := catalog.Create(context.Background(), NewService{Name: "Oil Change", Price: -0.01})
+	_, err := catalog.Create(context.Background(), NewService{Name: "Oil Change", Price: -1})
 	var validation ValidationError
 	if !errors.As(err, &validation) {
 		t.Fatalf("err = %v, want ValidationError", err)
@@ -172,7 +174,7 @@ func TestCreateRejectsNegativePrice(t *testing.T) {
 func TestCreateRejectsNonPositiveEstimatedTime(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
 	for _, estimated := range []int{0, -30} {
-		_, err := catalog.Create(context.Background(), NewService{Name: "Oil Change", Price: 10, EstimatedTime: ptr(estimated)})
+		_, err := catalog.Create(context.Background(), NewService{Name: "Oil Change", Price: 1000, EstimatedTime: ptr(estimated)})
 		var validation ValidationError
 		if !errors.As(err, &validation) {
 			t.Fatalf("estimated_time %d: err = %v, want ValidationError", estimated, err)
@@ -182,7 +184,7 @@ func TestCreateRejectsNonPositiveEstimatedTime(t *testing.T) {
 
 func TestCreateAcceptsAbsentEstimatedTime(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	created, err := catalog.Create(context.Background(), NewService{Name: "Diagnostics", Price: 60})
+	created, err := catalog.Create(context.Background(), NewService{Name: "Diagnostics", Price: 6000})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -193,7 +195,7 @@ func TestCreateAcceptsAbsentEstimatedTime(t *testing.T) {
 
 func TestCreateRejectsNonPositiveCode(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	_, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(0)), Name: "Oil Change", Price: 10})
+	_, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(0)), Name: "Oil Change", Price: 1000})
 	var validation ValidationError
 	if !errors.As(err, &validation) {
 		t.Fatalf("err = %v, want ValidationError", err)
@@ -203,7 +205,7 @@ func TestCreateRejectsNonPositiveCode(t *testing.T) {
 func TestCreateTrimsNameAndDescription(t *testing.T) {
 	store := newFakeStore()
 	catalog := NewCatalog(store)
-	if _, err := catalog.Create(context.Background(), NewService{Name: "  Oil Change  ", Description: "  cleans  ", Price: 10}); err != nil {
+	if _, err := catalog.Create(context.Background(), NewService{Name: "  Oil Change  ", Description: "  cleans  ", Price: 1000}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if store.lastNew.Name != "Oil Change" || store.lastNew.Description != "cleans" {
@@ -214,7 +216,7 @@ func TestCreateTrimsNameAndDescription(t *testing.T) {
 // BR2/AC2: a duplicate code is reported as such, not swallowed.
 func TestCreateDuplicateCode(t *testing.T) {
 	catalog := NewCatalog(newFakeStore(seededService()))
-	_, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(10)), Name: "Other", Price: 10})
+	_, err := catalog.Create(context.Background(), NewService{Code: ptr(int64(10)), Name: "Other", Price: 1000})
 	if !errors.Is(err, ErrCodeAlreadyExists) {
 		t.Fatalf("err = %v, want ErrCodeAlreadyExists", err)
 	}
@@ -256,13 +258,13 @@ func TestUpdateFields(t *testing.T) {
 	catalog := NewCatalog(newFakeStore(service))
 	updated, err := catalog.Update(context.Background(), service.ID, Changes{
 		Description:   ptr("Full synthetic oil."),
-		Price:         ptr(180.5),
+		Price:         ptr(money.Cents(18050)),
 		EstimatedTime: ptr(45),
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.Description != "Full synthetic oil." || updated.Price != 180.5 || *updated.EstimatedTime != 45 {
+	if updated.Description != "Full synthetic oil." || updated.Price != 18050 || *updated.EstimatedTime != 45 {
 		t.Fatalf("updated = %+v", updated)
 	}
 }
@@ -273,7 +275,7 @@ func TestUpdateValidations(t *testing.T) {
 	cases := map[string]Changes{
 		"empty change set":    {},
 		"blank name":          {Name: ptr("   ")},
-		"negative price":      {Price: ptr(-1.0)},
+		"negative price":      {Price: ptr(money.Cents(-100))},
 		"zero estimated time": {EstimatedTime: ptr(0)},
 	}
 	for name, changes := range cases {
@@ -287,7 +289,7 @@ func TestUpdateValidations(t *testing.T) {
 
 func TestUpdateNotFound(t *testing.T) {
 	catalog := NewCatalog(newFakeStore())
-	_, err := catalog.Update(context.Background(), "44444444-4444-4444-4444-444444444444", Changes{Price: ptr(10.0)})
+	_, err := catalog.Update(context.Background(), "44444444-4444-4444-4444-444444444444", Changes{Price: ptr(money.Cents(1000))})
 	if !errors.Is(err, ErrServiceNotFound) {
 		t.Fatalf("err = %v, want ErrServiceNotFound", err)
 	}

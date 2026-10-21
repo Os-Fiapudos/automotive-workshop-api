@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"automotive-workshop-api/internal/shared/money"
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
@@ -55,7 +56,7 @@ type serviceRef struct {
 	Code        int64
 	Name        string
 	Description string
-	Price       float64
+	Price       money.Cents
 }
 
 // serviceOrderLookups is the read-only boundary ServiceOrderService depends
@@ -116,7 +117,7 @@ type ServiceOrderRepository interface {
 	// appended to the history entry's fixed description; the administrative
 	// endpoints always pass "".
 	StartDiagnosis(ctx context.Context, order *ServiceOrder, notes string) error
-	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
+	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total money.Cents) (*Quote, error)
 	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
 
 	// Added by specs/service-order-execution/.

@@ -3,6 +3,8 @@ package servicecatalog
 import (
 	"context"
 	"strings"
+
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // ValidationError carries a business-rule violation whose message is safe to
@@ -22,7 +24,7 @@ type NewService struct {
 	Code          *int64
 	Name          string
 	Description   string
-	Price         float64
+	Price         money.Cents
 	EstimatedTime *int
 }
 
@@ -30,7 +32,7 @@ type NewService struct {
 type Changes struct {
 	Name          *string
 	Description   *string
-	Price         *float64
+	Price         *money.Cents
 	EstimatedTime *int
 }
 
