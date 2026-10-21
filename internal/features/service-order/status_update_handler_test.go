@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -46,7 +47,7 @@ func postStatusUpdate(mux *http.ServeMux, id, secret, body string) *httptest.Res
 func TestStatusUpdateSuccessReducedResponse(t *testing.T) {
 	repo := newFakeRepository()
 	mux := newStatusUpdateMux(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
 	response := postStatusUpdate(mux, order.ID.String(), testStatusSecret, `{"status":"IN_DIAGNOSIS","notes":"lift 2"}`)
 	require.Equal(t, http.StatusOK, response.Code)
@@ -62,7 +63,7 @@ func TestStatusUpdateSuccessReducedResponse(t *testing.T) {
 func TestStatusUpdateUnauthorized(t *testing.T) {
 	repo := newFakeRepository()
 	mux := newStatusUpdateMux(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
 	for name, secret := range map[string]string{"missing": "", "wrong": "nope", "quote secret": testExternalSecret} {
 		t.Run(name, func(t *testing.T) {
@@ -80,7 +81,7 @@ func TestStatusUpdateUnauthorized(t *testing.T) {
 	mux.ServeHTTP(recorder, request)
 	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 
-	assert.Equal(t, StatusReceived, order.Status)
+	assert.Equal(t, domain.StatusReceived, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 }
 
@@ -99,11 +100,11 @@ func TestStatusUpdateValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := newFakeRepository()
 			mux := newStatusUpdateMux(repo)
-			order := seedOrder(repo, StatusReceived)
+			order := seedOrder(repo, domain.StatusReceived)
 
 			response := postStatusUpdate(mux, order.ID.String(), testStatusSecret, body)
 			assert.Equal(t, http.StatusBadRequest, response.Code)
-			assert.Equal(t, StatusReceived, order.Status)
+			assert.Equal(t, domain.StatusReceived, order.Status)
 			assert.Empty(t, repo.history[order.ID])
 		})
 	}
@@ -122,29 +123,29 @@ func TestStatusUpdateUnknownOrder(t *testing.T) {
 func TestStatusUpdateIllegalTransitionIsConflict(t *testing.T) {
 	repo := newFakeRepository()
 	mux := newStatusUpdateMux(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
 	response := postStatusUpdate(mux, order.ID.String(), testStatusSecret, `{"status":"DELIVERED","notes":"skip ahead"}`)
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.Contains(t, response.Body.String(), "INVALID_STATUS_TRANSITION")
-	assert.Equal(t, StatusReceived, order.Status)
+	assert.Equal(t, domain.StatusReceived, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 }
 
 func TestStatusUpdatePendingExecutionsIsConflict(t *testing.T) {
 	repo := newFakeRepository()
 	mux := newStatusUpdateMux(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.quotes[order.ID] = &Quote{
+	repo.quotes[order.ID] = &domain.Quote{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
-		Status:         QuoteStatusApproved,
-		Items:          []QuoteItem{{Kind: QuoteItemService, ServiceID: serviceID, Quantity: 1}},
+		Status:         domain.QuoteStatusApproved,
+		Items:          []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: serviceID, Quantity: 1}},
 	}
 
 	response := postStatusUpdate(mux, order.ID.String(), testStatusSecret, `{"status":"COMPLETED"}`)
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.Contains(t, response.Body.String(), "EXECUTIONS_NOT_COMPLETED")
-	assert.Equal(t, StatusInProgress, order.Status)
+	assert.Equal(t, domain.StatusInProgress, order.Status)
 }

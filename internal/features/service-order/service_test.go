@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"testing"
 
@@ -38,7 +39,7 @@ func TestServiceCreateByID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, StatusReceived, result.Order.Status)
+	assert.Equal(t, domain.StatusReceived, result.Order.Status)
 	assert.EqualValues(t, 1, result.Order.Code)
 	assert.Len(t, result.Services, 1)
 	assert.NotEmpty(t, result.TrackingToken)
@@ -54,7 +55,7 @@ func TestServiceCreateByDocumentAndPlate(t *testing.T) {
 		LicensePlate:     "ABC1D23",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, StatusReceived, result.Order.Status)
+	assert.Equal(t, domain.StatusReceived, result.Order.Status)
 }
 
 func TestServiceCreateCustomerNotFound(t *testing.T) {
@@ -67,7 +68,7 @@ func TestServiceCreateCustomerNotFound(t *testing.T) {
 		VehicleID:  vehicleID.String(),
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrCustomerNotFound)
+	assert.ErrorIs(t, err, domain.ErrCustomerNotFound)
 }
 
 func TestServiceCreateCustomerInactive(t *testing.T) {
@@ -83,7 +84,7 @@ func TestServiceCreateCustomerInactive(t *testing.T) {
 		VehicleID:  vehicleID.String(),
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrCustomerInactive)
+	assert.ErrorIs(t, err, domain.ErrCustomerInactive)
 }
 
 func TestServiceCreateVehicleNotFound(t *testing.T) {
@@ -96,7 +97,7 @@ func TestServiceCreateVehicleNotFound(t *testing.T) {
 		VehicleID:  uuid.New().String(),
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrVehicleNotFound)
+	assert.ErrorIs(t, err, domain.ErrVehicleNotFound)
 }
 
 func TestServiceCreateVehicleInactive(t *testing.T) {
@@ -112,7 +113,7 @@ func TestServiceCreateVehicleInactive(t *testing.T) {
 		VehicleID:  vehicleID.String(),
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrVehicleInactive)
+	assert.ErrorIs(t, err, domain.ErrVehicleInactive)
 }
 
 func TestServiceCreateVehicleNotOwnedByCustomer(t *testing.T) {
@@ -130,7 +131,7 @@ func TestServiceCreateVehicleNotOwnedByCustomer(t *testing.T) {
 		VehicleID:  otherVehicleID.String(),
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrVehicleNotOwnedByCustomer)
+	assert.ErrorIs(t, err, domain.ErrVehicleNotOwnedByCustomer)
 }
 
 func TestServiceCreateRequestedServiceNotFound(t *testing.T) {
@@ -144,7 +145,7 @@ func TestServiceCreateRequestedServiceNotFound(t *testing.T) {
 		RequestedServiceIDs: []string{uuid.New().String()},
 	})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrRequestedServiceNotFound)
+	assert.ErrorIs(t, err, domain.ErrRequestedServiceNotFound)
 }
 
 func TestServiceCreateAllowsNoRequestedServices(t *testing.T) {
@@ -175,7 +176,7 @@ func TestServiceCreateWithRequestedProducts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Equal(t, []RequestedProduct{{ProductID: productID, Quantity: 2}}, result.Order.RequestedProducts)
+	assert.Equal(t, []domain.RequestedProduct{{ProductID: productID, Quantity: 2}}, result.Order.RequestedProducts)
 	require.Len(t, result.Products, 1)
 	assert.Equal(t, "Brake Pad", result.Products[0].Product.Name)
 	assert.EqualValues(t, 7, result.Products[0].Product.Code)
@@ -194,7 +195,7 @@ func TestServiceCreateRequestedProductNotFound(t *testing.T) {
 		VehicleID:         vehicleID.String(),
 		RequestedProducts: []RequestedProductInput{{ProductID: uuid.New().String(), Quantity: 1}},
 	})
-	assert.ErrorIs(t, err, ErrRequestedProductNotFound)
+	assert.ErrorIs(t, err, domain.ErrRequestedProductNotFound)
 	assert.Empty(t, repo.orders, "no order may be persisted")
 }
 
@@ -210,7 +211,7 @@ func TestServiceCreateRequestedProductInactive(t *testing.T) {
 		VehicleID:         vehicleID.String(),
 		RequestedProducts: []RequestedProductInput{{ProductID: productID.String(), Quantity: 1}},
 	})
-	assert.ErrorIs(t, err, ErrRequestedProductNotFound)
+	assert.ErrorIs(t, err, domain.ErrRequestedProductNotFound)
 	assert.Empty(t, repo.orders, "no order may be persisted")
 }
 
@@ -227,7 +228,7 @@ func TestServiceCreateRequestedProductInvalidQuantity(t *testing.T) {
 			VehicleID:         vehicleID.String(),
 			RequestedProducts: []RequestedProductInput{{ProductID: productID.String(), Quantity: quantity}},
 		})
-		assert.ErrorIs(t, err, ErrInvalidRequestedProductQuantity, "quantity %d", quantity)
+		assert.ErrorIs(t, err, domain.ErrInvalidRequestedProductQuantity, "quantity %d", quantity)
 	}
 	assert.Empty(t, repo.orders, "no order may be persisted")
 }
@@ -247,6 +248,6 @@ func TestServiceCreateRejectsDuplicateRequestedProduct(t *testing.T) {
 			{ProductID: productID.String(), Quantity: 2},
 		},
 	})
-	assert.ErrorIs(t, err, ErrDuplicateRequestedProduct)
+	assert.ErrorIs(t, err, domain.ErrDuplicateRequestedProduct)
 	assert.Empty(t, repo.orders, "no order may be persisted")
 }

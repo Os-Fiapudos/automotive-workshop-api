@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ type StockMovementResponse struct {
 	OccurredAt         time.Time `json:"occurredAt"`
 }
 
-func toStockMovementResponse(movement *StockMovement) StockMovementResponse {
+func toStockMovementResponse(movement *domain.StockMovement) StockMovementResponse {
 	response := StockMovementResponse{
 		ID:            movement.ID.String(),
 		ProductID:     movement.ProductID.String(),
@@ -87,7 +88,7 @@ type StockMovementListResponse struct {
 	Items []StockMovementResponse `json:"items"`
 }
 
-func toStockMovementListResponse(movements []*StockMovement) StockMovementListResponse {
+func toStockMovementListResponse(movements []*domain.StockMovement) StockMovementListResponse {
 	items := make([]StockMovementResponse, 0, len(movements))
 	for _, movement := range movements {
 		items = append(items, toStockMovementResponse(movement))

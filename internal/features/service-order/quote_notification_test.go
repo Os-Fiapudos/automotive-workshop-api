@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"bytes"
 	"context"
 	"errors"
@@ -33,11 +34,11 @@ func captureLog(t *testing.T) *bytes.Buffer {
 
 // seedQuoteReadyOrder registers a customer (with the given e-mail) and an
 // IN_DIAGNOSIS order of theirs with a composed quote, ready for SendQuote.
-func seedQuoteReadyOrder(t *testing.T, repo *fakeRepository, service *ServiceOrderService, email *string) *ServiceOrder {
+func seedQuoteReadyOrder(t *testing.T, repo *fakeRepository, service *ServiceOrderService, email *string) *domain.ServiceOrder {
 	t.Helper()
 	customerID := uuid.New()
 	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Secreta", Active: true, Email: email}, customerID.String())
-	order := seedOrder(repo, StatusInDiagnosis)
+	order := seedOrder(repo, domain.StatusInDiagnosis)
 	order.CustomerID = customerID
 	composeQuoteForOrder(t, service, repo, order)
 	return order
@@ -84,7 +85,7 @@ func TestSendQuoteSucceedsWhenNotifierFails(t *testing.T) {
 	quote, err := service.SendQuote(context.Background(), order.ID)
 	require.NoError(t, err)
 	require.NotNil(t, quote.SentAt)
-	assert.Equal(t, StatusAwaitingApproval, order.Status)
+	assert.Equal(t, domain.StatusAwaitingApproval, order.Status)
 	assert.Contains(t, logs.String(), "send failed")
 	assert.NotContains(t, logs.String(), email)
 }
@@ -93,7 +94,7 @@ func TestSendQuoteSucceedsWhenCustomerLookupFails(t *testing.T) {
 	repo := newFakeRepository()
 	notifier := &recordingNotifier{}
 	service := NewServiceOrderService(repo, repo, notifier)
-	order := seedOrder(repo, StatusInDiagnosis) // customer not registered in the fake
+	order := seedOrder(repo, domain.StatusInDiagnosis) // customer not registered in the fake
 	composeQuoteForOrder(t, service, repo, order)
 
 	_, err := service.SendQuote(context.Background(), order.ID)

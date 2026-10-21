@@ -1,4 +1,4 @@
-package serviceorder
+package domain
 
 import (
 	"testing"
@@ -25,7 +25,7 @@ func TestServiceExecutionFinishRecordsEndDate(t *testing.T) {
 	execution.StartedAt = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 
 	endedAt := execution.StartedAt.Add(2 * time.Hour)
-	require.NoError(t, execution.finish(&endedAt))
+	require.NoError(t, execution.Finish(&endedAt))
 	require.NotNil(t, execution.EndedAt)
 	assert.Equal(t, endedAt, *execution.EndedAt)
 }
@@ -39,7 +39,7 @@ func TestServiceExecutionFinishWithNilUsesServerDefault(t *testing.T) {
 	require.NoError(t, err)
 	execution.StartedAt = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 
-	require.NoError(t, execution.finish(nil))
+	require.NoError(t, execution.Finish(nil))
 	assert.Nil(t, execution.EndedAt, "the repository, not this method, resolves the server-default end time")
 }
 
@@ -49,7 +49,7 @@ func TestServiceExecutionFinishRejectsEndBeforeStart(t *testing.T) {
 	execution.StartedAt = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 
 	endedAt := execution.StartedAt.Add(-1 * time.Minute)
-	err = execution.finish(&endedAt)
+	err = execution.Finish(&endedAt)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrServiceExecutionEndBeforeStart)
 	assert.Nil(t, execution.EndedAt, "a rejected finish must not record an end date")
@@ -61,24 +61,24 @@ func TestServiceExecutionFinishRejectsAlreadyFinished(t *testing.T) {
 	execution.StartedAt = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 
 	firstEnd := execution.StartedAt.Add(time.Hour)
-	require.NoError(t, execution.finish(&firstEnd))
+	require.NoError(t, execution.Finish(&firstEnd))
 
 	secondEnd := execution.StartedAt.Add(2 * time.Hour)
-	err = execution.finish(&secondEnd)
+	err = execution.Finish(&secondEnd)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrServiceExecutionAlreadyFinished)
 }
 
 func TestFinalizeFromInProgress(t *testing.T) {
 	order := newTestOrder(t, StatusInProgress)
-	require.NoError(t, order.finalize())
+	require.NoError(t, order.Finalize())
 	assert.Equal(t, StatusCompleted, order.Status)
 }
 
 func TestFinalizeRejectsNonInProgress(t *testing.T) {
 	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusCompleted, StatusDelivered} {
 		order := newTestOrder(t, status)
-		err := order.finalize()
+		err := order.Finalize()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
@@ -87,14 +87,14 @@ func TestFinalizeRejectsNonInProgress(t *testing.T) {
 
 func TestDeliverFromCompleted(t *testing.T) {
 	order := newTestOrder(t, StatusCompleted)
-	require.NoError(t, order.deliver())
+	require.NoError(t, order.Deliver())
 	assert.Equal(t, StatusDelivered, order.Status)
 }
 
 func TestDeliverRejectsNonCompleted(t *testing.T) {
 	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusInProgress, StatusDelivered} {
 		order := newTestOrder(t, status)
-		err := order.deliver()
+		err := order.Deliver()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")

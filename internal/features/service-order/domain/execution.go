@@ -1,4 +1,4 @@
-package serviceorder
+package domain
 
 import (
 	"time"
@@ -34,17 +34,17 @@ func NewServiceExecution(serviceOrderID, serviceID uuid.UUID) (*ServiceExecution
 	}, nil
 }
 
-// finish records the execution's end date/time (BR3), rejecting a second
+// Finish records the execution's end date/time (BR3), rejecting a second
 // finish (BR "an execution's end cannot be recorded twice") and an end date
 // before the start date (BR4). endedAt is nil when the caller wants the
 // server-default "now" — that case is intentionally not compared against
 // StartedAt here: StartedAt was authored by the database's own clock
-// (execution_repository.go's StartExecution), and the default end time is
+// (the Postgres adapter's StartExecution), and the default end time is
 // likewise left to the database's now() (FinishExecution), so both come
 // from the same clock and BR4 can never spuriously fire from app/DB clock
 // drift. Only an explicit, caller-supplied endedAt is checked against
 // StartedAt.
-func (execution *ServiceExecution) finish(endedAt *time.Time) error {
+func (execution *ServiceExecution) Finish(endedAt *time.Time) error {
 	if execution.EndedAt != nil {
 		return ErrServiceExecutionAlreadyFinished
 	}

@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 
@@ -73,19 +74,19 @@ type serviceOrderLookups interface {
 	findServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*serviceRef, error)
 
 	// Added by specs/service-order-diagnosis-quote/.
-	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*ServiceOrder, error)
+	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*domain.ServiceOrder, error)
 	findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error)
 	findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error)
 
 	// Added by specs/service-order-query/.
-	findServiceOrderByCode(ctx context.Context, code int64) (*ServiceOrder, error)
+	findServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error)
 	findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error)
-	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error)
+	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error)
 	listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error)
 
 	// Added by specs/service-order-execution/.
-	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error)
-	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error)
+	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error)
+	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error)
 
 	// Added by specs/service-order-metrics/.
 	findAverageExecutionTimeByService(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error)
@@ -98,7 +99,7 @@ type serviceOrderLookups interface {
 	// service-order-tracking's FindByCodeAndTokenHash, reading
 	// service_order_tracking_tokens directly via SQL rather than importing
 	// that feature's Go package (CLAUDE.md §9.2).
-	findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error)
+	findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error)
 }
 
 // ServiceOrderRepository is the persistence boundary for the ServiceOrder
@@ -108,35 +109,35 @@ type ServiceOrderRepository interface {
 	// Create persists order and returns the raw tracking token generated for
 	// it (specs/service-order-tracking/design.md §5) — only that call ever
 	// sees the raw value; the database only ever stores its hash.
-	Create(ctx context.Context, order *ServiceOrder) (trackingToken string, err error)
+	Create(ctx context.Context, order *domain.ServiceOrder) (trackingToken string, err error)
 
 	// Added by specs/service-order-diagnosis-quote/. StartDiagnosis,
 	// FinalizeOrder and DeliverOrder take notes since
 	// specs/service-order-status-update/ (design.md §2): when non-empty it is
 	// appended to the history entry's fixed description; the administrative
 	// endpoints always pass "".
-	StartDiagnosis(ctx context.Context, order *ServiceOrder, notes string) error
-	SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error)
-	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error)
+	StartDiagnosis(ctx context.Context, order *domain.ServiceOrder, notes string) error
+	SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error)
+	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error)
 
 	// Added by specs/service-order-execution/.
-	StartExecution(ctx context.Context, execution *ServiceExecution) error
-	FinishExecution(ctx context.Context, execution *ServiceExecution) error
-	FinalizeOrder(ctx context.Context, order *ServiceOrder, notes string) error
-	DeliverOrder(ctx context.Context, order *ServiceOrder, notes string) error
+	StartExecution(ctx context.Context, execution *domain.ServiceExecution) error
+	FinishExecution(ctx context.Context, execution *domain.ServiceExecution) error
+	FinalizeOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error
+	DeliverOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error
 
 	// Added by specs/service-order-quote-decision/.
 
 	// SendQuote records quote as sent (sent_at/sent_version) and transitions
 	// order from IN_DIAGNOSIS to AWAITING_APPROVAL, transactionally.
-	SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error)
+	SendQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote) (*domain.Quote, error)
 
 	// DecideQuote records the customer's decision on quote (APPROVED or
 	// REJECTED, per decision), transitions order accordingly (IN_PROGRESS or
 	// CANCELED), and writes the corresponding history entry, all in one
 	// transaction (RNF07): a failure at any step, including the history
 	// insert, rolls back every other write this call made.
-	DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error)
+	DecideQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote, decision domain.QuoteStatus) (*domain.Quote, error)
 
 	// Added by specs/service-order-stock-usage/.
 
@@ -144,16 +145,16 @@ type ServiceOrderRepository interface {
 	// stock and records one EXIT StockMovement per item, transactionally
 	// (RNF07): a failure at any item rolls back every deduction already made
 	// in this call.
-	RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error)
+	RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error)
 
 	// ReverseStockMovement restores the quantity of a previously registered
 	// EXIT movement and records a linked, inverse ENTRY movement,
 	// transactionally (RNF07).
-	ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*StockMovement, error)
+	ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error)
 
 	// ListStockMovements loads every stock movement recorded against an
 	// order, most recent first.
-	ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*StockMovement, error)
+	ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error)
 }
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and
@@ -173,7 +174,7 @@ func NewPostgresServiceOrderRepository(pool *pgxpool.Pool) *PostgresServiceOrder
 // fails, everything is rolled back — the API never leaves a service order
 // without its creation history entry or its tracking token, or a requested
 // service link without the order it belongs to.
-func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *ServiceOrder) (string, error) {
+func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, order *domain.ServiceOrder) (string, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return "", err
@@ -250,7 +251,7 @@ func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 	ref := &customerRef{}
 	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone, &ref.Email); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrCustomerNotFound
+			return nil, domain.ErrCustomerNotFound
 		}
 		return nil, err
 	}
@@ -274,7 +275,7 @@ func scanVehicleRef(row pgx.Row) (*vehicleRef, error) {
 	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active,
 		&ref.Brand, &ref.Model, &ref.Year, &ref.Color); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrVehicleNotFound
+			return nil, domain.ErrVehicleNotFound
 		}
 		return nil, err
 	}
@@ -322,8 +323,8 @@ func (repository *PostgresServiceOrderRepository) findMissingServiceIDs(ctx cont
 // regardless of the token; only then is tokenHash checked against that
 // order's active tracking token, mirroring
 // service-order-tracking.PostgresTrackingRepository.FindByCodeAndTokenHash.
-func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*ServiceOrder, error) {
-	order := &ServiceOrder{}
+func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
+	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
 		 FROM service_orders WHERE code = $1`, code,
@@ -331,7 +332,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrac
 		&order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrServiceOrderNotFound
+			return nil, domain.ErrServiceOrderNotFound
 		}
 		return nil, err
 	}
@@ -346,7 +347,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrac
 		return nil, err
 	}
 	if !matches {
-		return nil, ErrTrackingTokenInvalid
+		return nil, domain.ErrTrackingTokenInvalid
 	}
 
 	return order, nil

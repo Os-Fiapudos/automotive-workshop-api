@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 
@@ -36,7 +37,7 @@ type RequestedProductInput struct {
 // handler does not have to make its own follow-up repository calls
 // (design.md §4.2).
 type CreateResult struct {
-	Order         *ServiceOrder
+	Order         *domain.ServiceOrder
 	Customer      *customerRef
 	Vehicle       *vehicleRef
 	Services      []*serviceRef
@@ -112,7 +113,7 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		return nil, err
 	}
 	if vehicle.CustomerID != customer.ID {
-		return nil, ErrVehicleNotOwnedByCustomer
+		return nil, domain.ErrVehicleNotOwnedByCustomer
 	}
 
 	requestedServiceIDs, err := parseUUIDs(input.RequestedServiceIDs)
@@ -125,7 +126,7 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 			return nil, err
 		}
 		if len(missing) > 0 {
-			return nil, ErrRequestedServiceNotFound
+			return nil, domain.ErrRequestedServiceNotFound
 		}
 	}
 
@@ -134,7 +135,7 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 		return nil, err
 	}
 
-	order, err := NewServiceOrder(customer.ID, vehicle.ID, input.Notes, requestedServiceIDs, requestedProducts)
+	order, err := domain.NewServiceOrder(customer.ID, vehicle.ID, input.Notes, requestedServiceIDs, requestedProducts)
 	if err != nil {
 		return nil, err
 	}
@@ -166,39 +167,39 @@ func (service *ServiceOrderService) Create(ctx context.Context, input CreateInpu
 // reaches the database. No stock balance is read or checked here (§7a.1).
 // It reuses findActiveProductByID, the quote feature's lookup (design.md
 // §7.2), and keeps its result as the response's display data.
-func (service *ServiceOrderService) resolveRequestedProducts(ctx context.Context, inputs []RequestedProductInput) ([]RequestedProduct, []*requestedProductRef, error) {
+func (service *ServiceOrderService) resolveRequestedProducts(ctx context.Context, inputs []RequestedProductInput) ([]domain.RequestedProduct, []*requestedProductRef, error) {
 	if len(inputs) == 0 {
 		return nil, nil, nil
 	}
 
-	requested := make([]RequestedProduct, len(inputs))
+	requested := make([]domain.RequestedProduct, len(inputs))
 	seen := make(map[uuid.UUID]bool, len(inputs))
 	for index, input := range inputs {
 		id, err := uuid.Parse(input.ProductID)
 		if err != nil {
-			return nil, nil, ErrRequestedProductNotFound
+			return nil, nil, domain.ErrRequestedProductNotFound
 		}
 		if input.Quantity <= 0 {
-			return nil, nil, ErrInvalidRequestedProductQuantity
+			return nil, nil, domain.ErrInvalidRequestedProductQuantity
 		}
 		if seen[id] {
-			return nil, nil, ErrDuplicateRequestedProduct
+			return nil, nil, domain.ErrDuplicateRequestedProduct
 		}
 		seen[id] = true
-		requested[index] = RequestedProduct{ProductID: id, Quantity: input.Quantity}
+		requested[index] = domain.RequestedProduct{ProductID: id, Quantity: input.Quantity}
 	}
 
 	refs := make([]*requestedProductRef, len(requested))
 	for index, product := range requested {
 		ref, err := service.lookups.findActiveProductByID(ctx, product.ProductID)
 		if err != nil {
-			if errors.Is(err, ErrProductNotFound) {
-				return nil, nil, ErrRequestedProductNotFound
+			if errors.Is(err, domain.ErrProductNotFound) {
+				return nil, nil, domain.ErrRequestedProductNotFound
 			}
 			return nil, nil, err
 		}
 		if !ref.Active {
-			return nil, nil, ErrRequestedProductNotFound
+			return nil, nil, domain.ErrRequestedProductNotFound
 		}
 		refs[index] = &requestedProductRef{Product: ref, Quantity: product.Quantity}
 	}
@@ -213,7 +214,7 @@ func (service *ServiceOrderService) resolveCustomer(ctx context.Context, input C
 	if input.CustomerID != "" {
 		id, parseErr := uuid.Parse(input.CustomerID)
 		if parseErr != nil {
-			return nil, ErrCustomerNotFound
+			return nil, domain.ErrCustomerNotFound
 		}
 		customer, err = service.lookups.findCustomerByID(ctx, id)
 	} else {
@@ -223,7 +224,7 @@ func (service *ServiceOrderService) resolveCustomer(ctx context.Context, input C
 		return nil, err
 	}
 	if !customer.Active {
-		return nil, ErrCustomerInactive
+		return nil, domain.ErrCustomerInactive
 	}
 	return customer, nil
 }
@@ -236,7 +237,7 @@ func (service *ServiceOrderService) resolveVehicle(ctx context.Context, input Cr
 	if input.VehicleID != "" {
 		id, parseErr := uuid.Parse(input.VehicleID)
 		if parseErr != nil {
-			return nil, ErrVehicleNotFound
+			return nil, domain.ErrVehicleNotFound
 		}
 		vehicle, err = service.lookups.findVehicleByID(ctx, id)
 	} else {
@@ -246,7 +247,7 @@ func (service *ServiceOrderService) resolveVehicle(ctx context.Context, input Cr
 		return nil, err
 	}
 	if !vehicle.Active {
-		return nil, ErrVehicleInactive
+		return nil, domain.ErrVehicleInactive
 	}
 	return vehicle, nil
 }
@@ -263,7 +264,7 @@ func parseUUIDs(values []string) ([]uuid.UUID, error) {
 	for index, value := range values {
 		id, err := uuid.Parse(value)
 		if err != nil {
-			return nil, ErrRequestedServiceNotFound
+			return nil, domain.ErrRequestedServiceNotFound
 		}
 		ids[index] = id
 	}

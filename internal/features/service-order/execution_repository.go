@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 
@@ -12,7 +13,7 @@ import (
 // its database-assigned StartedAt (design.md §2.6). A single INSERT needs no
 // transaction — nothing else is written alongside it (starting an execution
 // does not change the order's status, requirements.md BR8).
-func (repository *PostgresServiceOrderRepository) StartExecution(ctx context.Context, execution *ServiceExecution) error {
+func (repository *PostgresServiceOrderRepository) StartExecution(ctx context.Context, execution *domain.ServiceExecution) error {
 	return repository.pool.QueryRow(ctx,
 		`INSERT INTO audit_services (id, service_order_id, service_id)
 		 VALUES ($1, $2, $3)
@@ -30,7 +31,7 @@ func (repository *PostgresServiceOrderRepository) StartExecution(ctx context.Con
 // status guard — zero rows affected is treated as
 // ErrServiceExecutionAlreadyFinished, since existence was already confirmed
 // by findServiceExecutionByID earlier in the same request.
-func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Context, execution *ServiceExecution) error {
+func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Context, execution *domain.ServiceExecution) error {
 	err := repository.pool.QueryRow(ctx,
 		`UPDATE audit_services SET ended_at = COALESCE($2, now())
 		 WHERE id = $1 AND ended_at IS NULL
@@ -39,7 +40,7 @@ func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Co
 	).Scan(&execution.EndedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrServiceExecutionAlreadyFinished
+			return domain.ErrServiceExecutionAlreadyFinished
 		}
 		return err
 	}
@@ -49,7 +50,7 @@ func (repository *PostgresServiceOrderRepository) FinishExecution(ctx context.Co
 // FinalizeOrder moves order to COMPLETED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // StartDiagnosis.
-func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *ServiceOrder, notes string) error {
+func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -64,13 +65,13 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrInvalidStatusTransition
+		return domain.ErrInvalidStatusTransition
 	}
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'completion', $2, 'IN_PROGRESS', $3)`,
-		order.ID, historyDescription(historyOrderFinalized, notes), string(order.Status),
+		order.ID, domain.HistoryDescription(domain.HistoryOrderFinalized, notes), string(order.Status),
 	); err != nil {
 		return err
 	}
@@ -81,7 +82,7 @@ func (repository *PostgresServiceOrderRepository) FinalizeOrder(ctx context.Cont
 // DeliverOrder moves order to DELIVERED and records the transition in
 // service_order_history, transactionally (RNF07) — same shape as
 // FinalizeOrder.
-func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *ServiceOrder, notes string) error {
+func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -96,13 +97,13 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrInvalidStatusTransition
+		return domain.ErrInvalidStatusTransition
 	}
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'delivery', $2, 'COMPLETED', $3)`,
-		order.ID, historyDescription(historyVehicleDelivered, notes), string(order.Status),
+		order.ID, domain.HistoryDescription(domain.HistoryVehicleDelivered, notes), string(order.Status),
 	); err != nil {
 		return err
 	}
@@ -113,8 +114,8 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 // findServiceExecutionByID loads a single execution, scoped to
 // serviceOrderID so a client cannot finish another order's execution by
 // guessing its id.
-func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*ServiceExecution, error) {
-	execution := &ServiceExecution{}
+func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
+	execution := &domain.ServiceExecution{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
 		 FROM audit_services WHERE id = $1 AND service_order_id = $2`,
@@ -122,7 +123,7 @@ func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx c
 	).Scan(&execution.ID, &execution.ServiceOrderID, &execution.ServiceID, &execution.StartedAt, &execution.EndedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrServiceExecutionNotFound
+			return nil, domain.ErrServiceExecutionNotFound
 		}
 		return nil, err
 	}
@@ -132,7 +133,7 @@ func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx c
 // findServiceExecutionsByServiceOrderID loads every execution recorded for
 // an order, used by FinalizeOrder to check the required-executions rule
 // (design.md §2.3).
-func (repository *PostgresServiceOrderRepository) findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceExecution, error) {
+func (repository *PostgresServiceOrderRepository) findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
 		 FROM audit_services WHERE service_order_id = $1`, serviceOrderID)
@@ -141,9 +142,9 @@ func (repository *PostgresServiceOrderRepository) findServiceExecutionsByService
 	}
 	defer rows.Close()
 
-	var executions []*ServiceExecution
+	var executions []*domain.ServiceExecution
 	for rows.Next() {
-		execution := &ServiceExecution{}
+		execution := &domain.ServiceExecution{}
 		if err := rows.Scan(&execution.ID, &execution.ServiceOrderID, &execution.ServiceID, &execution.StartedAt, &execution.EndedAt); err != nil {
 			return nil, err
 		}

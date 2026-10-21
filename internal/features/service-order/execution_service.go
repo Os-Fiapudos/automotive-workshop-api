@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 	"time"
@@ -13,20 +14,20 @@ import (
 // requirements.md §2.1 for why reaching that status is itself an external
 // precondition this feature does not produce) and the service must exist in
 // the catalog.
-func (service *ServiceOrderService) StartExecution(ctx context.Context, serviceOrderID, serviceID uuid.UUID) (*ServiceExecution, error) {
+func (service *ServiceOrderService) StartExecution(ctx context.Context, serviceOrderID, serviceID uuid.UUID) (*domain.ServiceExecution, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusInProgress {
-		return nil, ErrInvalidStatusTransition
+	if order.Status != domain.StatusInProgress {
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
 	if _, err := service.lookups.findServiceByID(ctx, serviceID); err != nil {
 		return nil, err
 	}
 
-	execution, err := NewServiceExecution(order.ID, serviceID)
+	execution, err := domain.NewServiceExecution(order.ID, serviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,13 +42,13 @@ func (service *ServiceOrderService) StartExecution(ctx context.Context, serviceO
 // execution (BR3/BR4). endedAt is optional — nil means "now" (design.md
 // §2.2). The order must still be IN_PROGRESS (BR6: a finalized order accepts
 // no more finishes).
-func (service *ServiceOrderService) FinishExecution(ctx context.Context, serviceOrderID, executionID uuid.UUID, endedAt *time.Time) (*ServiceExecution, error) {
+func (service *ServiceOrderService) FinishExecution(ctx context.Context, serviceOrderID, executionID uuid.UUID, endedAt *time.Time) (*domain.ServiceExecution, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusInProgress {
-		return nil, ErrInvalidStatusTransition
+	if order.Status != domain.StatusInProgress {
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
 	execution, err := service.lookups.findServiceExecutionByID(ctx, serviceOrderID, executionID)
@@ -55,7 +56,7 @@ func (service *ServiceOrderService) FinishExecution(ctx context.Context, service
 		return nil, err
 	}
 
-	if err := execution.finish(endedAt); err != nil {
+	if err := execution.Finish(endedAt); err != nil {
 		return nil, err
 	}
 
@@ -68,7 +69,7 @@ func (service *ServiceOrderService) FinishExecution(ctx context.Context, service
 // FinalizeOrder transitions the order to COMPLETED once every required
 // execution — one per distinct service line item of its approved quote — is
 // complete (BR5, design.md §2.3).
-func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOrderID uuid.UUID) (*domain.ServiceOrder, error) {
 	order, _, err := service.finalizeOrder(ctx, serviceOrderID, "")
 	return order, err
 }
@@ -77,18 +78,18 @@ func (service *ServiceOrderService) FinalizeOrder(ctx context.Context, serviceOr
 // status update (specs/service-order-status-update/design.md §1): notes, if
 // non-empty, is appended to the history entry. It also returns the status
 // the order had before the transition.
-func (service *ServiceOrderService) finalizeOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
+func (service *ServiceOrderService) finalizeOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*domain.ServiceOrder, domain.Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, "", err
 	}
-	if order.Status != StatusInProgress {
-		return nil, "", ErrInvalidStatusTransition
+	if order.Status != domain.StatusInProgress {
+		return nil, "", domain.ErrInvalidStatusTransition
 	}
 	previousStatus := order.Status
 
 	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, serviceOrderID)
-	if err != nil && !errors.Is(err, ErrQuoteNotFound) {
+	if err != nil && !errors.Is(err, domain.ErrQuoteNotFound) {
 		return nil, "", err
 	}
 
@@ -98,7 +99,7 @@ func (service *ServiceOrderService) finalizeOrder(ctx context.Context, serviceOr
 		}
 	}
 
-	if err := order.finalize(); err != nil {
+	if err := order.Finalize(); err != nil {
 		return nil, "", err
 	}
 	if err := service.repository.FinalizeOrder(ctx, order, notes); err != nil {
@@ -110,10 +111,10 @@ func (service *ServiceOrderService) finalizeOrder(ctx context.Context, serviceOr
 // ensureRequiredExecutionsComplete implements BR5: every distinct service id
 // among quote's QuoteItemService line items must have at least one execution
 // with a recorded end date.
-func (service *ServiceOrderService) ensureRequiredExecutionsComplete(ctx context.Context, serviceOrderID uuid.UUID, quote *Quote) error {
+func (service *ServiceOrderService) ensureRequiredExecutionsComplete(ctx context.Context, serviceOrderID uuid.UUID, quote *domain.Quote) error {
 	required := make(map[uuid.UUID]bool)
 	for _, item := range quote.Items {
-		if item.Kind == QuoteItemService {
+		if item.Kind == domain.QuoteItemService {
 			required[item.ServiceID] = true
 		}
 	}
@@ -134,14 +135,14 @@ func (service *ServiceOrderService) ensureRequiredExecutionsComplete(ctx context
 
 	for serviceID := range required {
 		if !completed[serviceID] {
-			return ErrExecutionsNotCompleted
+			return domain.ErrExecutionsNotCompleted
 		}
 	}
 	return nil
 }
 
 // DeliverOrder transitions a COMPLETED order to DELIVERED (BR7).
-func (service *ServiceOrderService) DeliverOrder(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+func (service *ServiceOrderService) DeliverOrder(ctx context.Context, serviceOrderID uuid.UUID) (*domain.ServiceOrder, error) {
 	order, _, err := service.deliverOrder(ctx, serviceOrderID, "")
 	return order, err
 }
@@ -150,14 +151,14 @@ func (service *ServiceOrderService) DeliverOrder(ctx context.Context, serviceOrd
 // status update (specs/service-order-status-update/design.md §1): notes, if
 // non-empty, is appended to the history entry. It also returns the status
 // the order had before the transition.
-func (service *ServiceOrderService) deliverOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
+func (service *ServiceOrderService) deliverOrder(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*domain.ServiceOrder, domain.Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, "", err
 	}
 	previousStatus := order.Status
 
-	if err := order.deliver(); err != nil {
+	if err := order.Deliver(); err != nil {
 		return nil, "", err
 	}
 	if err := service.repository.DeliverOrder(ctx, order, notes); err != nil {

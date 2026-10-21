@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 	"log"
@@ -13,7 +14,7 @@ import (
 
 // StartDiagnosis transitions a service order from RECEIVED to
 // IN_DIAGNOSIS (requirements.md §3.1).
-func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceOrderID uuid.UUID) (*ServiceOrder, error) {
+func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceOrderID uuid.UUID) (*domain.ServiceOrder, error) {
 	order, _, err := service.startDiagnosis(ctx, serviceOrderID, "")
 	return order, err
 }
@@ -22,14 +23,14 @@ func (service *ServiceOrderService) StartDiagnosis(ctx context.Context, serviceO
 // status update (specs/service-order-status-update/design.md §1): notes, if
 // non-empty, is appended to the history entry. It also returns the status
 // the order had before the transition.
-func (service *ServiceOrderService) startDiagnosis(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*ServiceOrder, Status, error) {
+func (service *ServiceOrderService) startDiagnosis(ctx context.Context, serviceOrderID uuid.UUID, notes string) (*domain.ServiceOrder, domain.Status, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, "", err
 	}
 	previousStatus := order.Status
 
-	if err := order.startDiagnosis(); err != nil {
+	if err := order.StartDiagnosis(); err != nil {
 		return nil, "", err
 	}
 
@@ -46,31 +47,31 @@ func (service *ServiceOrderService) startDiagnosis(ctx context.Context, serviceO
 // specs/service-order-quote-decision/ moved that transition to SendQuote,
 // which owns the explicit "send to customer" step; composing/recomposing
 // only requires diagnosis to have started (order not RECEIVED).
-func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrderID uuid.UUID, inputs []QuoteItemInput) (*Quote, error) {
+func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrderID uuid.UUID, inputs []QuoteItemInput) (*domain.Quote, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status == StatusReceived {
-		return nil, ErrDiagnosisNotStarted
+	if order.Status == domain.StatusReceived {
+		return nil, domain.ErrDiagnosisNotStarted
 	}
 
 	existing, err := service.repository.FindQuoteByServiceOrderID(ctx, serviceOrderID)
-	if err != nil && !errors.Is(err, ErrQuoteNotFound) {
+	if err != nil && !errors.Is(err, domain.ErrQuoteNotFound) {
 		return nil, err
 	}
-	if existing != nil && existing.Status != QuoteStatusPending {
-		return nil, ErrQuoteAlreadyDecided
+	if existing != nil && existing.Status != domain.QuoteStatusPending {
+		return nil, domain.ErrQuoteAlreadyDecided
 	}
 
 	items, err := service.resolveQuoteItems(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateQuoteItems(items); err != nil {
+	if err := domain.ValidateQuoteItems(items); err != nil {
 		return nil, err
 	}
-	total := calculateTotal(items)
+	total := domain.CalculateTotal(items)
 
 	return service.repository.SaveQuote(ctx, order, items, total)
 }
@@ -79,7 +80,7 @@ func (service *ServiceOrderService) ComposeQuote(ctx context.Context, serviceOrd
 // (specs/service-order-quote-decision/requirements.md): only a complete
 // quote (at least one item) can be sent, and only while the order is
 // IN_DIAGNOSIS — sending is what moves it to AWAITING_APPROVAL.
-func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error) {
+func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
@@ -89,11 +90,11 @@ func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderI
 	if err != nil {
 		return nil, err
 	}
-	if err := validateQuoteItems(quote.Items); err != nil {
+	if err := domain.ValidateQuoteItems(quote.Items); err != nil {
 		return nil, err
 	}
 
-	if err := order.sendQuote(); err != nil {
+	if err := order.SendQuote(); err != nil {
 		return nil, err
 	}
 
@@ -112,7 +113,7 @@ func (service *ServiceOrderService) SendQuote(ctx context.Context, serviceOrderI
 // send (specs/service-order-quote-decision/requirements.md §4 item 10). There
 // is no retry or outbox — a failure is only logged. The log carries the order
 // code and an outcome only, never the recipient, name, token or credentials.
-func (service *ServiceOrderService) notifyQuoteSent(ctx context.Context, order *ServiceOrder, quote *Quote) {
+func (service *ServiceOrderService) notifyQuoteSent(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote) {
 	customer, err := service.lookups.findCustomerByID(ctx, order.CustomerID)
 	if err != nil {
 		log.Printf("quote notification: order %d: customer lookup failed", order.Code)
@@ -141,23 +142,23 @@ func (service *ServiceOrderService) notifyQuoteSent(ctx context.Context, order *
 // specs/service-order-tracking/ established. Approving moves the order to
 // IN_PROGRESS. Returns the updated order alongside the quote since the
 // public response reports both statuses.
-func (service *ServiceOrderService) ApproveQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
+func (service *ServiceOrderService) ApproveQuote(ctx context.Context, code int64, rawTrackingToken string) (*domain.ServiceOrder, *domain.Quote, error) {
 	order, err := service.resolveOrderByTrackingToken(ctx, code, rawTrackingToken)
 	if err != nil {
 		return nil, nil, err
 	}
-	return service.decideQuote(ctx, order, QuoteStatusApproved)
+	return service.decideQuote(ctx, order, domain.QuoteStatusApproved)
 }
 
 // RejectQuote records the customer's rejection of the service order's
 // quote, identified and authenticated the same way as ApproveQuote.
 // Rejecting moves the order to CANCELED.
-func (service *ServiceOrderService) RejectQuote(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, *Quote, error) {
+func (service *ServiceOrderService) RejectQuote(ctx context.Context, code int64, rawTrackingToken string) (*domain.ServiceOrder, *domain.Quote, error) {
 	order, err := service.resolveOrderByTrackingToken(ctx, code, rawTrackingToken)
 	if err != nil {
 		return nil, nil, err
 	}
-	return service.decideQuote(ctx, order, QuoteStatusRejected)
+	return service.decideQuote(ctx, order, domain.QuoteStatusRejected)
 }
 
 // DecideQuoteExternal records a decision relayed by an external system
@@ -167,9 +168,9 @@ func (service *ServiceOrderService) RejectQuote(ctx context.Context, code int64,
 // technical id, since no tracking token exists on this path, and the
 // decision then goes through exactly the same decideQuote core as the
 // customer-facing channel — same preconditions, same transaction.
-func (service *ServiceOrderService) DecideQuoteExternal(ctx context.Context, serviceOrderID uuid.UUID, decision QuoteStatus) (*ServiceOrder, *Quote, error) {
-	if decision != QuoteStatusApproved && decision != QuoteStatusRejected {
-		return nil, nil, ErrInvalidQuoteDecision
+func (service *ServiceOrderService) DecideQuoteExternal(ctx context.Context, serviceOrderID uuid.UUID, decision domain.QuoteStatus) (*domain.ServiceOrder, *domain.Quote, error) {
+	if decision != domain.QuoteStatusApproved && decision != domain.QuoteStatusRejected {
+		return nil, nil, domain.ErrInvalidQuoteDecision
 	}
 
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
@@ -192,9 +193,9 @@ func (service *ServiceOrderService) AuthenticateExternalNotification(presented s
 // (ErrServiceOrderNotFound for an unknown code, ErrTrackingTokenInvalid for
 // a missing/wrong/foreign/revoked token — so a customer can never respond to
 // another order's quote).
-func (service *ServiceOrderService) resolveOrderByTrackingToken(ctx context.Context, code int64, rawTrackingToken string) (*ServiceOrder, error) {
+func (service *ServiceOrderService) resolveOrderByTrackingToken(ctx context.Context, code int64, rawTrackingToken string) (*domain.ServiceOrder, error) {
 	if strings.TrimSpace(rawTrackingToken) == "" {
-		return nil, ErrTrackingTokenInvalid
+		return nil, domain.ErrTrackingTokenInvalid
 	}
 	return service.lookups.findServiceOrderByCodeWithTrackingToken(ctx, code, trackingtoken.Hash(rawTrackingToken))
 }
@@ -205,20 +206,20 @@ func (service *ServiceOrderService) resolveOrderByTrackingToken(ctx context.Cont
 // (ErrQuoteAlreadyDecided otherwise — the same outcome whether this is a
 // second, different decision or a repeat of the same one), then apply and
 // persist the decision in DecideQuote's single transaction (RNF07).
-func (service *ServiceOrderService) decideQuote(ctx context.Context, order *ServiceOrder, decision QuoteStatus) (*ServiceOrder, *Quote, error) {
+func (service *ServiceOrderService) decideQuote(ctx context.Context, order *domain.ServiceOrder, decision domain.QuoteStatus) (*domain.ServiceOrder, *domain.Quote, error) {
 	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, order.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if quote.Status != QuoteStatusPending {
-		return nil, nil, ErrQuoteAlreadyDecided
+	if quote.Status != domain.QuoteStatusPending {
+		return nil, nil, domain.ErrQuoteAlreadyDecided
 	}
 
 	var transitionErr error
-	if decision == QuoteStatusApproved {
-		transitionErr = order.approveQuote()
+	if decision == domain.QuoteStatusApproved {
+		transitionErr = order.ApproveQuote()
 	} else {
-		transitionErr = order.rejectQuote()
+		transitionErr = order.RejectQuote()
 	}
 	if transitionErr != nil {
 		return nil, nil, transitionErr
@@ -232,7 +233,7 @@ func (service *ServiceOrderService) decideQuote(ctx context.Context, order *Serv
 }
 
 // GetQuote reads the current quote and its items for a service order.
-func (service *ServiceOrderService) GetQuote(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error) {
+func (service *ServiceOrderService) GetQuote(ctx context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error) {
 	if _, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID); err != nil {
 		return nil, err
 	}
@@ -242,24 +243,24 @@ func (service *ServiceOrderService) GetQuote(ctx context.Context, serviceOrderID
 // resolveQuoteItems resolves and prices every raw input against the
 // catalog, building the immutable snapshot each QuoteItem persists
 // (requirements.md §3.5, §3.11, §3.12).
-func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, inputs []QuoteItemInput) ([]QuoteItem, error) {
-	items := make([]QuoteItem, 0, len(inputs))
+func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, inputs []QuoteItemInput) ([]domain.QuoteItem, error) {
+	items := make([]domain.QuoteItem, 0, len(inputs))
 	for _, input := range inputs {
 		switch input.Kind {
-		case QuoteItemProduct:
+		case domain.QuoteItemProduct:
 			id, err := uuid.Parse(input.ProductID)
 			if err != nil {
-				return nil, ErrProductNotFound
+				return nil, domain.ErrProductNotFound
 			}
 			product, err := service.lookups.findActiveProductByID(ctx, id)
 			if err != nil {
 				return nil, err
 			}
 			if !product.Active {
-				return nil, ErrProductInactive
+				return nil, domain.ErrProductInactive
 			}
-			items = append(items, QuoteItem{
-				Kind:        QuoteItemProduct,
+			items = append(items, domain.QuoteItem{
+				Kind:        domain.QuoteItemProduct,
 				ProductID:   product.ID,
 				Description: product.Description,
 				Quantity:    input.Quantity,
@@ -267,17 +268,17 @@ func (service *ServiceOrderService) resolveQuoteItems(ctx context.Context, input
 				Total:       float64(input.Quantity) * product.UnitPrice,
 			})
 
-		case QuoteItemService:
+		case domain.QuoteItemService:
 			id, err := uuid.Parse(input.ServiceID)
 			if err != nil {
-				return nil, ErrRequestedServiceNotFound
+				return nil, domain.ErrRequestedServiceNotFound
 			}
 			catalogService, err := service.lookups.findServiceByID(ctx, id)
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, QuoteItem{
-				Kind:        QuoteItemService,
+			items = append(items, domain.QuoteItem{
+				Kind:        domain.QuoteItemService,
 				ServiceID:   catalogService.ID,
 				Description: catalogService.Description,
 				Quantity:    input.Quantity,

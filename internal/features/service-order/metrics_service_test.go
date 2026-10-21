@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"testing"
 	"time"
@@ -14,8 +15,8 @@ import (
 // in-progress) execution of serviceID within a fresh order, started at
 // startedAt.
 func seedExecution(repo *fakeRepository, customerID, vehicleID, serviceID uuid.UUID, startedAt time.Time, endedAt *time.Time) {
-	order := seedListOrder(repo, customerID, vehicleID, StatusInProgress, startedAt)
-	execution := &ServiceExecution{
+	order := seedListOrder(repo, customerID, vehicleID, domain.StatusInProgress, startedAt)
+	execution := &domain.ServiceExecution{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
 		ServiceID:      serviceID,

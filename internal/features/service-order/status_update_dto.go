@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"strings"
 	"unicode/utf8"
 
@@ -20,7 +21,7 @@ type ExternalStatusUpdateRequest struct {
 // maxStatusUpdateNotesLength. UpdateStatusExternal repeats both checks.
 func (request ExternalStatusUpdateRequest) Validate() []apierror.Detail {
 	var details []apierror.Detail
-	if !isExternalStatusTarget(Status(request.Status)) {
+	if !isExternalStatusTarget(domain.Status(request.Status)) {
 		details = append(details, apierror.Detail{Field: "status", Message: "status must be one of IN_DIAGNOSIS, COMPLETED, DELIVERED"})
 	}
 	if utf8.RuneCountInString(strings.TrimSpace(request.Notes)) > maxStatusUpdateNotesLength {

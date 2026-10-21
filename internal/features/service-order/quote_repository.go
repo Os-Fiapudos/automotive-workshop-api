@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 
@@ -26,8 +27,8 @@ type productRef struct {
 // findServiceOrderByID loads a ServiceOrder by id, used by StartDiagnosis
 // and ComposeQuote/GetQuote to resolve the order before validating a status
 // transition.
-func (repository *PostgresServiceOrderRepository) findServiceOrderByID(ctx context.Context, id uuid.UUID) (*ServiceOrder, error) {
-	order := &ServiceOrder{}
+func (repository *PostgresServiceOrderRepository) findServiceOrderByID(ctx context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
+	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
 		 FROM service_orders WHERE id = $1`, id,
@@ -35,7 +36,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByID(ctx conte
 		&order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrServiceOrderNotFound
+			return nil, domain.ErrServiceOrderNotFound
 		}
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func (repository *PostgresServiceOrderRepository) findActiveProductByID(ctx cont
 	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.UnitPrice, &ref.Active)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrProductNotFound
+			return nil, domain.ErrProductNotFound
 		}
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Co
 	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.Price)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrRequestedServiceNotFound
+			return nil, domain.ErrRequestedServiceNotFound
 		}
 		return nil, err
 	}
@@ -81,7 +82,7 @@ func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Co
 // transition: zero rows affected is treated the same as the pre-checked
 // ErrInvalidStatusTransition. notes, if non-empty, is appended to the
 // history description (specs/service-order-status-update/design.md §2).
-func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Context, order *ServiceOrder, notes string) error {
+func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Context, order *domain.ServiceOrder, notes string) error {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -96,13 +97,13 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrInvalidStatusTransition
+		return domain.ErrInvalidStatusTransition
 	}
 
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO service_order_history (service_order_id, event, description, previous_status, new_status)
 		 VALUES ($1, 'diagnosis_started', $2, 'RECEIVED', $3)`,
-		order.ID, historyDescription(historyDiagnosisStarted, notes), string(order.Status),
+		order.ID, domain.HistoryDescription(domain.HistoryDiagnosisStarted, notes), string(order.Status),
 	); err != nil {
 		return err
 	}
@@ -117,14 +118,14 @@ func (repository *PostgresServiceOrderRepository) StartDiagnosis(ctx context.Con
 // status — specs/service-order-quote-decision/ moved the
 // IN_DIAGNOSIS -> AWAITING_APPROVAL transition to SendQuote, since that
 // feature introduced an explicit "send" step distinct from composition.
-func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context, order *ServiceOrder, items []QuoteItem, total float64) (*Quote, error) {
+func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
-	quote := &Quote{ServiceOrderID: order.ID, TotalAmount: total, Status: QuoteStatusPending}
+	quote := &domain.Quote{ServiceOrderID: order.ID, TotalAmount: total, Status: domain.QuoteStatusPending}
 	err = tx.QueryRow(ctx,
 		`INSERT INTO quotes (service_order_id, total_amount)
 		 VALUES ($1, $2)
@@ -145,7 +146,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 
 	for _, item := range items {
 		switch item.Kind {
-		case QuoteItemProduct:
+		case domain.QuoteItemProduct:
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_products (quote_id, product_id, quantity, applied_description, applied_unit_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -153,7 +154,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 			); err != nil {
 				return nil, err
 			}
-		case QuoteItemService:
+		case domain.QuoteItemService:
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_services (quote_id, service_id, quantity, applied_description, applied_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -185,7 +186,7 @@ func (repository *PostgresServiceOrderRepository) SaveQuote(ctx context.Context,
 // records quote as sent, transactionally (RNF07). The
 // "AND status = 'IN_DIAGNOSIS'" guard closes a race with a concurrent
 // transition, same pattern as StartDiagnosis.
-func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context, order *ServiceOrder, quote *Quote) (*Quote, error) {
+func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote) (*domain.Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -200,7 +201,7 @@ func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context,
 		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, ErrInvalidStatusTransition
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
 	if err := tx.QueryRow(ctx,
@@ -230,8 +231,8 @@ func (repository *PostgresServiceOrderRepository) SendQuote(ctx context.Context,
 // event value — 'approval' for APPROVED, 'cancellation' for REJECTED (both
 // values already existed in the history_event enum, unused until this
 // feature became their first producer).
-func decisionEventFor(decision QuoteStatus) string {
-	if decision == QuoteStatusApproved {
+func decisionEventFor(decision domain.QuoteStatus) string {
+	if decision == domain.QuoteStatusApproved {
 		return "approval"
 	}
 	return "cancellation"
@@ -248,7 +249,7 @@ func decisionEventFor(decision QuoteStatus) string {
 // after reject, or a repeated identical decision) affect zero rows, which is
 // reported as ErrQuoteAlreadyDecided — the same outcome regardless of
 // whether the second attempt matches the first decision or not.
-func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Context, order *ServiceOrder, quote *Quote, decision QuoteStatus) (*Quote, error) {
+func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote, decision domain.QuoteStatus) (*domain.Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -261,7 +262,7 @@ func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Contex
 		quote.ID, string(decision),
 	).Scan(&quote.RespondedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrQuoteAlreadyDecided
+			return nil, domain.ErrQuoteAlreadyDecided
 		}
 		return nil, err
 	}
@@ -275,11 +276,11 @@ func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Contex
 		return nil, err
 	}
 	if tag.RowsAffected() == 0 {
-		return nil, ErrInvalidStatusTransition
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
 	description := "Customer approved the quote."
-	if decision == QuoteStatusRejected {
+	if decision == domain.QuoteStatusRejected {
 		description = "Customer rejected the quote."
 	}
 	if _, err := tx.Exec(ctx,
@@ -300,15 +301,15 @@ func (repository *PostgresServiceOrderRepository) DecideQuote(ctx context.Contex
 // FindQuoteByServiceOrderID loads the current quote and its items for an
 // order. Returns ErrQuoteNotFound if no quote has been composed yet (a
 // real, expected state — see docs/seed.sql order 4).
-func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*Quote, error) {
-	quote := &Quote{ServiceOrderID: serviceOrderID}
+func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error) {
+	quote := &domain.Quote{ServiceOrderID: serviceOrderID}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, total_amount, status, version, generated_at, sent_at, sent_version, responded_at, created_at, updated_at
 		 FROM quotes WHERE service_order_id = $1`, serviceOrderID,
 	).Scan(&quote.ID, &quote.Code, &quote.TotalAmount, &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrQuoteNotFound
+			return nil, domain.ErrQuoteNotFound
 		}
 		return nil, err
 	}
@@ -320,7 +321,7 @@ func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx 
 		return nil, err
 	}
 	for productRows.Next() {
-		item := QuoteItem{Kind: QuoteItemProduct}
+		item := domain.QuoteItem{Kind: domain.QuoteItemProduct}
 		if err := productRows.Scan(&item.ProductID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
 			productRows.Close()
 			return nil, err
@@ -339,7 +340,7 @@ func (repository *PostgresServiceOrderRepository) FindQuoteByServiceOrderID(ctx 
 		return nil, err
 	}
 	for serviceRows.Next() {
-		item := QuoteItem{Kind: QuoteItemService}
+		item := domain.QuoteItem{Kind: domain.QuoteItemService}
 		if err := serviceRows.Scan(&item.ServiceID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
 			serviceRows.Close()
 			return nil, err

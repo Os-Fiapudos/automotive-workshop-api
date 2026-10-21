@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 	"time"
@@ -25,7 +26,7 @@ type ListFilter struct {
 // order with the customer/vehicle display data the response needs
 // (design.md §1.8).
 type ServiceOrderListItem struct {
-	Order    *ServiceOrder
+	Order    *domain.ServiceOrder
 	Customer *customerRef
 	Vehicle  *vehicleRef
 }
@@ -33,12 +34,12 @@ type ServiceOrderListItem struct {
 // ServiceOrderDetail is the full read model for a single service order
 // (design.md §1.8). Quote is nil when no quote has been composed yet.
 type ServiceOrderDetail struct {
-	Order             *ServiceOrder
+	Order             *domain.ServiceOrder
 	Customer          *customerRef
 	Vehicle           *vehicleRef
 	RequestedServices []*serviceRef
-	Quote             *Quote
-	History           []*ServiceOrderHistory
+	Quote             *domain.Quote
+	History           []*domain.ServiceOrderHistory
 }
 
 // List retrieves a filtered, paginated page of service orders. With no
@@ -74,7 +75,7 @@ func (service *ServiceOrderService) GetDetailByCode(ctx context.Context, code in
 // filters any related record by status/active (requirements.md BR6) — an
 // inactive customer/vehicle or an order with no quote yet are both valid,
 // fully-displayed states, not errors.
-func (service *ServiceOrderService) buildDetail(ctx context.Context, order *ServiceOrder) (*ServiceOrderDetail, error) {
+func (service *ServiceOrderService) buildDetail(ctx context.Context, order *domain.ServiceOrder) (*ServiceOrderDetail, error) {
 	customer, err := service.lookups.findCustomerByID(ctx, order.CustomerID)
 	if err != nil {
 		return nil, err
@@ -96,10 +97,10 @@ func (service *ServiceOrderService) buildDetail(ctx context.Context, order *Serv
 	}
 
 	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, order.ID)
-	if err != nil && !errors.Is(err, ErrQuoteNotFound) {
+	if err != nil && !errors.Is(err, domain.ErrQuoteNotFound) {
 		return nil, err
 	}
-	if errors.Is(err, ErrQuoteNotFound) {
+	if errors.Is(err, domain.ErrQuoteNotFound) {
 		quote = nil
 	}
 

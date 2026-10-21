@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"strings"
 	"testing"
@@ -14,12 +15,12 @@ import (
 
 func TestUpdateStatusExternalDispatchesEachSupportedStatus(t *testing.T) {
 	cases := []struct {
-		from, to    Status
+		from, to    domain.Status
 		event, text string
 	}{
-		{StatusReceived, StatusInDiagnosis, "diagnosis_started", historyDiagnosisStarted},
-		{StatusInProgress, StatusCompleted, "completion", historyOrderFinalized},
-		{StatusCompleted, StatusDelivered, "delivery", historyVehicleDelivered},
+		{domain.StatusReceived, domain.StatusInDiagnosis, "diagnosis_started", domain.HistoryDiagnosisStarted},
+		{domain.StatusInProgress, domain.StatusCompleted, "completion", domain.HistoryOrderFinalized},
+		{domain.StatusCompleted, domain.StatusDelivered, "delivery", domain.HistoryVehicleDelivered},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.to), func(t *testing.T) {
@@ -45,9 +46,9 @@ func TestUpdateStatusExternalDispatchesEachSupportedStatus(t *testing.T) {
 func TestUpdateStatusExternalPersistsTrimmedNotes(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, StatusInDiagnosis, "  Vehicle on lift 2  ")
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, "  Vehicle on lift 2  ")
 	require.NoError(t, err)
 
 	history := repo.history[order.ID]
@@ -58,23 +59,23 @@ func TestUpdateStatusExternalPersistsTrimmedNotes(t *testing.T) {
 func TestUpdateStatusExternalBlankNotesAreAbsent(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusCompleted)
+	order := seedOrder(repo, domain.StatusCompleted)
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, StatusDelivered, "   ")
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusDelivered, "   ")
 	require.NoError(t, err)
-	assert.Equal(t, historyVehicleDelivered, repo.history[order.ID][0].Description)
+	assert.Equal(t, domain.HistoryVehicleDelivered, repo.history[order.ID][0].Description)
 }
 
 func TestUpdateStatusExternalRejectsUnsupportedStatuses(t *testing.T) {
-	for _, status := range []Status{StatusReceived, StatusAwaitingApproval, StatusInProgress, StatusCanceled, "UNKNOWN", ""} {
+	for _, status := range []domain.Status{domain.StatusReceived, domain.StatusAwaitingApproval, domain.StatusInProgress, domain.StatusCanceled, "UNKNOWN", ""} {
 		t.Run(string(status), func(t *testing.T) {
 			repo := newFakeRepository()
 			service := newTestService(repo)
-			order := seedOrder(repo, StatusReceived)
+			order := seedOrder(repo, domain.StatusReceived)
 
 			_, err := service.UpdateStatusExternal(context.Background(), order.ID, status, "")
-			assert.ErrorIs(t, err, ErrUnsupportedExternalStatus)
-			assert.Equal(t, StatusReceived, order.Status)
+			assert.ErrorIs(t, err, domain.ErrUnsupportedExternalStatus)
+			assert.Equal(t, domain.StatusReceived, order.Status)
 			assert.Empty(t, repo.history[order.ID])
 		})
 	}
@@ -84,15 +85,15 @@ func TestUpdateStatusExternalRejectsUnsupportedStatuses(t *testing.T) {
 // waiting for quote approval can be neither finalized nor delivered through
 // the external channel.
 func TestUpdateStatusExternalCannotSkipApproval(t *testing.T) {
-	for _, target := range []Status{StatusCompleted, StatusDelivered, StatusInDiagnosis} {
+	for _, target := range []domain.Status{domain.StatusCompleted, domain.StatusDelivered, domain.StatusInDiagnosis} {
 		t.Run(string(target), func(t *testing.T) {
 			repo := newFakeRepository()
 			service := newTestService(repo)
-			order := seedOrder(repo, StatusAwaitingApproval)
+			order := seedOrder(repo, domain.StatusAwaitingApproval)
 
 			_, err := service.UpdateStatusExternal(context.Background(), order.ID, target, "note")
-			assert.ErrorIs(t, err, ErrInvalidStatusTransition)
-			assert.Equal(t, StatusAwaitingApproval, order.Status)
+			assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+			assert.Equal(t, domain.StatusAwaitingApproval, order.Status)
 			assert.Empty(t, repo.history[order.ID])
 		})
 	}
@@ -101,11 +102,11 @@ func TestUpdateStatusExternalCannotSkipApproval(t *testing.T) {
 func TestUpdateStatusExternalDeliverOnReceivedIsInvalidTransition(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, StatusDelivered, "")
-	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
-	assert.Equal(t, StatusReceived, order.Status)
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusDelivered, "")
+	assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
+	assert.Equal(t, domain.StatusReceived, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 }
 
@@ -114,41 +115,41 @@ func TestUpdateStatusExternalDeliverOnReceivedIsInvalidTransition(t *testing.T) 
 func TestUpdateStatusExternalCompletedRequiresExecutions(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
-	repo.quotes[order.ID] = &Quote{
+	repo.quotes[order.ID] = &domain.Quote{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
-		Status:         QuoteStatusApproved,
-		Items:          []QuoteItem{{Kind: QuoteItemService, ServiceID: serviceID, Quantity: 1}},
+		Status:         domain.QuoteStatusApproved,
+		Items:          []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: serviceID, Quantity: 1}},
 	}
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, StatusCompleted, "")
-	assert.ErrorIs(t, err, ErrExecutionsNotCompleted)
-	assert.Equal(t, StatusInProgress, order.Status)
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusCompleted, "")
+	assert.ErrorIs(t, err, domain.ErrExecutionsNotCompleted)
+	assert.Equal(t, domain.StatusInProgress, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 }
 
 func TestUpdateStatusExternalUnknownOrder(t *testing.T) {
 	service := newTestService(newFakeRepository())
 
-	_, err := service.UpdateStatusExternal(context.Background(), uuid.New(), StatusInDiagnosis, "")
-	assert.ErrorIs(t, err, ErrServiceOrderNotFound)
+	_, err := service.UpdateStatusExternal(context.Background(), uuid.New(), domain.StatusInDiagnosis, "")
+	assert.ErrorIs(t, err, domain.ErrServiceOrderNotFound)
 }
 
 func TestUpdateStatusExternalNotesLength(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength+1))
-	assert.ErrorIs(t, err, ErrInvalidStatusUpdateNotes)
-	assert.Equal(t, StatusReceived, order.Status)
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength+1))
+	assert.ErrorIs(t, err, domain.ErrInvalidStatusUpdateNotes)
+	assert.Equal(t, domain.StatusReceived, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 
 	// Exactly the limit, counted in characters (not bytes), is accepted.
-	_, err = service.UpdateStatusExternal(context.Background(), order.ID, StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength))
+	_, err = service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength))
 	require.NoError(t, err)
 }
 
@@ -157,13 +158,13 @@ func TestUpdateStatusExternalNotesLength(t *testing.T) {
 func TestAdministrativeTransitionsKeepFixedDescriptions(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusReceived)
+	order := seedOrder(repo, domain.StatusReceived)
 
 	_, err := service.StartDiagnosis(context.Background(), order.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Diagnosis started.", repo.history[order.ID][0].Description)
 
-	order.Status = StatusInProgress
+	order.Status = domain.StatusInProgress
 	_, err = service.FinalizeOrder(context.Background(), order.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Service order finalized.", repo.history[order.ID][1].Description)

@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -88,10 +89,10 @@ func TestExternalDecisionMissingOrWrongSecret(t *testing.T) {
 	response := postExternalDecision(mux, "not-a-uuid", "wrong-secret", `{"decision":"approved"}`)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 
-	assert.Equal(t, StatusAwaitingApproval, order.Status)
+	assert.Equal(t, domain.StatusAwaitingApproval, order.Status)
 	quote, err := repo.FindQuoteByServiceOrderID(t.Context(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, QuoteStatusPending, quote.Status)
+	assert.Equal(t, domain.QuoteStatusPending, quote.Status)
 }
 
 // TestExternalDecisionInvalidDecision covers AC18.
@@ -104,7 +105,7 @@ func TestExternalDecisionInvalidDecision(t *testing.T) {
 		response := postExternalDecision(mux, order.ID.String(), testExternalSecret, body)
 		assert.Equal(t, http.StatusBadRequest, response.Code, body)
 	}
-	assert.Equal(t, StatusAwaitingApproval, order.Status)
+	assert.Equal(t, domain.StatusAwaitingApproval, order.Status)
 }
 
 func TestExternalDecisionRepeatIsConflict(t *testing.T) {
@@ -118,7 +119,7 @@ func TestExternalDecisionRepeatIsConflict(t *testing.T) {
 	response = postExternalDecision(mux, order.ID.String(), testExternalSecret, `{"decision":"rejected"}`)
 	assert.Equal(t, http.StatusConflict, response.Code)
 	assert.Contains(t, response.Body.String(), "QUOTE_ALREADY_DECIDED")
-	assert.Equal(t, StatusInProgress, order.Status)
+	assert.Equal(t, domain.StatusInProgress, order.Status)
 }
 
 // TestCustomerDecisionRoutesStillUnwrapped is the AC20 regression: the

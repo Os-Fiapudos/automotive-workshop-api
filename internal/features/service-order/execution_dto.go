@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"strings"
 	"time"
 
@@ -38,7 +39,7 @@ type ServiceExecutionResponse struct {
 	EndedAt        *time.Time `json:"endedAt,omitempty"`
 }
 
-func toServiceExecutionResponse(execution *ServiceExecution) ServiceExecutionResponse {
+func toServiceExecutionResponse(execution *domain.ServiceExecution) ServiceExecutionResponse {
 	return ServiceExecutionResponse{
 		ID:             execution.ID.String(),
 		ServiceOrderID: execution.ServiceOrderID.String(),

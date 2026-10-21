@@ -1,4 +1,4 @@
-package serviceorder
+package domain
 
 import (
 	"testing"
@@ -18,14 +18,14 @@ func newTestOrder(t *testing.T, status Status) *ServiceOrder {
 
 func TestStartDiagnosisFromReceived(t *testing.T) {
 	order := newTestOrder(t, StatusReceived)
-	require.NoError(t, order.startDiagnosis())
+	require.NoError(t, order.StartDiagnosis())
 	assert.Equal(t, StatusInDiagnosis, order.Status)
 }
 
 func TestStartDiagnosisRejectsNonReceived(t *testing.T) {
 	for _, status := range []Status{StatusInDiagnosis, StatusAwaitingApproval} {
 		order := newTestOrder(t, status)
-		err := order.startDiagnosis()
+		err := order.StartDiagnosis()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
@@ -34,14 +34,14 @@ func TestStartDiagnosisRejectsNonReceived(t *testing.T) {
 
 func TestSendQuoteFromInDiagnosis(t *testing.T) {
 	order := newTestOrder(t, StatusInDiagnosis)
-	require.NoError(t, order.sendQuote())
+	require.NoError(t, order.SendQuote())
 	assert.Equal(t, StatusAwaitingApproval, order.Status)
 }
 
 func TestSendQuoteRejectsNonInDiagnosis(t *testing.T) {
 	for _, status := range []Status{StatusReceived, StatusAwaitingApproval, StatusInProgress} {
 		order := newTestOrder(t, status)
-		err := order.sendQuote()
+		err := order.SendQuote()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
@@ -50,14 +50,14 @@ func TestSendQuoteRejectsNonInDiagnosis(t *testing.T) {
 
 func TestApproveQuoteFromAwaitingApproval(t *testing.T) {
 	order := newTestOrder(t, StatusAwaitingApproval)
-	require.NoError(t, order.approveQuote())
+	require.NoError(t, order.ApproveQuote())
 	assert.Equal(t, StatusInProgress, order.Status)
 }
 
 func TestApproveQuoteRejectsNonAwaitingApproval(t *testing.T) {
 	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
 		order := newTestOrder(t, status)
-		err := order.approveQuote()
+		err := order.ApproveQuote()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
@@ -66,14 +66,14 @@ func TestApproveQuoteRejectsNonAwaitingApproval(t *testing.T) {
 
 func TestRejectQuoteFromAwaitingApproval(t *testing.T) {
 	order := newTestOrder(t, StatusAwaitingApproval)
-	require.NoError(t, order.rejectQuote())
+	require.NoError(t, order.RejectQuote())
 	assert.Equal(t, StatusCanceled, order.Status)
 }
 
 func TestRejectQuoteRejectsNonAwaitingApproval(t *testing.T) {
 	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusInProgress} {
 		order := newTestOrder(t, status)
-		err := order.rejectQuote()
+		err := order.RejectQuote()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
 		assert.Equal(t, status, order.Status, "status must not change on a rejected transition")
@@ -81,14 +81,14 @@ func TestRejectQuoteRejectsNonAwaitingApproval(t *testing.T) {
 }
 
 func TestValidateQuoteItemsRejectsEmpty(t *testing.T) {
-	err := validateQuoteItems(nil)
+	err := ValidateQuoteItems(nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrEmptyQuote)
 }
 
 func TestValidateQuoteItemsRejectsInvalidQuantity(t *testing.T) {
 	items := []QuoteItem{{Kind: QuoteItemProduct, Quantity: 0, UnitPrice: 10, Total: 0}}
-	err := validateQuoteItems(items)
+	err := ValidateQuoteItems(items)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidQuantity)
 }
@@ -98,7 +98,7 @@ func TestValidateQuoteItemsAcceptsValidItems(t *testing.T) {
 		{Kind: QuoteItemProduct, Quantity: 2, UnitPrice: 10, Total: 20},
 		{Kind: QuoteItemService, Quantity: 1, UnitPrice: 80, Total: 80},
 	}
-	require.NoError(t, validateQuoteItems(items))
+	require.NoError(t, ValidateQuoteItems(items))
 }
 
 func TestCalculateTotalSumsItems(t *testing.T) {
@@ -107,7 +107,7 @@ func TestCalculateTotalSumsItems(t *testing.T) {
 		{Total: 48.50},
 		{Total: 129.90},
 	}
-	assert.InDelta(t, 214.30, calculateTotal(items), 0.0001)
+	assert.InDelta(t, 214.30, CalculateTotal(items), 0.0001)
 }
 
 func TestCalculateTotalManyItemsNoDrift(t *testing.T) {
@@ -115,9 +115,9 @@ func TestCalculateTotalManyItemsNoDrift(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		items = append(items, QuoteItem{Total: 0.10})
 	}
-	assert.InDelta(t, 100.0, calculateTotal(items), 0.0001)
+	assert.InDelta(t, 100.0, CalculateTotal(items), 0.0001)
 }
 
 func TestCalculateTotalEmpty(t *testing.T) {
-	assert.Equal(t, 0.0, calculateTotal(nil))
+	assert.Equal(t, 0.0, CalculateTotal(nil))
 }

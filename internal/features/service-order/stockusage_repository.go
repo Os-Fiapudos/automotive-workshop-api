@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 
@@ -19,7 +20,7 @@ import (
 // internal/features/product/repository.go's AdjustStock already established
 // for this exact race (BR8): Postgres serializes concurrent UPDATEs of the
 // same row, so a concurrent call can never observe a stale balance.
-func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error) {
+func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -29,26 +30,26 @@ func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context
 	var status string
 	if err := tx.QueryRow(ctx, `SELECT status FROM service_orders WHERE id = $1`, orderID).Scan(&status); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrServiceOrderNotFound
+			return nil, domain.ErrServiceOrderNotFound
 		}
 		return nil, err
 	}
-	if status != string(StatusInProgress) {
-		return nil, ErrInvalidStatusTransition
+	if status != string(domain.StatusInProgress) {
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
-	movements := make([]*StockMovement, 0, len(items))
+	movements := make([]*domain.StockMovement, 0, len(items))
 	for _, item := range items {
 		productID, err := uuid.Parse(item.ProductID)
 		if err != nil {
-			return nil, ErrProductNotFound
+			return nil, domain.ErrProductNotFound
 		}
 
-		movement := &StockMovement{
+		movement := &domain.StockMovement{
 			ID:             uuid.New(),
 			ProductID:      productID,
 			ServiceOrderID: &orderID,
-			Type:           StockMovementExit,
+			Type:           domain.StockMovementExit,
 			Quantity:       item.Quantity,
 		}
 
@@ -71,15 +72,15 @@ func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context
 				`SELECT status, current_stock FROM products WHERE id = $1`, productID,
 			).Scan(&productStatus, &currentStock)
 			if errors.Is(lookupErr, pgx.ErrNoRows) {
-				return nil, ErrProductNotFound
+				return nil, domain.ErrProductNotFound
 			}
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
 			if productStatus != "ACTIVE" {
-				return nil, ErrProductInactive
+				return nil, domain.ErrProductInactive
 			}
-			return nil, ErrInsufficientStock
+			return nil, domain.ErrInsufficientStock
 		}
 
 		if err := tx.QueryRow(ctx,
@@ -105,14 +106,14 @@ func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context
 // another order's movement by guessing its id), confirms it is an
 // unreversed EXIT, re-credits the product, and inserts the linked inverse
 // ENTRY movement, all in one transaction (RNF07, BR9).
-func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*StockMovement, error) {
+func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once Commit succeeds
 
-	var original StockMovement
+	var original domain.StockMovement
 	var typeStr string
 	err = tx.QueryRow(ctx,
 		`SELECT id, product_id, type, quantity FROM stock_movements WHERE id = $1 AND service_order_id = $2`,
@@ -120,12 +121,12 @@ func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx conte
 	).Scan(&original.ID, &original.ProductID, &typeStr, &original.Quantity)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrStockMovementNotFound
+			return nil, domain.ErrStockMovementNotFound
 		}
 		return nil, err
 	}
-	if typeStr != string(StockMovementExit) {
-		return nil, ErrStockMovementNotReversible
+	if typeStr != string(domain.StockMovementExit) {
+		return nil, domain.ErrStockMovementNotReversible
 	}
 
 	var alreadyReversed bool
@@ -135,14 +136,14 @@ func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx conte
 		return nil, err
 	}
 	if alreadyReversed {
-		return nil, ErrStockMovementAlreadyReversed
+		return nil, domain.ErrStockMovementAlreadyReversed
 	}
 
-	reversal := &StockMovement{
+	reversal := &domain.StockMovement{
 		ID:                 uuid.New(),
 		ProductID:          original.ProductID,
 		ServiceOrderID:     &orderID,
-		Type:               StockMovementEntry,
+		Type:               domain.StockMovementEntry,
 		Quantity:           original.Quantity,
 		ReversedMovementID: &movementID,
 	}
@@ -155,7 +156,7 @@ func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx conte
 		reversal.ProductID, reversal.Quantity,
 	).Scan(&reversal.PreviousStock, &reversal.NewStock); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrProductNotFound
+			return nil, domain.ErrProductNotFound
 		}
 		return nil, err
 	}
@@ -178,7 +179,7 @@ func (repository *PostgresServiceOrderRepository) ReverseStockMovement(ctx conte
 // ListStockMovements implements ServiceOrderRepository (design.md §4.3) — a
 // read, no transaction needed, same reasoning findServicesByIDs already
 // applies.
-func (repository *PostgresServiceOrderRepository) ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*StockMovement, error) {
+func (repository *PostgresServiceOrderRepository) ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, product_id, service_order_id, type, quantity, previous_stock, new_stock, reason, reversed_movement_id, occurred_at
 		 FROM stock_movements WHERE service_order_id = $1 ORDER BY occurred_at DESC`, orderID)
@@ -187,9 +188,9 @@ func (repository *PostgresServiceOrderRepository) ListStockMovements(ctx context
 	}
 	defer rows.Close()
 
-	var movements []*StockMovement
+	var movements []*domain.StockMovement
 	for rows.Next() {
-		movement := &StockMovement{}
+		movement := &domain.StockMovement{}
 		var typeStr string
 		var reason *string
 		if err := rows.Scan(
@@ -199,7 +200,7 @@ func (repository *PostgresServiceOrderRepository) ListStockMovements(ctx context
 		); err != nil {
 			return nil, err
 		}
-		movement.Type = StockMovementType(typeStr)
+		movement.Type = domain.StockMovementType(typeStr)
 		if reason != nil {
 			movement.Reason = *reason
 		}

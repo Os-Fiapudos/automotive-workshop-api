@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"net/http"
 	"strconv"
 	"strings"
@@ -280,7 +281,7 @@ func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r
 	}
 	decision, ok := request.toQuoteStatus()
 	if !ok {
-		writeServiceError(w, ErrInvalidQuoteDecision)
+		writeServiceError(w, domain.ErrInvalidQuoteDecision)
 		return
 	}
 
@@ -319,7 +320,7 @@ func (handler *serviceOrderHandler) updateStatusExternal(w http.ResponseWriter, 
 		return
 	}
 
-	result, err := handler.service.UpdateStatusExternal(r.Context(), id, Status(request.Status), request.Notes)
+	result, err := handler.service.UpdateStatusExternal(r.Context(), id, domain.Status(request.Status), request.Notes)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -378,7 +379,7 @@ func parseListFilter(r *http.Request) (ListFilter, []apierror.Detail) {
 	}
 
 	if raw := strings.TrimSpace(query.Get("status")); raw != "" {
-		if !isKnownStatus(raw) {
+		if !domain.IsKnownStatus(raw) {
 			details = append(details, apierror.Detail{Field: "status", Message: "must be one of RECEIVED, IN_DIAGNOSIS, AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DELIVERED, CANCELED"})
 		} else {
 			filter.Status = &raw

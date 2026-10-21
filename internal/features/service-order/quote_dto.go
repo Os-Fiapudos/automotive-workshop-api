@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -57,9 +58,9 @@ func (request ComposeQuoteRequest) toInputs() []QuoteItemInput {
 	inputs := make([]QuoteItemInput, 0, len(request.Items))
 	for _, item := range request.Items {
 		if strings.TrimSpace(item.ProductID) != "" {
-			inputs = append(inputs, QuoteItemInput{Kind: QuoteItemProduct, ProductID: item.ProductID, Quantity: item.Quantity})
+			inputs = append(inputs, QuoteItemInput{Kind: domain.QuoteItemProduct, ProductID: item.ProductID, Quantity: item.Quantity})
 		} else {
-			inputs = append(inputs, QuoteItemInput{Kind: QuoteItemService, ServiceID: item.ServiceID, Quantity: item.Quantity})
+			inputs = append(inputs, QuoteItemInput{Kind: domain.QuoteItemService, ServiceID: item.ServiceID, Quantity: item.Quantity})
 		}
 	}
 	return inputs
@@ -91,7 +92,7 @@ type QuoteResponse struct {
 	RespondedAt    *time.Time          `json:"respondedAt,omitempty"`
 }
 
-func toQuoteResponse(quote *Quote) QuoteResponse {
+func toQuoteResponse(quote *domain.Quote) QuoteResponse {
 	items := make([]quoteItemResponse, 0, len(quote.Items))
 	for _, item := range quote.Items {
 		response := quoteItemResponse{
@@ -100,7 +101,7 @@ func toQuoteResponse(quote *Quote) QuoteResponse {
 			UnitPrice:   item.UnitPrice,
 			Total:       item.Total,
 		}
-		if item.Kind == QuoteItemProduct {
+		if item.Kind == domain.QuoteItemProduct {
 			response.ProductID = item.ProductID.String()
 		} else {
 			response.ServiceID = item.ServiceID.String()
@@ -136,7 +137,7 @@ type quoteDecisionResponse struct {
 	RespondedAt *time.Time `json:"respondedAt"`
 }
 
-func toQuoteDecisionResponse(order *ServiceOrder, quote *Quote) quoteDecisionResponse {
+func toQuoteDecisionResponse(order *domain.ServiceOrder, quote *domain.Quote) quoteDecisionResponse {
 	return quoteDecisionResponse{
 		Code:        order.Code,
 		QuoteStatus: string(quote.Status),
@@ -161,12 +162,12 @@ const (
 // toQuoteStatus maps the relayed decision onto the quote status it
 // produces; ok is false for anything other than exactly "approved" or
 // "rejected" (AC18).
-func (request ExternalQuoteDecisionRequest) toQuoteStatus() (QuoteStatus, bool) {
+func (request ExternalQuoteDecisionRequest) toQuoteStatus() (domain.QuoteStatus, bool) {
 	switch request.Decision {
 	case externalDecisionApproved:
-		return QuoteStatusApproved, true
+		return domain.QuoteStatusApproved, true
 	case externalDecisionRejected:
-		return QuoteStatusRejected, true
+		return domain.QuoteStatusRejected, true
 	default:
 		return "", false
 	}
@@ -181,6 +182,6 @@ type serviceOrderStatusResponse struct {
 	Status string `json:"status"`
 }
 
-func toServiceOrderStatusResponse(order *ServiceOrder) serviceOrderStatusResponse {
+func toServiceOrderStatusResponse(order *domain.ServiceOrder) serviceOrderStatusResponse {
 	return serviceOrderStatusResponse{ID: order.ID.String(), Status: string(order.Status)}
 }

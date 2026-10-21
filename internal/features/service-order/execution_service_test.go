@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 func TestStartExecutionSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -34,28 +35,28 @@ func TestStartExecutionRejectsWithoutApproval(t *testing.T) {
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
-	for _, status := range []Status{StatusReceived, StatusInDiagnosis, StatusAwaitingApproval, StatusCompleted, StatusDelivered} {
+	for _, status := range []domain.Status{domain.StatusReceived, domain.StatusInDiagnosis, domain.StatusAwaitingApproval, domain.StatusCompleted, domain.StatusDelivered} {
 		order := seedOrder(repo, status)
 		_, err := service.StartExecution(context.Background(), order.ID, serviceID)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+		assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
 	}
 }
 
 func TestStartExecutionRejectsUnknownService(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 
 	_, err := service.StartExecution(context.Background(), order.ID, uuid.New())
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrRequestedServiceNotFound)
+	assert.ErrorIs(t, err, domain.ErrRequestedServiceNotFound)
 }
 
 func TestFinishExecutionSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -71,7 +72,7 @@ func TestFinishExecutionSuccess(t *testing.T) {
 func TestFinishExecutionRejectsEndBeforeStart(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
@@ -81,17 +82,17 @@ func TestFinishExecutionRejectsEndBeforeStart(t *testing.T) {
 	before := execution.StartedAt.Add(-1 * time.Hour)
 	_, err = service.FinishExecution(context.Background(), order.ID, execution.ID, &before)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrServiceExecutionEndBeforeStart)
+	assert.ErrorIs(t, err, domain.ErrServiceExecutionEndBeforeStart)
 }
 
 func TestFinishExecutionRejectsUnknownExecution(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 
 	_, err := service.FinishExecution(context.Background(), order.ID, uuid.New(), nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrServiceExecutionNotFound)
+	assert.ErrorIs(t, err, domain.ErrServiceExecutionNotFound)
 }
 
 // TestFinishExecutionRejectsAfterFinalized covers BR6 ("uma OS finalizada
@@ -99,38 +100,38 @@ func TestFinishExecutionRejectsUnknownExecution(t *testing.T) {
 func TestFinishExecutionRejectsAfterFinalized(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
 
-	order.Status = StatusCompleted
+	order.Status = domain.StatusCompleted
 
 	_, err = service.FinishExecution(context.Background(), order.ID, execution.ID, nil)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
 }
 
 func TestFinalizeOrderSuccessWithoutQuote(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 
 	finalized, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusCompleted, finalized.Status)
+	assert.Equal(t, domain.StatusCompleted, finalized.Status)
 }
 
 func TestFinalizeOrderRejectsNonInProgress(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusAwaitingApproval)
+	order := seedOrder(repo, domain.StatusAwaitingApproval)
 
 	_, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
 }
 
 // TestFinalizeOrderRequiresCompletedExecutions covers BR5: every service
@@ -138,51 +139,51 @@ func TestFinalizeOrderRejectsNonInProgress(t *testing.T) {
 func TestFinalizeOrderRequiresCompletedExecutions(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
 	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
-	repo.quotes[order.ID] = &Quote{
+	repo.quotes[order.ID] = &domain.Quote{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
-		Status:         QuoteStatusApproved,
-		Items:          []QuoteItem{{Kind: QuoteItemService, ServiceID: serviceID, Quantity: 1}},
+		Status:         domain.QuoteStatusApproved,
+		Items:          []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: serviceID, Quantity: 1}},
 	}
 
 	_, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrExecutionsNotCompleted)
+	assert.ErrorIs(t, err, domain.ErrExecutionsNotCompleted)
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
 
 	_, err = service.FinalizeOrder(context.Background(), order.ID)
 	require.Error(t, err, "an execution that has started but not finished must still block finalization")
-	assert.ErrorIs(t, err, ErrExecutionsNotCompleted)
+	assert.ErrorIs(t, err, domain.ErrExecutionsNotCompleted)
 
 	_, err = service.FinishExecution(context.Background(), order.ID, execution.ID, nil)
 	require.NoError(t, err)
 
 	finalized, err := service.FinalizeOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusCompleted, finalized.Status)
+	assert.Equal(t, domain.StatusCompleted, finalized.Status)
 }
 
 func TestDeliverOrderSuccess(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusCompleted)
+	order := seedOrder(repo, domain.StatusCompleted)
 
 	delivered, err := service.DeliverOrder(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.Equal(t, StatusDelivered, delivered.Status)
+	assert.Equal(t, domain.StatusDelivered, delivered.Status)
 }
 
 func TestDeliverOrderRejectsNonCompleted(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
-	order := seedOrder(repo, StatusInProgress)
+	order := seedOrder(repo, domain.StatusInProgress)
 
 	_, err := service.DeliverOrder(context.Background(), order.ID)
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrInvalidStatusTransition)
+	assert.ErrorIs(t, err, domain.ErrInvalidStatusTransition)
 }

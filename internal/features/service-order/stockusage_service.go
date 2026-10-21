@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 
 	"github.com/google/uuid"
@@ -11,13 +12,13 @@ import (
 // existence/active/balance checks are not duplicated here — they are
 // enforced atomically by the repository's guarded UPDATE (design.md §3), to
 // avoid a check-then-act race with a concurrent request (BR8).
-func (service *ServiceOrderService) RegisterStockUsage(ctx context.Context, serviceOrderID uuid.UUID, items []StockUsageItem) ([]*StockMovement, error) {
+func (service *ServiceOrderService) RegisterStockUsage(ctx context.Context, serviceOrderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error) {
 	order, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status != StatusInProgress {
-		return nil, ErrInvalidStatusTransition
+	if order.Status != domain.StatusInProgress {
+		return nil, domain.ErrInvalidStatusTransition
 	}
 
 	if err := validateStockUsageItems(items); err != nil {
@@ -29,7 +30,7 @@ func (service *ServiceOrderService) RegisterStockUsage(ctx context.Context, serv
 
 // ReverseStockMovement reverses a previously registered usage movement
 // belonging to serviceOrderID, restoring the deducted quantity (BR9).
-func (service *ServiceOrderService) ReverseStockMovement(ctx context.Context, serviceOrderID, movementID uuid.UUID) (*StockMovement, error) {
+func (service *ServiceOrderService) ReverseStockMovement(ctx context.Context, serviceOrderID, movementID uuid.UUID) (*domain.StockMovement, error) {
 	if _, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID); err != nil {
 		return nil, err
 	}
@@ -38,7 +39,7 @@ func (service *ServiceOrderService) ReverseStockMovement(ctx context.Context, se
 
 // ListStockMovements reads every stock movement recorded against a service
 // order.
-func (service *ServiceOrderService) ListStockMovements(ctx context.Context, serviceOrderID uuid.UUID) ([]*StockMovement, error) {
+func (service *ServiceOrderService) ListStockMovements(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.StockMovement, error) {
 	if _, err := service.lookups.findServiceOrderByID(ctx, serviceOrderID); err != nil {
 		return nil, err
 	}

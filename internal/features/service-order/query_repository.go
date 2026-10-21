@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 	"strconv"
@@ -12,8 +13,8 @@ import (
 // findServiceOrderByCode loads a ServiceOrder by its sequential code,
 // findServiceOrderByID's counterpart for the code branch of
 // GET /api/v1/service-orders/{id} (design.md §1.2).
-func (repository *PostgresServiceOrderRepository) findServiceOrderByCode(ctx context.Context, code int64) (*ServiceOrder, error) {
-	order := &ServiceOrder{}
+func (repository *PostgresServiceOrderRepository) findServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error) {
+	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
 		 FROM service_orders WHERE code = $1`, code,
@@ -21,7 +22,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByCode(ctx con
 		&order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrServiceOrderNotFound
+			return nil, domain.ErrServiceOrderNotFound
 		}
 		return nil, err
 	}
@@ -57,7 +58,7 @@ func (repository *PostgresServiceOrderRepository) findRequestedServices(ctx cont
 
 // findHistoryByServiceOrderID loads a service order's full status-change
 // trail, oldest first (requirements.md BR4).
-func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*ServiceOrderHistory, error) {
+func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, occurred_at, event, description, previous_status, new_status
 		 FROM service_order_history
@@ -68,9 +69,9 @@ func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ct
 	}
 	defer rows.Close()
 
-	var history []*ServiceOrderHistory
+	var history []*domain.ServiceOrderHistory
 	for rows.Next() {
-		entry := &ServiceOrderHistory{}
+		entry := &domain.ServiceOrderHistory{}
 		if err := rows.Scan(&entry.ID, &entry.ServiceOrderID, &entry.OccurredAt, &entry.Event,
 			&entry.Description, &entry.PreviousStatus, &entry.NewStatus); err != nil {
 			return nil, err
@@ -161,7 +162,7 @@ func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.
 	var items []*ServiceOrderListItem
 	total := 0
 	for rows.Next() {
-		order := &ServiceOrder{}
+		order := &domain.ServiceOrder{}
 		customer := &customerRef{}
 		vehicle := &vehicleRef{}
 		if err := rows.Scan(
