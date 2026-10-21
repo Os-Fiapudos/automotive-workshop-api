@@ -87,6 +87,14 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   (`go.mod` `go 1.26.0`; CI `go-version: "1.26"` resolves to the latest 1.26 patch;
   `SCANNER_GO_VERSION` follows; Dockerfile `golang:1.26-alpine`). Notes above that mention
   1.25 are records of the decision at the time.
+  **Fixed on 2026-10-21**: "resolves to the latest 1.26 patch" only holds with
+  `check-latest: true` on every `actions/setup-go` step — without it, setup-go reuses the
+  1.26 patch cached in the runner image. The cached go1.26.9 failed the `security` job on a
+  `crypto/x509` advisory fixed in go1.26.10 (reachable from `cmd/api`'s
+  `server.ListenAndServe`), so all three jobs now set `check-latest: true`. Locally,
+  `govulncheck` reports for the installed toolchain: keep it on the latest 1.26 patch (or run
+  `GOTOOLCHAIN=go1.26.10 scripts/security-scan.sh`), and rebuild the image with
+  `docker compose build --pull` so `golang:1.26-alpine` is not a stale cached patch.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
   see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
   by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
