@@ -6,7 +6,7 @@ not to flag. Read it before the diff.
 
 **For AI-assisted review**, give the model this file, the three spec files next to it
 (`requirements.md` §7 takes precedence over §1–§6, `design.md` §9 over §1–§7), and the diff
-`git diff c6e4677...feature/F2-US01-clean-architecture-service-order`. Prompts are in §8.
+`git diff c6e4677...chore/F2-US01-clean-architecture-service-order`. Prompts are in §8.
 
 ## 1. What this change is
 
@@ -15,7 +15,9 @@ R01/R02) into `domain/`, `usecase/` and `adapter/{postgres,httpapi,notifier}/`, 
 dependencies pointing inward. It is **not** a feature change: no route, status code, JSON
 field, error code, SQL statement or business rule is supposed to change.
 
-- Base: `develop` at `c6e4677`.
+- Base: `c6e4677` (the `develop` commit this work started from). The PR targets
+  `fase-2/clean-architecture`, a long-lived Fase 2 line created at that same commit and
+  never merged into `develop`.
 - 12 commits (the last one adds this guide). Each refactor step is a separate commit that builds and passes tests on its
   own: spec → domain → usecase → postgres → httpapi+notifier → architecture test →
   coverage gate → other modules → docs → guard tests → evidence. Reviewing commit by commit
