@@ -18,7 +18,7 @@ field, error code, SQL statement or business rule is supposed to change.
 - Base: `c6e4677` (the `develop` commit this work started from). The PR targets
   `fase-2/clean-architecture`, a long-lived Fase 2 line created at that same commit and
   never merged into `develop`.
-- 12 commits (the last one adds this guide). Each refactor step is a separate commit that builds and passes tests on its
+- One commit per step (the PR description lists them). Each refactor step builds and passes tests on its
   own: spec → domain → usecase → postgres → httpapi+notifier → architecture test →
   coverage gate → other modules → docs → guard tests → evidence. Reviewing commit by commit
   is easier than reviewing the squashed diff.
