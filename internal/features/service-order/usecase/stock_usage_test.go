@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -15,7 +15,7 @@ func TestRegisterStockUsageSuccess(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
 	movements, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
@@ -35,7 +35,7 @@ func TestRegisterStockUsageRejectsWithoutInProgress(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
 	for _, status := range []domain.Status{domain.StatusReceived, domain.StatusInDiagnosis, domain.StatusAwaitingApproval, domain.StatusCompleted, domain.StatusDelivered} {
@@ -53,7 +53,7 @@ func TestRegisterStockUsageRejectsInvalidQuantity(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
 	_, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
@@ -78,7 +78,7 @@ func TestRegisterStockUsageRejectsInsufficientStock(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 2)
 
 	_, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
@@ -92,7 +92,7 @@ func TestRegisterStockUsageRejectsInactiveProduct(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: false})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: false})
 	repo.setProductStock(productID, 10)
 
 	_, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
@@ -106,7 +106,7 @@ func TestReverseStockMovementSuccess(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
 	movements, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{
@@ -129,7 +129,7 @@ func TestListStockMovements(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Active: true})
 	repo.setProductStock(productID, 10)
 
 	_, err := service.RegisterStockUsage(context.Background(), order.ID, []StockUsageItem{

@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -16,13 +16,13 @@ import (
 // framework, same convention as internal/features/customer/fake_repository_test.go.
 type fakeRepository struct {
 	orders            []*domain.ServiceOrder
-	customers         map[uuid.UUID]*customerRef
-	customersByDoc    map[string]*customerRef
-	vehicles          map[uuid.UUID]*vehicleRef
-	services          map[uuid.UUID]*serviceRef
-	products          map[uuid.UUID]*productRef
+	customers         map[uuid.UUID]*CustomerRef
+	customersByDoc    map[string]*CustomerRef
+	vehicles          map[uuid.UUID]*VehicleRef
+	services          map[uuid.UUID]*ServiceRef
+	products          map[uuid.UUID]*ProductRef
 	quotes            map[uuid.UUID]*domain.Quote                 // keyed by service order id
-	requestedServices map[uuid.UUID][]*serviceRef                 // keyed by service order id
+	requestedServices map[uuid.UUID][]*ServiceRef                 // keyed by service order id
 	history           map[uuid.UUID][]*domain.ServiceOrderHistory // keyed by service order id
 	executions        map[uuid.UUID][]*domain.ServiceExecution    // keyed by service order id
 	trackingTokens    map[uuid.UUID]string                        // keyed by service order id, value is the token hash
@@ -32,13 +32,13 @@ type fakeRepository struct {
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
-		customers:         make(map[uuid.UUID]*customerRef),
-		customersByDoc:    make(map[string]*customerRef),
-		vehicles:          make(map[uuid.UUID]*vehicleRef),
-		services:          make(map[uuid.UUID]*serviceRef),
-		products:          make(map[uuid.UUID]*productRef),
+		customers:         make(map[uuid.UUID]*CustomerRef),
+		customersByDoc:    make(map[string]*CustomerRef),
+		vehicles:          make(map[uuid.UUID]*VehicleRef),
+		services:          make(map[uuid.UUID]*ServiceRef),
+		products:          make(map[uuid.UUID]*ProductRef),
 		quotes:            make(map[uuid.UUID]*domain.Quote),
-		requestedServices: make(map[uuid.UUID][]*serviceRef),
+		requestedServices: make(map[uuid.UUID][]*ServiceRef),
 		history:           make(map[uuid.UUID][]*domain.ServiceOrderHistory),
 		executions:        make(map[uuid.UUID][]*domain.ServiceExecution),
 		trackingTokens:    make(map[uuid.UUID]string),
@@ -54,13 +54,13 @@ func (fake *fakeRepository) addTrackingToken(orderID uuid.UUID, tokenHash string
 	fake.trackingTokens[orderID] = tokenHash
 }
 
-func (fake *fakeRepository) addCustomer(ref *customerRef, document string) {
+func (fake *fakeRepository) addCustomer(ref *CustomerRef, document string) {
 	fake.customers[ref.ID] = ref
 	fake.customersByDoc[document] = ref
 }
-func (fake *fakeRepository) addVehicle(ref *vehicleRef) { fake.vehicles[ref.ID] = ref }
-func (fake *fakeRepository) addService(ref *serviceRef) { fake.services[ref.ID] = ref }
-func (fake *fakeRepository) addProduct(ref *productRef) { fake.products[ref.ID] = ref }
+func (fake *fakeRepository) addVehicle(ref *VehicleRef) { fake.vehicles[ref.ID] = ref }
+func (fake *fakeRepository) addService(ref *ServiceRef) { fake.services[ref.ID] = ref }
+func (fake *fakeRepository) addProduct(ref *ProductRef) { fake.products[ref.ID] = ref }
 
 // setProductStock seeds productID's balance for
 // stockusage_service_test.go — separate from addProduct since existing
@@ -94,7 +94,7 @@ func (fake *fakeRepository) Create(_ context.Context, order *domain.ServiceOrder
 	return rawToken, nil
 }
 
-func (fake *fakeRepository) findServiceOrderByID(_ context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
+func (fake *fakeRepository) FindServiceOrderByID(_ context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
 	for _, order := range fake.orders {
 		if order.ID == id {
 			return order, nil
@@ -103,7 +103,7 @@ func (fake *fakeRepository) findServiceOrderByID(_ context.Context, id uuid.UUID
 	return nil, domain.ErrServiceOrderNotFound
 }
 
-func (fake *fakeRepository) findActiveProductByID(_ context.Context, id uuid.UUID) (*productRef, error) {
+func (fake *fakeRepository) FindActiveProductByID(_ context.Context, id uuid.UUID) (*ProductRef, error) {
 	ref, ok := fake.products[id]
 	if !ok {
 		return nil, domain.ErrProductNotFound
@@ -111,7 +111,7 @@ func (fake *fakeRepository) findActiveProductByID(_ context.Context, id uuid.UUI
 	return ref, nil
 }
 
-func (fake *fakeRepository) findServiceByID(_ context.Context, id uuid.UUID) (*serviceRef, error) {
+func (fake *fakeRepository) FindServiceByID(_ context.Context, id uuid.UUID) (*ServiceRef, error) {
 	ref, ok := fake.services[id]
 	if !ok {
 		return nil, domain.ErrRequestedServiceNotFound
@@ -177,7 +177,7 @@ func (fake *fakeRepository) DecideQuote(_ context.Context, _ *domain.ServiceOrde
 
 // findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
 // (specs/service-order-quote-decision/) for the service-level unit tests.
-func (fake *fakeRepository) findServiceOrderByCodeWithTrackingToken(_ context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
+func (fake *fakeRepository) FindServiceOrderByCodeWithTrackingToken(_ context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
 	for _, order := range fake.orders {
 		if order.Code != code {
 			continue
@@ -198,7 +198,7 @@ func (fake *fakeRepository) FindQuoteByServiceOrderID(_ context.Context, service
 	return quote, nil
 }
 
-func (fake *fakeRepository) findCustomerByID(_ context.Context, id uuid.UUID) (*customerRef, error) {
+func (fake *fakeRepository) FindCustomerByID(_ context.Context, id uuid.UUID) (*CustomerRef, error) {
 	ref, ok := fake.customers[id]
 	if !ok {
 		return nil, domain.ErrCustomerNotFound
@@ -206,7 +206,7 @@ func (fake *fakeRepository) findCustomerByID(_ context.Context, id uuid.UUID) (*
 	return ref, nil
 }
 
-func (fake *fakeRepository) findCustomerByDocument(_ context.Context, normalizedDocument string) (*customerRef, error) {
+func (fake *fakeRepository) FindCustomerByDocument(_ context.Context, normalizedDocument string) (*CustomerRef, error) {
 	ref, ok := fake.customersByDoc[normalizedDocument]
 	if !ok {
 		return nil, domain.ErrCustomerNotFound
@@ -214,7 +214,7 @@ func (fake *fakeRepository) findCustomerByDocument(_ context.Context, normalized
 	return ref, nil
 }
 
-func (fake *fakeRepository) findVehicleByID(_ context.Context, id uuid.UUID) (*vehicleRef, error) {
+func (fake *fakeRepository) FindVehicleByID(_ context.Context, id uuid.UUID) (*VehicleRef, error) {
 	ref, ok := fake.vehicles[id]
 	if !ok {
 		return nil, domain.ErrVehicleNotFound
@@ -222,7 +222,7 @@ func (fake *fakeRepository) findVehicleByID(_ context.Context, id uuid.UUID) (*v
 	return ref, nil
 }
 
-func (fake *fakeRepository) findVehicleByPlate(_ context.Context, plate string) (*vehicleRef, error) {
+func (fake *fakeRepository) FindVehicleByPlate(_ context.Context, plate string) (*VehicleRef, error) {
 	for _, ref := range fake.vehicles {
 		if ref.LicensePlate == plate {
 			return ref, nil
@@ -231,7 +231,7 @@ func (fake *fakeRepository) findVehicleByPlate(_ context.Context, plate string) 
 	return nil, domain.ErrVehicleNotFound
 }
 
-func (fake *fakeRepository) findMissingServiceIDs(_ context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+func (fake *fakeRepository) FindMissingServiceIDs(_ context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
 	var missing []uuid.UUID
 	for _, id := range ids {
 		if _, ok := fake.services[id]; !ok {
@@ -241,8 +241,8 @@ func (fake *fakeRepository) findMissingServiceIDs(_ context.Context, ids []uuid.
 	return missing, nil
 }
 
-func (fake *fakeRepository) findServicesByIDs(_ context.Context, ids []uuid.UUID) ([]*serviceRef, error) {
-	refs := make([]*serviceRef, 0, len(ids))
+func (fake *fakeRepository) FindServicesByIDs(_ context.Context, ids []uuid.UUID) ([]*ServiceRef, error) {
+	refs := make([]*ServiceRef, 0, len(ids))
 	for _, id := range ids {
 		if ref, ok := fake.services[id]; ok {
 			refs = append(refs, ref)
@@ -254,7 +254,7 @@ func (fake *fakeRepository) findServicesByIDs(_ context.Context, ids []uuid.UUID
 // setRequestedServices/addHistory seed the query-only projections
 // findRequestedServices/findHistoryByServiceOrderID read back, used by
 // query_service_test.go (specs/service-order-query/).
-func (fake *fakeRepository) setRequestedServices(orderID uuid.UUID, refs []*serviceRef) {
+func (fake *fakeRepository) setRequestedServices(orderID uuid.UUID, refs []*ServiceRef) {
 	fake.requestedServices[orderID] = refs
 }
 
@@ -262,7 +262,7 @@ func (fake *fakeRepository) addHistory(orderID uuid.UUID, entry *domain.ServiceO
 	fake.history[orderID] = append(fake.history[orderID], entry)
 }
 
-func (fake *fakeRepository) findServiceOrderByCode(_ context.Context, code int64) (*domain.ServiceOrder, error) {
+func (fake *fakeRepository) FindServiceOrderByCode(_ context.Context, code int64) (*domain.ServiceOrder, error) {
 	for _, order := range fake.orders {
 		if order.Code == code {
 			return order, nil
@@ -271,11 +271,11 @@ func (fake *fakeRepository) findServiceOrderByCode(_ context.Context, code int64
 	return nil, domain.ErrServiceOrderNotFound
 }
 
-func (fake *fakeRepository) findRequestedServices(_ context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error) {
+func (fake *fakeRepository) FindRequestedServices(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceRef, error) {
 	return fake.requestedServices[serviceOrderID], nil
 }
 
-func (fake *fakeRepository) findHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
+func (fake *fakeRepository) FindHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
 	return fake.history[serviceOrderID], nil
 }
 
@@ -313,7 +313,7 @@ func (fake *fakeRepository) DeliverOrder(_ context.Context, order *domain.Servic
 	return nil
 }
 
-func (fake *fakeRepository) findServiceExecutionByID(_ context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
+func (fake *fakeRepository) FindServiceExecutionByID(_ context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
 	for _, execution := range fake.executions[serviceOrderID] {
 		if execution.ID == executionID {
 			return execution, nil
@@ -322,7 +322,7 @@ func (fake *fakeRepository) findServiceExecutionByID(_ context.Context, serviceO
 	return nil, domain.ErrServiceExecutionNotFound
 }
 
-func (fake *fakeRepository) findServiceExecutionsByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
+func (fake *fakeRepository) FindServiceExecutionsByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
 	return fake.executions[serviceOrderID], nil
 }
 
@@ -331,9 +331,9 @@ func (fake *fakeRepository) findServiceExecutionsByServiceOrderID(_ context.Cont
 // and aggregating the same way the real SQL query does
 // (specs/service-order-metrics/design.md §1.6), for the service-layer unit
 // tests to exercise without a database.
-func (fake *fakeRepository) findAverageExecutionTimeByService(_ context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
+func (fake *fakeRepository) FindAverageExecutionTimeByService(_ context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
 	type accumulator struct {
-		ref   *serviceRef
+		ref   *ServiceRef
 		count int
 		total time.Duration
 	}
@@ -411,7 +411,7 @@ func statusExcludedByDefault(status domain.Status) bool {
 // PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
 // the same way the real SQL query does (design.md §1.3/§1.4), for the
 // service-layer unit tests to exercise without a database.
-func (fake *fakeRepository) listServiceOrders(_ context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+func (fake *fakeRepository) ListServiceOrders(_ context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
 	var matched []*ServiceOrderListItem
 	for _, order := range fake.orders {
 		if filter.Code != nil && order.Code != *filter.Code {

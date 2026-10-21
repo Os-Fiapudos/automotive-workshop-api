@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -34,10 +34,10 @@ func captureLog(t *testing.T) *bytes.Buffer {
 
 // seedQuoteReadyOrder registers a customer (with the given e-mail) and an
 // IN_DIAGNOSIS order of theirs with a composed quote, ready for SendQuote.
-func seedQuoteReadyOrder(t *testing.T, repo *fakeRepository, service *ServiceOrderService, email *string) *domain.ServiceOrder {
+func seedQuoteReadyOrder(t *testing.T, repo *fakeRepository, service *testServices, email *string) *domain.ServiceOrder {
 	t.Helper()
 	customerID := uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Secreta", Active: true, Email: email}, customerID.String())
+	repo.addCustomer(&CustomerRef{ID: customerID, Code: 1, Name: "Maria Secreta", Active: true, Email: email}, customerID.String())
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	order.CustomerID = customerID
 	composeQuoteForOrder(t, service, repo, order)
@@ -47,7 +47,7 @@ func seedQuoteReadyOrder(t *testing.T, repo *fakeRepository, service *ServiceOrd
 func TestSendQuoteNotifiesCustomerAfterSend(t *testing.T) {
 	repo := newFakeRepository()
 	notifier := &recordingNotifier{}
-	service := NewServiceOrderService(repo, repo, notifier)
+	service := newTestServices(repo, notifier)
 	email := "cliente@example.com"
 	order := seedQuoteReadyOrder(t, repo, service, &email)
 	logs := captureLog(t)
@@ -64,7 +64,7 @@ func TestSendQuoteNotifiesCustomerAfterSend(t *testing.T) {
 func TestSendQuoteSkipsNotificationWithoutEmail(t *testing.T) {
 	repo := newFakeRepository()
 	notifier := &recordingNotifier{}
-	service := NewServiceOrderService(repo, repo, notifier)
+	service := newTestServices(repo, notifier)
 	blank := "  "
 	for _, email := range []*string{nil, &blank} {
 		order := seedQuoteReadyOrder(t, repo, service, email)
@@ -77,7 +77,7 @@ func TestSendQuoteSkipsNotificationWithoutEmail(t *testing.T) {
 func TestSendQuoteSucceedsWhenNotifierFails(t *testing.T) {
 	repo := newFakeRepository()
 	notifier := &recordingNotifier{err: errors.New("provider down")}
-	service := NewServiceOrderService(repo, repo, notifier)
+	service := newTestServices(repo, notifier)
 	email := "cliente@example.com"
 	order := seedQuoteReadyOrder(t, repo, service, &email)
 	logs := captureLog(t)
@@ -93,7 +93,7 @@ func TestSendQuoteSucceedsWhenNotifierFails(t *testing.T) {
 func TestSendQuoteSucceedsWhenCustomerLookupFails(t *testing.T) {
 	repo := newFakeRepository()
 	notifier := &recordingNotifier{}
-	service := NewServiceOrderService(repo, repo, notifier)
+	service := newTestServices(repo, notifier)
 	order := seedOrder(repo, domain.StatusInDiagnosis) // customer not registered in the fake
 	composeQuoteForOrder(t, service, repo, order)
 

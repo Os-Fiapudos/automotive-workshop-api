@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,7 +38,7 @@ func TestResendNotifierSendsOneEmail(t *testing.T) {
 	var requests []capturedRequest
 	notifier := NewResendQuoteNotifier("re_secret", "oficina@example.com", fakeResendClient(200, nil, &requests))
 
-	err := notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 42, TotalAmount: 450.5, RecipientEmail: "cliente@example.com"})
+	err := notifier.NotifyQuoteSent(context.Background(), usecase.QuoteNotification{OrderCode: 42, TotalAmount: 450.5, RecipientEmail: "cliente@example.com"})
 	require.NoError(t, err)
 
 	require.Len(t, requests, 1)
@@ -65,7 +66,7 @@ func TestResendNotifierSkipsWithoutRecipient(t *testing.T) {
 	var requests []capturedRequest
 	notifier := NewResendQuoteNotifier("re_secret", "oficina@example.com", fakeResendClient(200, nil, &requests))
 
-	require.NoError(t, notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 1, RecipientEmail: "  "}))
+	require.NoError(t, notifier.NotifyQuoteSent(context.Background(), usecase.QuoteNotification{OrderCode: 1, RecipientEmail: "  "}))
 	assert.Empty(t, requests)
 }
 
@@ -74,7 +75,7 @@ func TestResendNotifierProviderRejection(t *testing.T) {
 		var requests []capturedRequest
 		notifier := NewResendQuoteNotifier("re_secret", "oficina@example.com", fakeResendClient(status, nil, &requests))
 
-		err := notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
+		err := notifier.NotifyQuoteSent(context.Background(), usecase.QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
 		require.ErrorIs(t, err, ErrResendRejected)
 		assert.NotContains(t, err.Error(), "cliente@example.com")
 	}
@@ -85,7 +86,7 @@ func TestResendNotifierTransportError(t *testing.T) {
 	boom := errors.New("connection reset")
 	notifier := NewResendQuoteNotifier("re_secret", "oficina@example.com", fakeResendClient(0, boom, &requests))
 
-	err := notifier.NotifyQuoteSent(context.Background(), QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
+	err := notifier.NotifyQuoteSent(context.Background(), usecase.QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
 	require.ErrorIs(t, err, boom)
 }
 
@@ -97,6 +98,6 @@ func TestResendNotifierCanceledContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := notifier.NotifyQuoteSent(ctx, QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
+	err := notifier.NotifyQuoteSent(ctx, usecase.QuoteNotification{OrderCode: 1, RecipientEmail: "cliente@example.com"})
 	require.ErrorIs(t, err, context.Canceled)
 }

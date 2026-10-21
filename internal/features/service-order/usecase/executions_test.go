@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -16,7 +16,7 @@ func TestStartExecutionSuccess(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
@@ -33,7 +33,7 @@ func TestStartExecutionRejectsWithoutApproval(t *testing.T) {
 	repo := newFakeRepository()
 	service := newTestService(repo)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	for _, status := range []domain.Status{domain.StatusReceived, domain.StatusInDiagnosis, domain.StatusAwaitingApproval, domain.StatusCompleted, domain.StatusDelivered} {
 		order := seedOrder(repo, status)
@@ -58,7 +58,7 @@ func TestFinishExecutionSuccess(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
@@ -74,7 +74,7 @@ func TestFinishExecutionRejectsEndBeforeStart(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
@@ -102,7 +102,7 @@ func TestFinishExecutionRejectsAfterFinalized(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	execution, err := service.StartExecution(context.Background(), order.ID, serviceID)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestFinalizeOrderRequiresCompletedExecutions(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 	repo.quotes[order.ID] = &domain.Quote{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,

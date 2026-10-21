@@ -91,9 +91,7 @@ func main() {
 	if externalStatusUpdateSecret == externalNotificationSecret {
 		log.Fatalf("EXTERNAL_STATUS_UPDATE_SECRET must differ from EXTERNAL_NOTIFICATION_SECRET")
 	}
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier).
-		WithExternalNotificationSecret(externalNotificationSecret).
-		WithExternalStatusUpdateSecret(externalStatusUpdateSecret)
+	serviceOrderUseCases := buildServiceOrderUseCases(serviceOrderRepository, quoteNotifier, externalNotificationSecret, externalStatusUpdateSecret)
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)
@@ -147,7 +145,7 @@ func main() {
 	// it let an unauthenticated caller confirm a CPF/CNPJ was a registered
 	// customer and open orders in their name — see
 	// docs/owasp-vulnerability-and-coverage-report.md VULN-02.
-	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+	serviceorder.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
 
 	// Service Order Tracking (specs/service-order-tracking, RF12): a
 	// customer-facing route that deliberately never requires the

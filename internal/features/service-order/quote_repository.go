@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"errors"
 
@@ -9,25 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// productRef is the minimal product-catalog data needed to price and
-// describe a quote item, plus its Active flag for the RF-required
-// active-product check. Package-local, deliberately not
-// internal/features/product's Product type — same "no direct coupling
-// between features" reasoning as customerRef/vehicleRef
-// (specs/service-order-opening/design.md §1.4).
-type productRef struct {
-	ID          uuid.UUID
-	Code        int64
-	Name        string
-	Description string
-	UnitPrice   float64
-	Active      bool
-}
-
 // findServiceOrderByID loads a ServiceOrder by id, used by StartDiagnosis
 // and ComposeQuote/GetQuote to resolve the order before validating a status
 // transition.
-func (repository *PostgresServiceOrderRepository) findServiceOrderByID(ctx context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
+func (repository *PostgresServiceOrderRepository) FindServiceOrderByID(ctx context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
 	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
@@ -45,8 +31,8 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByID(ctx conte
 
 // findActiveProductByID loads a product's catalog data for pricing a quote
 // item (requirements.md §3.11: must exist and be ACTIVE).
-func (repository *PostgresServiceOrderRepository) findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error) {
-	ref := &productRef{}
+func (repository *PostgresServiceOrderRepository) FindActiveProductByID(ctx context.Context, id uuid.UUID) (*usecase.ProductRef, error) {
+	ref := &usecase.ProductRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, unit_price, status = 'ACTIVE' FROM products WHERE id = $1`, id,
 	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.UnitPrice, &ref.Active)
@@ -62,8 +48,8 @@ func (repository *PostgresServiceOrderRepository) findActiveProductByID(ctx cont
 // findServiceByID loads a single service's catalog data for pricing a quote
 // item. Services have no status column (requirements.md §3.12) — existence
 // is the only check.
-func (repository *PostgresServiceOrderRepository) findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error) {
-	ref := &serviceRef{}
+func (repository *PostgresServiceOrderRepository) FindServiceByID(ctx context.Context, id uuid.UUID) (*usecase.ServiceRef, error) {
+	ref := &usecase.ServiceRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, price FROM services WHERE id = $1`, id,
 	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.Price)

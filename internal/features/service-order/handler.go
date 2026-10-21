@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"net/http"
 	"strconv"
 	"strings"
@@ -46,8 +47,8 @@ const externalStatusSecretHeader = "X-External-Status-Secret" // #nosec G101 -- 
 // requireAuth may be nil, same nil-safe convention as
 // internal/features/product.RegisterRoutes, for callers that deliberately
 // need an unauthenticated router (e.g. isolated fixture setup in tests).
-func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAuth func(http.Handler) http.Handler) {
-	handler := &serviceOrderHandler{service: service}
+func RegisterRoutes(mux *http.ServeMux, useCases UseCases, requireAuth func(http.Handler) http.Handler) {
+	handler := &serviceOrderHandler{useCases: useCases}
 
 	wrap := func(h http.HandlerFunc) http.Handler {
 		if requireAuth != nil {
@@ -111,8 +112,21 @@ func RegisterRoutes(mux *http.ServeMux, service *ServiceOrderService, requireAut
 	mux.Handle("POST /api/v1/service-orders/{id}/stock-movements/{movementId}/reversal", wrap(handler.reverseStockMovement))
 }
 
+// UseCases are the application use cases the HTTP routes call, built and
+// composed in cmd/api/main.go (specs/service-order-architecture-refactor/
+// design.md §9.3).
+type UseCases struct {
+	Opening    *usecase.Opening
+	Lifecycle  *usecase.Lifecycle
+	Quotes     *usecase.Quotes
+	Executions *usecase.Executions
+	Queries    *usecase.Queries
+	StockUsage *usecase.StockUsage
+	Metrics    *usecase.Metrics
+}
+
 type serviceOrderHandler struct {
-	service *ServiceOrderService
+	useCases UseCases
 }
 
 func (handler *serviceOrderHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +141,7 @@ func (handler *serviceOrderHandler) create(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	result, err := handler.service.Create(r.Context(), request.toInput())
+	result, err := handler.useCases.Opening.Create(r.Context(), request.toInput())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -144,7 +158,7 @@ func (handler *serviceOrderHandler) startDiagnosis(w http.ResponseWriter, r *htt
 		return
 	}
 
-	order, err := handler.service.StartDiagnosis(r.Context(), id)
+	order, err := handler.useCases.Lifecycle.StartDiagnosis(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -171,7 +185,7 @@ func (handler *serviceOrderHandler) composeQuote(w http.ResponseWriter, r *http.
 		return
 	}
 
-	quote, err := handler.service.ComposeQuote(r.Context(), id, request.toInputs())
+	quote, err := handler.useCases.Quotes.ComposeQuote(r.Context(), id, request.toInputs())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -187,7 +201,7 @@ func (handler *serviceOrderHandler) getQuote(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	quote, err := handler.service.GetQuote(r.Context(), id)
+	quote, err := handler.useCases.Quotes.GetQuote(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -205,7 +219,7 @@ func (handler *serviceOrderHandler) sendQuote(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	quote, err := handler.service.SendQuote(r.Context(), id)
+	quote, err := handler.useCases.Quotes.SendQuote(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -228,7 +242,7 @@ func (handler *serviceOrderHandler) approveQuote(w http.ResponseWriter, r *http.
 		return
 	}
 
-	order, quote, err := handler.service.ApproveQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
+	order, quote, err := handler.useCases.Quotes.ApproveQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -248,7 +262,7 @@ func (handler *serviceOrderHandler) rejectQuote(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	order, quote, err := handler.service.RejectQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
+	order, quote, err := handler.useCases.Quotes.RejectQuote(r.Context(), code, r.Header.Get(trackingTokenHeader))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -263,7 +277,7 @@ func (handler *serviceOrderHandler) rejectQuote(w http.ResponseWriter, r *http.R
 // with a missing/wrong secret gets a 401 and learns nothing about whether
 // the order exists, and no decision is applied (AC17).
 func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r *http.Request) {
-	if !handler.service.AuthenticateExternalNotification(r.Header.Get(externalNotificationSecretHeader)) {
+	if !handler.useCases.Quotes.AuthenticateExternalNotification(r.Header.Get(externalNotificationSecretHeader)) {
 		apierror.Write(w, apierror.Unauthorized("INVALID_EXTERNAL_SECRET", "external notification secret is missing or invalid"))
 		return
 	}
@@ -285,7 +299,7 @@ func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r
 		return
 	}
 
-	order, quote, err := handler.service.DecideQuoteExternal(r.Context(), id, decision)
+	order, quote, err := handler.useCases.Quotes.DecideQuoteExternal(r.Context(), id, decision)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -299,7 +313,7 @@ func (handler *serviceOrderHandler) decideQuoteExternal(w http.ResponseWriter, r
 // before {id} or the body are looked at, and the body is validated before
 // the order is loaded, so a 401/400 never reveals or changes anything.
 func (handler *serviceOrderHandler) updateStatusExternal(w http.ResponseWriter, r *http.Request) {
-	if !handler.service.AuthenticateExternalStatusUpdate(r.Header.Get(externalStatusSecretHeader)) {
+	if !handler.useCases.Lifecycle.AuthenticateExternalStatusUpdate(r.Header.Get(externalStatusSecretHeader)) {
 		apierror.Write(w, apierror.Unauthorized("INVALID_EXTERNAL_SECRET", "external status secret is missing or invalid"))
 		return
 	}
@@ -320,7 +334,7 @@ func (handler *serviceOrderHandler) updateStatusExternal(w http.ResponseWriter, 
 		return
 	}
 
-	result, err := handler.service.UpdateStatusExternal(r.Context(), id, domain.Status(request.Status), request.Notes)
+	result, err := handler.useCases.Lifecycle.UpdateStatusExternal(r.Context(), id, domain.Status(request.Status), request.Notes)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -350,7 +364,7 @@ func (handler *serviceOrderHandler) list(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	items, total, err := handler.service.List(r.Context(), filter, page, pageSize)
+	items, total, err := handler.useCases.Queries.List(r.Context(), filter, page, pageSize)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -364,8 +378,8 @@ func (handler *serviceOrderHandler) list(w http.ResponseWriter, r *http.Request)
 // "status" one of the six known values, is "createdFrom"/"createdTo" a valid
 // RFC3339 date-time) happens here, mirroring CreateRequest.Validate()'s
 // handler-side call in this same package.
-func parseListFilter(r *http.Request) (ListFilter, []apierror.Detail) {
-	var filter ListFilter
+func parseListFilter(r *http.Request) (usecase.ListFilter, []apierror.Detail) {
+	var filter usecase.ListFilter
 	var details []apierror.Detail
 	query := r.URL.Query()
 
@@ -425,7 +439,7 @@ func (handler *serviceOrderHandler) get(w http.ResponseWriter, r *http.Request) 
 	rawID := r.PathValue("id")
 
 	if id, err := uuid.Parse(rawID); err == nil {
-		detail, err := handler.service.GetDetail(r.Context(), id)
+		detail, err := handler.useCases.Queries.GetDetail(r.Context(), id)
 		if err != nil {
 			writeServiceError(w, err)
 			return
@@ -440,7 +454,7 @@ func (handler *serviceOrderHandler) get(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	detail, err := handler.service.GetDetailByCode(r.Context(), code)
+	detail, err := handler.useCases.Queries.GetDetailByCode(r.Context(), code)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -474,7 +488,7 @@ func (handler *serviceOrderHandler) startExecution(w http.ResponseWriter, r *htt
 		return
 	}
 
-	execution, err := handler.service.StartExecution(r.Context(), id, serviceID)
+	execution, err := handler.useCases.Executions.StartExecution(r.Context(), id, serviceID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -504,7 +518,7 @@ func (handler *serviceOrderHandler) finishExecution(w http.ResponseWriter, r *ht
 		return
 	}
 
-	execution, err := handler.service.FinishExecution(r.Context(), id, executionID, request.EndedAt)
+	execution, err := handler.useCases.Executions.FinishExecution(r.Context(), id, executionID, request.EndedAt)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -521,7 +535,7 @@ func (handler *serviceOrderHandler) finalizeOrder(w http.ResponseWriter, r *http
 		return
 	}
 
-	order, err := handler.service.FinalizeOrder(r.Context(), id)
+	order, err := handler.useCases.Lifecycle.FinalizeOrder(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -538,7 +552,7 @@ func (handler *serviceOrderHandler) deliverOrder(w http.ResponseWriter, r *http.
 		return
 	}
 
-	order, err := handler.service.DeliverOrder(r.Context(), id)
+	order, err := handler.useCases.Lifecycle.DeliverOrder(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -557,7 +571,7 @@ func (handler *serviceOrderHandler) averageExecutionTime(w http.ResponseWriter, 
 		return
 	}
 
-	metrics, err := handler.service.AverageExecutionTime(r.Context(), filter)
+	metrics, err := handler.useCases.Metrics.AverageExecutionTime(r.Context(), filter)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -570,8 +584,8 @@ func (handler *serviceOrderHandler) averageExecutionTime(w http.ResponseWriter, 
 // GET .../metrics/average-execution-time query filters
 // (specs/service-order-metrics/design.md §1.3), mirroring
 // parseListFilter's per-field apierror.Detail accumulation pattern.
-func parseMetricsFilter(r *http.Request) (MetricsFilter, []apierror.Detail) {
-	var filter MetricsFilter
+func parseMetricsFilter(r *http.Request) (usecase.MetricsFilter, []apierror.Detail) {
+	var filter usecase.MetricsFilter
 	var details []apierror.Detail
 	query := r.URL.Query()
 
@@ -624,7 +638,7 @@ func (handler *serviceOrderHandler) registerStockUsage(w http.ResponseWriter, r 
 		return
 	}
 
-	movements, err := handler.service.RegisterStockUsage(r.Context(), id, request.toItems())
+	movements, err := handler.useCases.StockUsage.RegisterStockUsage(r.Context(), id, request.toItems())
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -642,7 +656,7 @@ func (handler *serviceOrderHandler) listStockMovements(w http.ResponseWriter, r 
 		return
 	}
 
-	movements, err := handler.service.ListStockMovements(r.Context(), id)
+	movements, err := handler.useCases.StockUsage.ListStockMovements(r.Context(), id)
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -666,7 +680,7 @@ func (handler *serviceOrderHandler) reverseStockMovement(w http.ResponseWriter, 
 		return
 	}
 
-	reversal, err := handler.service.ReverseStockMovement(r.Context(), id, movementID)
+	reversal, err := handler.useCases.StockUsage.ReverseStockMovement(r.Context(), id, movementID)
 	if err != nil {
 		writeServiceError(w, err)
 		return

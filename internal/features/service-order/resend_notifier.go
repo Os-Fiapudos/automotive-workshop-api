@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -42,7 +43,7 @@ func NewResendQuoteNotifier(apiKey, fromEmail string, httpClient *http.Client) *
 
 // NotifyQuoteSent sends one informational e-mail. It contains the order code
 // and total only — no tracking link or token, and no promise of a portal.
-func (notifier *ResendQuoteNotifier) NotifyQuoteSent(ctx context.Context, notification QuoteNotification) error {
+func (notifier *ResendQuoteNotifier) NotifyQuoteSent(ctx context.Context, notification usecase.QuoteNotification) error {
 	if strings.TrimSpace(notification.RecipientEmail) == "" {
 		return nil
 	}

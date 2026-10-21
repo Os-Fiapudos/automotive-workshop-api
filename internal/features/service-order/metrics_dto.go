@@ -1,5 +1,7 @@
 package serviceorder
 
+import "automotive-workshop-api/internal/features/service-order/usecase"
+
 // serviceMetricResponse is one entry of the average-execution-time metric
 // response (specs/service-order-metrics/design.md §1.5/§1.9).
 type serviceMetricResponse struct {
@@ -18,7 +20,7 @@ type AverageExecutionTimeResponse struct {
 	Services []serviceMetricResponse `json:"services"`
 }
 
-func toAverageExecutionTimeResponse(metrics []*ServiceMetric) AverageExecutionTimeResponse {
+func toAverageExecutionTimeResponse(metrics []*usecase.ServiceMetric) AverageExecutionTimeResponse {
 	services := make([]serviceMetricResponse, 0, len(metrics))
 	for _, metric := range metrics {
 		services = append(services, serviceMetricResponse{

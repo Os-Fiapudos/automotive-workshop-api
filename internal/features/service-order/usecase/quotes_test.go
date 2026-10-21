@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -54,9 +54,9 @@ func TestComposeQuoteSuccess(t *testing.T) {
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 35.90, Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 35.90, Active: true})
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change", Description: "Engine oil and filter change.", Price: 80.00})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change", Description: "Engine oil and filter change.", Price: 80.00})
 
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 2},
@@ -75,7 +75,7 @@ func TestComposeQuoteRejectsBeforeDiagnosis(t *testing.T) {
 	order := seedOrder(repo, domain.StatusReceived)
 
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -108,7 +108,7 @@ func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 0},
@@ -134,7 +134,7 @@ func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: false, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: false, UnitPrice: 10})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -160,7 +160,7 @@ func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -181,7 +181,7 @@ func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 	order := seedOrder(repo, domain.StatusAwaitingApproval)
 	repo.seedDecidedQuote(order.ID, domain.QuoteStatusApproved)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -205,7 +205,7 @@ func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "A part"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10, Description: "A part"})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 2},
@@ -225,7 +225,7 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 10, Description: "Original description"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10, Description: "Original description"})
 
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -233,7 +233,7 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate a later catalog change.
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 999, Description: "Changed description"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 999, Description: "Changed description"})
 
 	assert.Equal(t, "Original description", quote.Items[0].Description)
 	assert.InDelta(t, 10.0, quote.Items[0].UnitPrice, 0.0001)
@@ -244,10 +244,10 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 // composeQuoteForOrder composes a one-item quote for order through the real
 // ComposeQuote use case, so SendQuote/ApproveQuote/RejectQuote tests below
 // exercise a realistically-composed quote rather than a hand-built fixture.
-func composeQuoteForOrder(t *testing.T, service *ServiceOrderService, repo *fakeRepository, order *domain.ServiceOrder) *domain.Quote {
+func composeQuoteForOrder(t *testing.T, service *testServices, repo *fakeRepository, order *domain.ServiceOrder) *domain.Quote {
 	t.Helper()
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true, UnitPrice: 42.50, Description: "A part"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 42.50, Description: "A part"})
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
 	})
@@ -308,7 +308,7 @@ func TestSendQuoteUnknownOrder(t *testing.T) {
 // as its tracking token — the fixture ApproveQuote/RejectQuote tests build
 // on, mirroring how a real order reaches AWAITING_APPROVAL with a token
 // issued at creation (specs/service-order-tracking/).
-func seedSentQuote(t *testing.T, service *ServiceOrderService, repo *fakeRepository, rawToken string) *domain.ServiceOrder {
+func seedSentQuote(t *testing.T, service *testServices, repo *fakeRepository, rawToken string) *domain.ServiceOrder {
 	t.Helper()
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	composeQuoteForOrder(t, service, repo, order)

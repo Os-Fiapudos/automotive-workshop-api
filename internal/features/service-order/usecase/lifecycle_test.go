@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -117,7 +117,7 @@ func TestUpdateStatusExternalCompletedRequiresExecutions(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 	repo.quotes[order.ID] = &domain.Quote{
 		ID:             uuid.New(),
 		ServiceOrderID: order.ID,
@@ -143,13 +143,13 @@ func TestUpdateStatusExternalNotesLength(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusReceived)
 
-	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength+1))
+	_, err := service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", MaxStatusUpdateNotesLength+1))
 	assert.ErrorIs(t, err, domain.ErrInvalidStatusUpdateNotes)
 	assert.Equal(t, domain.StatusReceived, order.Status)
 	assert.Empty(t, repo.history[order.ID])
 
 	// Exactly the limit, counted in characters (not bytes), is accepted.
-	_, err = service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", maxStatusUpdateNotesLength))
+	_, err = service.UpdateStatusExternal(context.Background(), order.ID, domain.StatusInDiagnosis, strings.Repeat("é", MaxStatusUpdateNotesLength))
 	require.NoError(t, err)
 }
 

@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"context"
@@ -28,10 +28,19 @@ type ServiceMetric struct {
 	AverageDurationMinutes float64
 }
 
+// Metrics is the service-order metrics use case (specs/service-order-metrics/).
+type Metrics struct {
+	reader ExecutionMetricsReader
+}
+
+func NewMetrics(reader ExecutionMetricsReader) *Metrics {
+	return &Metrics{reader: reader}
+}
+
 // AverageExecutionTime reports, per service, how many completed executions
 // exist and their average duration (requirements.md BR1-BR4) — a thin
 // pass-through, since the business rules are all satisfied by the
 // aggregate query itself (design.md §1.6).
-func (service *ServiceOrderService) AverageExecutionTime(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
-	return service.lookups.findAverageExecutionTimeByService(ctx, filter)
+func (metrics *Metrics) AverageExecutionTime(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
+	return metrics.reader.FindAverageExecutionTimeByService(ctx, filter)
 }

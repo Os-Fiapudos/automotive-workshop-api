@@ -61,7 +61,7 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	customerService := customer.NewCustomerService(customerRepository)
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil)
+	serviceOrderUseCases := newServiceOrderUseCases(serviceOrderRepository, "", "")
 
 	trackingRepository := servicetracking.NewPostgresTrackingRepository(pool)
 	trackingService := servicetracking.NewTrackingService(trackingRepository)
@@ -80,7 +80,7 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	customer.RegisterRoutes(router, customerService, nil)
-	serviceorder.RegisterRoutes(router, serviceOrderService, nil)
+	serviceorder.RegisterRoutes(router, serviceOrderUseCases, nil)
 	servicetracking.RegisterRoutes(router, trackingService)
 
 	server := httptest.NewServer(router)

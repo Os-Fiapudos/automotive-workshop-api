@@ -22,23 +22,22 @@ const testExternalSecret = "external-test-secret"
 func TestRegisterRoutesDoesNotPanic(t *testing.T) {
 	passThrough := func(next http.Handler) http.Handler { return next }
 	assert.NotPanics(t, func() {
-		RegisterRoutes(http.NewServeMux(), newTestService(newFakeRepository()), passThrough)
+		RegisterRoutes(http.NewServeMux(), newTestUseCases(newFakeStore()), passThrough)
 	})
 }
 
 // newExternalDecisionMux wires the real routes with a requireAuth that
 // rejects everything, proving the external decision route is not behind the
 // administrative JWT.
-func newExternalDecisionMux(repo *fakeRepository) (*http.ServeMux, *ServiceOrderService) {
-	service := newTestService(repo).WithExternalNotificationSecret(testExternalSecret)
+func newExternalDecisionMux(store *fakeStore) *http.ServeMux {
 	denyAll := func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 		})
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, service, denyAll)
-	return mux, service
+	RegisterRoutes(mux, newTestUseCases(store), denyAll)
+	return mux
 }
 
 func postExternalDecision(mux *http.ServeMux, id, secret, body string) *httptest.ResponseRecorder {
@@ -52,9 +51,9 @@ func postExternalDecision(mux *http.ServeMux, id, secret, body string) *httptest
 }
 
 func TestExternalDecisionApprovesWithoutJWT(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	response := postExternalDecision(mux, order.ID.String(), testExternalSecret, `{"decision":"approved"}`)
 	require.Equal(t, http.StatusOK, response.Code)
@@ -63,9 +62,9 @@ func TestExternalDecisionApprovesWithoutJWT(t *testing.T) {
 }
 
 func TestExternalDecisionRejects(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	response := postExternalDecision(mux, order.ID.String(), testExternalSecret, `{"decision":"rejected"}`)
 	require.Equal(t, http.StatusOK, response.Code)
@@ -77,9 +76,9 @@ func TestExternalDecisionRejects(t *testing.T) {
 // effect — and the same 401 for an unknown order, so the secret check
 // reveals nothing about which ids exist.
 func TestExternalDecisionMissingOrWrongSecret(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	for _, secret := range []string{"", "wrong-secret"} {
 		response := postExternalDecision(mux, order.ID.String(), secret, `{"decision":"approved"}`)
@@ -97,9 +96,9 @@ func TestExternalDecisionMissingOrWrongSecret(t *testing.T) {
 
 // TestExternalDecisionInvalidDecision covers AC18.
 func TestExternalDecisionInvalidDecision(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	for _, body := range []string{`{"decision":"APPROVED"}`, `{"decision":"maybe"}`, `{}`} {
 		response := postExternalDecision(mux, order.ID.String(), testExternalSecret, body)
@@ -109,9 +108,9 @@ func TestExternalDecisionInvalidDecision(t *testing.T) {
 }
 
 func TestExternalDecisionRepeatIsConflict(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	response := postExternalDecision(mux, order.ID.String(), testExternalSecret, `{"decision":"approved"}`)
 	require.Equal(t, http.StatusOK, response.Code)
@@ -125,9 +124,9 @@ func TestExternalDecisionRepeatIsConflict(t *testing.T) {
 // TestCustomerDecisionRoutesStillUnwrapped is the AC20 regression: the
 // tracking-token routes keep working without the JWT alongside the new one.
 func TestCustomerDecisionRoutesStillUnwrapped(t *testing.T) {
-	repo := newFakeRepository()
-	mux, service := newExternalDecisionMux(repo)
-	order := seedSentQuote(t, service, repo, "the-real-token")
+	repo := newFakeStore()
+	mux := newExternalDecisionMux(repo)
+	order := seedSentQuote(t, repo, "the-real-token")
 
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/acompanhamento/"+strconv.FormatInt(order.Code, 10)+"/orcamento/aprovar", nil)
 	request.Header.Set(trackingTokenHeader, "the-real-token")

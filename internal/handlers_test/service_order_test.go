@@ -55,14 +55,12 @@ func testServiceOrderServer(t *testing.T) (*pgxpool.Pool, string, string) {
 	customerService := customer.NewCustomerService(customerRepository)
 
 	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil).
-		WithExternalNotificationSecret(testExternalNotificationSecret).
-		WithExternalStatusUpdateSecret(testExternalStatusSecret)
+	serviceOrderUseCases := newServiceOrderUseCases(serviceOrderRepository, testExternalNotificationSecret, testExternalStatusSecret)
 
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	customer.RegisterRoutes(router, customerService, requireAuth)
-	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+	serviceorder.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)

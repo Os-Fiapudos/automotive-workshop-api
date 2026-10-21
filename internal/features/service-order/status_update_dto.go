@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"strings"
 	"unicode/utf8"
 
@@ -21,10 +22,10 @@ type ExternalStatusUpdateRequest struct {
 // maxStatusUpdateNotesLength. UpdateStatusExternal repeats both checks.
 func (request ExternalStatusUpdateRequest) Validate() []apierror.Detail {
 	var details []apierror.Detail
-	if !isExternalStatusTarget(domain.Status(request.Status)) {
+	if !usecase.IsExternalStatusTarget(domain.Status(request.Status)) {
 		details = append(details, apierror.Detail{Field: "status", Message: "status must be one of IN_DIAGNOSIS, COMPLETED, DELIVERED"})
 	}
-	if utf8.RuneCountInString(strings.TrimSpace(request.Notes)) > maxStatusUpdateNotesLength {
+	if utf8.RuneCountInString(strings.TrimSpace(request.Notes)) > usecase.MaxStatusUpdateNotesLength {
 		details = append(details, apierror.Detail{Field: "notes", Message: "notes must be at most 500 characters"})
 	}
 	return details
@@ -40,7 +41,7 @@ type statusUpdateResponse struct {
 	Status         string `json:"status"`
 }
 
-func toStatusUpdateResponse(result *StatusUpdateResult) statusUpdateResponse {
+func toStatusUpdateResponse(result *usecase.StatusUpdateResult) statusUpdateResponse {
 	return statusUpdateResponse{
 		ID:             result.Order.ID.String(),
 		Code:           result.Order.Code,

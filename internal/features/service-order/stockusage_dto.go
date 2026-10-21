@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"strings"
 	"time"
 
@@ -37,10 +38,10 @@ func (request RegisterStockUsageRequest) Validate() []apierror.Detail {
 	return details
 }
 
-func (request RegisterStockUsageRequest) toItems() []StockUsageItem {
-	items := make([]StockUsageItem, 0, len(request.Items))
+func (request RegisterStockUsageRequest) toItems() []usecase.StockUsageItem {
+	items := make([]usecase.StockUsageItem, 0, len(request.Items))
 	for _, item := range request.Items {
-		items = append(items, StockUsageItem{ProductID: item.ProductID, Quantity: item.Quantity})
+		items = append(items, usecase.StockUsageItem{ProductID: item.ProductID, Quantity: item.Quantity})
 	}
 	return items
 }

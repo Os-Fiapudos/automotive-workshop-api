@@ -114,7 +114,7 @@ func (repository *PostgresServiceOrderRepository) DeliverOrder(ctx context.Conte
 // findServiceExecutionByID loads a single execution, scoped to
 // serviceOrderID so a client cannot finish another order's execution by
 // guessing its id.
-func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
+func (repository *PostgresServiceOrderRepository) FindServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
 	execution := &domain.ServiceExecution{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
@@ -133,7 +133,7 @@ func (repository *PostgresServiceOrderRepository) findServiceExecutionByID(ctx c
 // findServiceExecutionsByServiceOrderID loads every execution recorded for
 // an order, used by FinalizeOrder to check the required-executions rule
 // (design.md §2.3).
-func (repository *PostgresServiceOrderRepository) findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
+func (repository *PostgresServiceOrderRepository) FindServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, service_id, started_at, ended_at
 		 FROM audit_services WHERE service_order_id = $1`, serviceOrderID)

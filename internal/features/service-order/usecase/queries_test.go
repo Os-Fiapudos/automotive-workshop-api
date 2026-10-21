@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -133,8 +133,8 @@ func TestListFiltersByCustomerDocument(t *testing.T) {
 
 	otherCustomerID := uuid.New()
 	otherVehicleID := uuid.New()
-	repo.addCustomer(&customerRef{ID: otherCustomerID, Code: 2, Name: "Other", Active: true, Document: "22233344400"}, "22233344400")
-	repo.addVehicle(&vehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: otherCustomerID, Active: true})
+	repo.addCustomer(&CustomerRef{ID: otherCustomerID, Code: 2, Name: "Other", Active: true, Document: "22233344400"}, "22233344400")
+	repo.addVehicle(&VehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: otherCustomerID, Active: true})
 	seedListOrder(repo, otherCustomerID, otherVehicleID, domain.StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{CustomerDocument: normalizedDocument}, 1, 20)
@@ -151,7 +151,7 @@ func TestListFiltersByLicensePlate(t *testing.T) {
 	target := seedListOrder(repo, customerID, vehicleID, domain.StatusReceived, time.Now())
 
 	otherVehicleID := uuid.New()
-	repo.addVehicle(&vehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: customerID, Active: true})
+	repo.addVehicle(&VehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9Z99", CustomerID: customerID, Active: true})
 	seedListOrder(repo, customerID, otherVehicleID, domain.StatusReceived, time.Now())
 
 	items, total, err := service.List(context.Background(), ListFilter{LicensePlate: "ABC1D23"}, 1, 20)
@@ -224,7 +224,7 @@ func TestGetDetailAssemblesEveryField(t *testing.T) {
 	order := seedListOrder(repo, customerID, vehicleID, domain.StatusAwaitingApproval, time.Now())
 
 	requestedServiceID := uuid.New()
-	repo.setRequestedServices(order.ID, []*serviceRef{{ID: requestedServiceID, Code: 1, Name: "Oil Change"}})
+	repo.setRequestedServices(order.ID, []*ServiceRef{{ID: requestedServiceID, Code: 1, Name: "Oil Change"}})
 	repo.addHistory(order.ID, &domain.ServiceOrderHistory{
 		ID: uuid.New(), ServiceOrderID: order.ID, Event: "creation",
 		PreviousStatus: domain.StatusReceived, NewStatus: domain.StatusReceived,

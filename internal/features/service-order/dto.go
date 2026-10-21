@@ -1,6 +1,7 @@
 package serviceorder
 
 import (
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"fmt"
 	"strings"
 	"time"
@@ -87,16 +88,16 @@ func validateRequestedProducts(products []RequestedProductRequest) []apierror.De
 	return details
 }
 
-func (request CreateRequest) toInput() CreateInput {
-	var requestedProducts []RequestedProductInput
+func (request CreateRequest) toInput() usecase.CreateInput {
+	var requestedProducts []usecase.RequestedProductInput
 	for _, product := range request.RequestedProducts {
-		requestedProducts = append(requestedProducts, RequestedProductInput{
+		requestedProducts = append(requestedProducts, usecase.RequestedProductInput{
 			ProductID: strings.TrimSpace(product.ProductID),
 			Quantity:  product.Quantity,
 		})
 	}
 
-	return CreateInput{
+	return usecase.CreateInput{
 		CustomerID:          request.CustomerID,
 		CustomerDocument:    request.CustomerDocument,
 		VehicleID:           request.VehicleID,
@@ -156,7 +157,7 @@ type Response struct {
 	TrackingToken     string                    `json:"trackingToken"`
 }
 
-func toResponse(result *CreateResult) Response {
+func toResponse(result *usecase.CreateResult) Response {
 	requestedServices := make([]serviceSummary, 0, len(result.Services))
 	for _, service := range result.Services {
 		requestedServices = append(requestedServices, serviceSummary{

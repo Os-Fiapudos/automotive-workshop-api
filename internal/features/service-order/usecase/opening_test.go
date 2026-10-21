@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -12,15 +12,11 @@ import (
 
 const normalizedDocument = "11144477735"
 
-func newTestService(repo *fakeRepository) *ServiceOrderService {
-	return NewServiceOrderService(repo, repo, nil)
-}
-
 func seedActiveCustomerAndVehicle(repo *fakeRepository) (customerID, vehicleID uuid.UUID) {
 	customerID = uuid.New()
 	vehicleID = uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true, Document: normalizedDocument}, normalizedDocument)
-	repo.addVehicle(&vehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
+	repo.addCustomer(&CustomerRef{ID: customerID, Code: 1, Name: "Maria Silva", Active: true, Document: normalizedDocument}, normalizedDocument)
+	repo.addVehicle(&VehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
 	return customerID, vehicleID
 }
 
@@ -29,7 +25,7 @@ func TestServiceCreateByID(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change"})
 
 	result, err := service.Create(context.Background(), CreateInput{
 		CustomerID:          customerID.String(),
@@ -76,8 +72,8 @@ func TestServiceCreateCustomerInactive(t *testing.T) {
 	service := newTestService(repo)
 	customerID := uuid.New()
 	vehicleID := uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Carlos", Active: false}, normalizedDocument)
-	repo.addVehicle(&vehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
+	repo.addCustomer(&CustomerRef{ID: customerID, Code: 1, Name: "Carlos", Active: false}, normalizedDocument)
+	repo.addVehicle(&VehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: true})
 
 	_, err := service.Create(context.Background(), CreateInput{
 		CustomerID: customerID.String(),
@@ -105,8 +101,8 @@ func TestServiceCreateVehicleInactive(t *testing.T) {
 	service := newTestService(repo)
 	customerID := uuid.New()
 	vehicleID := uuid.New()
-	repo.addCustomer(&customerRef{ID: customerID, Code: 1, Name: "Maria", Active: true}, normalizedDocument)
-	repo.addVehicle(&vehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: false})
+	repo.addCustomer(&CustomerRef{ID: customerID, Code: 1, Name: "Maria", Active: true}, normalizedDocument)
+	repo.addVehicle(&VehicleRef{ID: vehicleID, Code: 1, LicensePlate: "ABC1D23", CustomerID: customerID, Active: false})
 
 	_, err := service.Create(context.Background(), CreateInput{
 		CustomerID: customerID.String(),
@@ -122,9 +118,9 @@ func TestServiceCreateVehicleNotOwnedByCustomer(t *testing.T) {
 	customerID, _ := seedActiveCustomerAndVehicle(repo)
 
 	otherCustomerID := uuid.New()
-	repo.addCustomer(&customerRef{ID: otherCustomerID, Code: 2, Name: "Other", Active: true}, "98765432100")
+	repo.addCustomer(&CustomerRef{ID: otherCustomerID, Code: 2, Name: "Other", Active: true}, "98765432100")
 	otherVehicleID := uuid.New()
-	repo.addVehicle(&vehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9W88", CustomerID: otherCustomerID, Active: true})
+	repo.addVehicle(&VehicleRef{ID: otherVehicleID, Code: 2, LicensePlate: "XYZ9W88", CustomerID: otherCustomerID, Active: true})
 
 	_, err := service.Create(context.Background(), CreateInput{
 		CustomerID: customerID.String(),
@@ -166,7 +162,7 @@ func TestServiceCreateWithRequestedProducts(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 7, Name: "Brake Pad", Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 7, Name: "Brake Pad", Active: true})
 	repo.setProductStock(productID, 15)
 
 	result, err := service.Create(context.Background(), CreateInput{
@@ -204,7 +200,7 @@ func TestServiceCreateRequestedProductInactive(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Code: 1, Name: "Old Part", Active: false})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Old Part", Active: false})
 
 	_, err := service.Create(context.Background(), CreateInput{
 		CustomerID:        customerID.String(),
@@ -220,7 +216,7 @@ func TestServiceCreateRequestedProductInvalidQuantity(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Active: true})
 
 	for _, quantity := range []int{0, -3} {
 		_, err := service.Create(context.Background(), CreateInput{
@@ -238,7 +234,7 @@ func TestServiceCreateRejectsDuplicateRequestedProduct(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	productID := uuid.New()
-	repo.addProduct(&productRef{ID: productID, Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Active: true})
 
 	_, err := service.Create(context.Background(), CreateInput{
 		CustomerID: customerID.String(),

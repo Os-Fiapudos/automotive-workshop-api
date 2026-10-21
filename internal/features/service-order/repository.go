@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"errors"
 
@@ -11,151 +12,6 @@ import (
 
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
-
-// customerRef is the minimal customer data this feature needs to resolve
-// and validate a customer, plus display it in the response. It is a
-// package-local projection, deliberately not the customer feature's
-// Customer type — importing internal/features/customer directly would
-// violate the "no direct coupling between features" rule (CLAUDE.md §9.2).
-type customerRef struct {
-	ID       uuid.UUID
-	Code     int64
-	Name     string
-	Active   bool
-	Document string
-	Phone    string
-	// Email is nullable (customers.email); only the quote-sent notification
-	// reads it (specs/service-order-email-notification/).
-	Email *string
-}
-
-// vehicleRef is the vehicle-side equivalent of customerRef. Brand/Model/Year/
-// Color are only needed by the detail view (specs/service-order-query/), left
-// unused (but always populated — same query as everyone else, see
-// scanVehicleRef) by the create flow.
-type vehicleRef struct {
-	ID           uuid.UUID
-	Code         int64
-	LicensePlate string
-	CustomerID   uuid.UUID
-	Active       bool
-	Brand        string
-	Model        string
-	Year         int
-	Color        string
-}
-
-// serviceRef is the minimal service-catalog data needed to display a
-// requested service in the response. Description/Price are only populated
-// by findServiceByID (used to price/snapshot a quote item,
-// specs/service-order-diagnosis-quote/) — findServicesByIDs (used for the
-// order-creation response) leaves them zero, since that response doesn't
-// need them.
-type serviceRef struct {
-	ID          uuid.UUID
-	Code        int64
-	Name        string
-	Description string
-	Price       float64
-}
-
-// serviceOrderLookups is the read-only boundary ServiceOrderService depends
-// on to resolve and validate the customer, vehicle, and requested services
-// referenced by a create request. It is defined here, next to
-// ServiceOrderRepository, and implemented by the same Postgres type — the
-// split into two interfaces exists so service_test.go can fake exactly what
-// the service layer needs (design.md §3.2).
-type serviceOrderLookups interface {
-	findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error)
-	findCustomerByDocument(ctx context.Context, normalizedDocument string) (*customerRef, error)
-	findVehicleByID(ctx context.Context, id uuid.UUID) (*vehicleRef, error)
-	findVehicleByPlate(ctx context.Context, plate string) (*vehicleRef, error)
-	findMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
-	findServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*serviceRef, error)
-
-	// Added by specs/service-order-diagnosis-quote/.
-	findServiceOrderByID(ctx context.Context, id uuid.UUID) (*domain.ServiceOrder, error)
-	findActiveProductByID(ctx context.Context, id uuid.UUID) (*productRef, error)
-	findServiceByID(ctx context.Context, id uuid.UUID) (*serviceRef, error)
-
-	// Added by specs/service-order-query/.
-	findServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error)
-	findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error)
-	findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error)
-	listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error)
-
-	// Added by specs/service-order-execution/.
-	findServiceExecutionByID(ctx context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error)
-	findServiceExecutionsByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error)
-
-	// Added by specs/service-order-metrics/.
-	findAverageExecutionTimeByService(ctx context.Context, filter MetricsFilter) ([]*ServiceMetric, error)
-
-	// Added by specs/service-order-quote-decision/: resolves the order
-	// identified by its public code first (so an unknown code always maps to
-	// ErrServiceOrderNotFound regardless of the token), then checks
-	// tokenHash against that specific order's active tracking token
-	// (ErrTrackingTokenInvalid otherwise) — same precedence as
-	// service-order-tracking's FindByCodeAndTokenHash, reading
-	// service_order_tracking_tokens directly via SQL rather than importing
-	// that feature's Go package (CLAUDE.md §9.2).
-	findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error)
-}
-
-// ServiceOrderRepository is the persistence boundary for the ServiceOrder
-// aggregate. It only has the writes this feature performs — no speculative
-// CRUD methods for reads this feature doesn't need (design.md §3.2).
-type ServiceOrderRepository interface {
-	// Create persists order and returns the raw tracking token generated for
-	// it (specs/service-order-tracking/design.md §5) — only that call ever
-	// sees the raw value; the database only ever stores its hash.
-	Create(ctx context.Context, order *domain.ServiceOrder) (trackingToken string, err error)
-
-	// Added by specs/service-order-diagnosis-quote/. StartDiagnosis,
-	// FinalizeOrder and DeliverOrder take notes since
-	// specs/service-order-status-update/ (design.md §2): when non-empty it is
-	// appended to the history entry's fixed description; the administrative
-	// endpoints always pass "".
-	StartDiagnosis(ctx context.Context, order *domain.ServiceOrder, notes string) error
-	SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error)
-	FindQuoteByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error)
-
-	// Added by specs/service-order-execution/.
-	StartExecution(ctx context.Context, execution *domain.ServiceExecution) error
-	FinishExecution(ctx context.Context, execution *domain.ServiceExecution) error
-	FinalizeOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error
-	DeliverOrder(ctx context.Context, order *domain.ServiceOrder, notes string) error
-
-	// Added by specs/service-order-quote-decision/.
-
-	// SendQuote records quote as sent (sent_at/sent_version) and transitions
-	// order from IN_DIAGNOSIS to AWAITING_APPROVAL, transactionally.
-	SendQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote) (*domain.Quote, error)
-
-	// DecideQuote records the customer's decision on quote (APPROVED or
-	// REJECTED, per decision), transitions order accordingly (IN_PROGRESS or
-	// CANCELED), and writes the corresponding history entry, all in one
-	// transaction (RNF07): a failure at any step, including the history
-	// insert, rolls back every other write this call made.
-	DecideQuote(ctx context.Context, order *domain.ServiceOrder, quote *domain.Quote, decision domain.QuoteStatus) (*domain.Quote, error)
-
-	// Added by specs/service-order-stock-usage/.
-
-	// RegisterStockUsage deducts every item's quantity from its product's
-	// stock and records one EXIT StockMovement per item, transactionally
-	// (RNF07): a failure at any item rolls back every deduction already made
-	// in this call.
-	RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error)
-
-	// ReverseStockMovement restores the quantity of a previously registered
-	// EXIT movement and records a linked, inverse ENTRY movement,
-	// transactionally (RNF07).
-	ReverseStockMovement(ctx context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error)
-
-	// ListStockMovements loads every stock movement recorded against an
-	// order, most recent first.
-	ListStockMovements(ctx context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error)
-}
 
 // PostgresServiceOrderRepository implements ServiceOrderRepository and
 // serviceOrderLookups against pgx.
@@ -235,20 +91,20 @@ func (repository *PostgresServiceOrderRepository) Create(ctx context.Context, or
 	return rawToken, nil
 }
 
-func (repository *PostgresServiceOrderRepository) findCustomerByID(ctx context.Context, id uuid.UUID) (*customerRef, error) {
+func (repository *PostgresServiceOrderRepository) FindCustomerByID(ctx context.Context, id uuid.UUID) (*usecase.CustomerRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE id = $1`, id)
 	return scanCustomerRef(row)
 }
 
-func (repository *PostgresServiceOrderRepository) findCustomerByDocument(ctx context.Context, normalizedDocument string) (*customerRef, error) {
+func (repository *PostgresServiceOrderRepository) FindCustomerByDocument(ctx context.Context, normalizedDocument string) (*usecase.CustomerRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, status = 'ACTIVE', document, phone, email FROM customers WHERE document = $1`, normalizedDocument)
 	return scanCustomerRef(row)
 }
 
-func scanCustomerRef(row pgx.Row) (*customerRef, error) {
-	ref := &customerRef{}
+func scanCustomerRef(row pgx.Row) (*usecase.CustomerRef, error) {
+	ref := &usecase.CustomerRef{}
 	if err := row.Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Active, &ref.Document, &ref.Phone, &ref.Email); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrCustomerNotFound
@@ -258,20 +114,20 @@ func scanCustomerRef(row pgx.Row) (*customerRef, error) {
 	return ref, nil
 }
 
-func (repository *PostgresServiceOrderRepository) findVehicleByID(ctx context.Context, id uuid.UUID) (*vehicleRef, error) {
+func (repository *PostgresServiceOrderRepository) FindVehicleByID(ctx context.Context, id uuid.UUID) (*usecase.VehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE id = $1`, id)
 	return scanVehicleRef(row)
 }
 
-func (repository *PostgresServiceOrderRepository) findVehicleByPlate(ctx context.Context, plate string) (*vehicleRef, error) {
+func (repository *PostgresServiceOrderRepository) FindVehicleByPlate(ctx context.Context, plate string) (*usecase.VehicleRef, error) {
 	row := repository.pool.QueryRow(ctx,
 		`SELECT id, code, license_plate, customer_id, status = 'ACTIVE', brand, model, year, color FROM vehicles WHERE license_plate = $1`, plate)
 	return scanVehicleRef(row)
 }
 
-func scanVehicleRef(row pgx.Row) (*vehicleRef, error) {
-	ref := &vehicleRef{}
+func scanVehicleRef(row pgx.Row) (*usecase.VehicleRef, error) {
+	ref := &usecase.VehicleRef{}
 	if err := row.Scan(&ref.ID, &ref.Code, &ref.LicensePlate, &ref.CustomerID, &ref.Active,
 		&ref.Brand, &ref.Model, &ref.Year, &ref.Color); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -285,7 +141,7 @@ func scanVehicleRef(row pgx.Row) (*vehicleRef, error) {
 // findMissingServiceIDs reports which of ids do not exist in the services
 // catalog, so the caller can reject the request naming exactly what's
 // missing (requirements.md §3.7).
-func (repository *PostgresServiceOrderRepository) findMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+func (repository *PostgresServiceOrderRepository) FindMissingServiceIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -323,7 +179,7 @@ func (repository *PostgresServiceOrderRepository) findMissingServiceIDs(ctx cont
 // regardless of the token; only then is tokenHash checked against that
 // order's active tracking token, mirroring
 // service-order-tracking.PostgresTrackingRepository.FindByCodeAndTokenHash.
-func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
+func (repository *PostgresServiceOrderRepository) FindServiceOrderByCodeWithTrackingToken(ctx context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
 	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
@@ -357,7 +213,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByCodeWithTrac
 // service ids, used to build the response after Create commits — a read,
 // not a write, so it does not need to run inside Create's transaction
 // (design.md §4.2).
-func (repository *PostgresServiceOrderRepository) findServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*serviceRef, error) {
+func (repository *PostgresServiceOrderRepository) FindServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]*usecase.ServiceRef, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -369,9 +225,9 @@ func (repository *PostgresServiceOrderRepository) findServicesByIDs(ctx context.
 	}
 	defer rows.Close()
 
-	var refs []*serviceRef
+	var refs []*usecase.ServiceRef
 	for rows.Next() {
-		ref := &serviceRef{}
+		ref := &usecase.ServiceRef{}
 		if err := rows.Scan(&ref.ID, &ref.Code, &ref.Name); err != nil {
 			return nil, err
 		}

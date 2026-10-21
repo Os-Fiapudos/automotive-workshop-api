@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"errors"
 
@@ -20,7 +21,7 @@ import (
 // internal/features/product/repository.go's AdjustStock already established
 // for this exact race (BR8): Postgres serializes concurrent UPDATEs of the
 // same row, so a concurrent call can never observe a stale balance.
-func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error) {
+func (repository *PostgresServiceOrderRepository) RegisterStockUsage(ctx context.Context, orderID uuid.UUID, items []usecase.StockUsageItem) ([]*domain.StockMovement, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"errors"
 	"strconv"
@@ -13,7 +14,7 @@ import (
 // findServiceOrderByCode loads a ServiceOrder by its sequential code,
 // findServiceOrderByID's counterpart for the code branch of
 // GET /api/v1/service-orders/{id} (design.md §1.2).
-func (repository *PostgresServiceOrderRepository) findServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error) {
+func (repository *PostgresServiceOrderRepository) FindServiceOrderByCode(ctx context.Context, code int64) (*domain.ServiceOrder, error) {
 	order := &domain.ServiceOrder{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, customer_id, vehicle_id, opened_at, status, notes, created_at, updated_at
@@ -34,7 +35,7 @@ func (repository *PostgresServiceOrderRepository) findServiceOrderByCode(ctx con
 // against services directly — unlike findServicesByIDs (used by the create
 // flow, which already has the ids in memory), a detail view loaded back from
 // the database only has the order's id (design.md §1.7).
-func (repository *PostgresServiceOrderRepository) findRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*serviceRef, error) {
+func (repository *PostgresServiceOrderRepository) FindRequestedServices(ctx context.Context, serviceOrderID uuid.UUID) ([]*usecase.ServiceRef, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT s.id, s.code, s.name
 		 FROM service_order_requested_services r
@@ -45,9 +46,9 @@ func (repository *PostgresServiceOrderRepository) findRequestedServices(ctx cont
 	}
 	defer rows.Close()
 
-	var refs []*serviceRef
+	var refs []*usecase.ServiceRef
 	for rows.Next() {
-		ref := &serviceRef{}
+		ref := &usecase.ServiceRef{}
 		if err := rows.Scan(&ref.ID, &ref.Code, &ref.Name); err != nil {
 			return nil, err
 		}
@@ -58,7 +59,7 @@ func (repository *PostgresServiceOrderRepository) findRequestedServices(ctx cont
 
 // findHistoryByServiceOrderID loads a service order's full status-change
 // trail, oldest first (requirements.md BR4).
-func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
+func (repository *PostgresServiceOrderRepository) FindHistoryByServiceOrderID(ctx context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
 	rows, err := repository.pool.Query(ctx,
 		`SELECT id, service_order_id, occurred_at, event, description, previous_status, new_status
 		 FROM service_order_history
@@ -89,7 +90,7 @@ func (repository *PostgresServiceOrderRepository) findHistoryByServiceOrderID(ct
 // oldest first; when filter.Status is set, every row already shares one
 // status, so both the exclusion and the priority CASE are skipped in favor
 // of plain oldest-first (requirements.md BR3, AC12/AC13).
-func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+func (repository *PostgresServiceOrderRepository) ListServiceOrders(ctx context.Context, filter usecase.ListFilter, page, pageSize int) ([]*usecase.ServiceOrderListItem, int, error) {
 	offset := (page - 1) * pageSize
 
 	query := `
@@ -159,12 +160,12 @@ func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.
 	}
 	defer rows.Close()
 
-	var items []*ServiceOrderListItem
+	var items []*usecase.ServiceOrderListItem
 	total := 0
 	for rows.Next() {
 		order := &domain.ServiceOrder{}
-		customer := &customerRef{}
-		vehicle := &vehicleRef{}
+		customer := &usecase.CustomerRef{}
+		vehicle := &usecase.VehicleRef{}
 		if err := rows.Scan(
 			&order.ID, &order.Code, &order.CustomerID, &order.VehicleID, &order.OpenedAt, &order.Status, &order.Notes, &order.CreatedAt, &order.UpdatedAt,
 			&customer.ID, &customer.Code, &customer.Name, &customer.Active, &customer.Document, &customer.Phone,
@@ -173,7 +174,7 @@ func (repository *PostgresServiceOrderRepository) listServiceOrders(ctx context.
 		); err != nil {
 			return nil, 0, err
 		}
-		items = append(items, &ServiceOrderListItem{Order: order, Customer: customer, Vehicle: vehicle})
+		items = append(items, &usecase.ServiceOrderListItem{Order: order, Customer: customer, Vehicle: vehicle})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err

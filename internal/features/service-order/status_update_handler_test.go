@@ -20,17 +20,14 @@ const testStatusSecret = "status-test-secret"
 
 // newStatusUpdateMux wires the real routes with a requireAuth that rejects
 // everything, proving the route is reachable without an administrative JWT.
-func newStatusUpdateMux(repo *fakeRepository) *http.ServeMux {
-	service := newTestService(repo).
-		WithExternalNotificationSecret(testExternalSecret).
-		WithExternalStatusUpdateSecret(testStatusSecret)
+func newStatusUpdateMux(store *fakeStore) *http.ServeMux {
 	denyAll := func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 		})
 	}
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, service, denyAll)
+	RegisterRoutes(mux, newTestUseCases(store), denyAll)
 	return mux
 }
 
@@ -45,7 +42,7 @@ func postStatusUpdate(mux *http.ServeMux, id, secret, body string) *httptest.Res
 }
 
 func TestStatusUpdateSuccessReducedResponse(t *testing.T) {
-	repo := newFakeRepository()
+	repo := newFakeStore()
 	mux := newStatusUpdateMux(repo)
 	order := seedOrder(repo, domain.StatusReceived)
 
@@ -61,7 +58,7 @@ func TestStatusUpdateSuccessReducedResponse(t *testing.T) {
 // quote-decision secret, and a bearer token alone are all 401 — for an
 // unknown order too, so the check reveals nothing about which ids exist.
 func TestStatusUpdateUnauthorized(t *testing.T) {
-	repo := newFakeRepository()
+	repo := newFakeStore()
 	mux := newStatusUpdateMux(repo)
 	order := seedOrder(repo, domain.StatusReceived)
 
@@ -98,7 +95,7 @@ func TestStatusUpdateValidation(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			repo := newFakeRepository()
+			repo := newFakeStore()
 			mux := newStatusUpdateMux(repo)
 			order := seedOrder(repo, domain.StatusReceived)
 
@@ -111,7 +108,7 @@ func TestStatusUpdateValidation(t *testing.T) {
 }
 
 func TestStatusUpdateUnknownOrder(t *testing.T) {
-	mux := newStatusUpdateMux(newFakeRepository())
+	mux := newStatusUpdateMux(newFakeStore())
 
 	for _, id := range []string{uuid.NewString(), "not-a-uuid"} {
 		response := postStatusUpdate(mux, id, testStatusSecret, `{"status":"IN_DIAGNOSIS"}`)
@@ -121,7 +118,7 @@ func TestStatusUpdateUnknownOrder(t *testing.T) {
 
 // TestStatusUpdateIllegalTransitionIsConflict covers AC5/AC9.
 func TestStatusUpdateIllegalTransitionIsConflict(t *testing.T) {
-	repo := newFakeRepository()
+	repo := newFakeStore()
 	mux := newStatusUpdateMux(repo)
 	order := seedOrder(repo, domain.StatusReceived)
 
@@ -133,7 +130,7 @@ func TestStatusUpdateIllegalTransitionIsConflict(t *testing.T) {
 }
 
 func TestStatusUpdatePendingExecutionsIsConflict(t *testing.T) {
-	repo := newFakeRepository()
+	repo := newFakeStore()
 	mux := newStatusUpdateMux(repo)
 	order := seedOrder(repo, domain.StatusInProgress)
 	serviceID := uuid.New()

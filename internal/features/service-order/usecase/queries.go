@@ -1,12 +1,13 @@
-package serviceorder
+package usecase
 
 import (
-	"automotive-workshop-api/internal/features/service-order/domain"
 	"context"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/features/service-order/domain"
 )
 
 // ListFilter carries the already-parsed/validated filters accepted by
@@ -27,47 +28,62 @@ type ListFilter struct {
 // (design.md §1.8).
 type ServiceOrderListItem struct {
 	Order    *domain.ServiceOrder
-	Customer *customerRef
-	Vehicle  *vehicleRef
+	Customer *CustomerRef
+	Vehicle  *VehicleRef
 }
 
 // ServiceOrderDetail is the full read model for a single service order
 // (design.md §1.8). Quote is nil when no quote has been composed yet.
 type ServiceOrderDetail struct {
 	Order             *domain.ServiceOrder
-	Customer          *customerRef
-	Vehicle           *vehicleRef
-	RequestedServices []*serviceRef
+	Customer          *CustomerRef
+	Vehicle           *VehicleRef
+	RequestedServices []*ServiceRef
 	Quote             *domain.Quote
 	History           []*domain.ServiceOrderHistory
+}
+
+// Queries groups the read-only service order use cases
+// (specs/service-order-query/).
+type Queries struct {
+	orders     OrderFinder
+	codes      OrderCodeFinder
+	customers  CustomerLookup
+	vehicles   VehicleLookup
+	projection ServiceOrderQueryStore
+	quotes     QuoteReader
+}
+
+func NewQueries(orders OrderFinder, codes OrderCodeFinder, customers CustomerLookup, vehicles VehicleLookup, projection ServiceOrderQueryStore, quotes QuoteReader) *Queries {
+	return &Queries{orders: orders, codes: codes, customers: customers, vehicles: vehicles, projection: projection, quotes: quotes}
 }
 
 // List retrieves a filtered, paginated page of service orders. With no
 // status filter, it excludes COMPLETED/DELIVERED/CANCELED and orders by
 // status priority then oldest first; with a status filter, it orders
 // oldest first within that status (requirements.md BR1-BR3).
-func (service *ServiceOrderService) List(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
-	return service.lookups.listServiceOrders(ctx, filter, page, pageSize)
+func (queries *Queries) List(ctx context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+	return queries.projection.ListServiceOrders(ctx, filter, page, pageSize)
 }
 
 // GetDetail retrieves the full detail view of a service order by its
 // technical id (requirements.md BR4).
-func (service *ServiceOrderService) GetDetail(ctx context.Context, id uuid.UUID) (*ServiceOrderDetail, error) {
-	order, err := service.lookups.findServiceOrderByID(ctx, id)
+func (queries *Queries) GetDetail(ctx context.Context, id uuid.UUID) (*ServiceOrderDetail, error) {
+	order, err := queries.orders.FindServiceOrderByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return service.buildDetail(ctx, order)
+	return queries.buildDetail(ctx, order)
 }
 
 // GetDetailByCode retrieves the full detail view of a service order by its
 // sequential code (requirements.md BR4).
-func (service *ServiceOrderService) GetDetailByCode(ctx context.Context, code int64) (*ServiceOrderDetail, error) {
-	order, err := service.lookups.findServiceOrderByCode(ctx, code)
+func (queries *Queries) GetDetailByCode(ctx context.Context, code int64) (*ServiceOrderDetail, error) {
+	order, err := queries.codes.FindServiceOrderByCode(ctx, code)
 	if err != nil {
 		return nil, err
 	}
-	return service.buildDetail(ctx, order)
+	return queries.buildDetail(ctx, order)
 }
 
 // buildDetail assembles a ServiceOrderDetail once the order itself is
@@ -75,28 +91,28 @@ func (service *ServiceOrderService) GetDetailByCode(ctx context.Context, code in
 // filters any related record by status/active (requirements.md BR6) — an
 // inactive customer/vehicle or an order with no quote yet are both valid,
 // fully-displayed states, not errors.
-func (service *ServiceOrderService) buildDetail(ctx context.Context, order *domain.ServiceOrder) (*ServiceOrderDetail, error) {
-	customer, err := service.lookups.findCustomerByID(ctx, order.CustomerID)
+func (queries *Queries) buildDetail(ctx context.Context, order *domain.ServiceOrder) (*ServiceOrderDetail, error) {
+	customer, err := queries.customers.FindCustomerByID(ctx, order.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 
-	vehicle, err := service.lookups.findVehicleByID(ctx, order.VehicleID)
+	vehicle, err := queries.vehicles.FindVehicleByID(ctx, order.VehicleID)
 	if err != nil {
 		return nil, err
 	}
 
-	requestedServices, err := service.lookups.findRequestedServices(ctx, order.ID)
+	requestedServices, err := queries.projection.FindRequestedServices(ctx, order.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	history, err := service.lookups.findHistoryByServiceOrderID(ctx, order.ID)
+	history, err := queries.projection.FindHistoryByServiceOrderID(ctx, order.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	quote, err := service.repository.FindQuoteByServiceOrderID(ctx, order.ID)
+	quote, err := queries.quotes.FindQuoteByServiceOrderID(ctx, order.ID)
 	if err != nil && !errors.Is(err, domain.ErrQuoteNotFound) {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package serviceorder
+package usecase
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
@@ -31,7 +31,7 @@ func TestAverageExecutionTimeAveragesCompletedExecutions(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
 
 	start := time.Now().Add(-2 * time.Hour)
 	end30 := start.Add(30 * time.Minute)
@@ -52,7 +52,7 @@ func TestAverageExecutionTimeExcludesInProgressExecutions(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
 
 	start := time.Now().Add(-time.Hour)
 	end := start.Add(20 * time.Minute)
@@ -81,8 +81,8 @@ func TestAverageExecutionTimeFiltersByService(t *testing.T) {
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	targetID := uuid.New()
 	otherID := uuid.New()
-	repo.addService(&serviceRef{ID: targetID, Code: 1, Name: "Troca de óleo"})
-	repo.addService(&serviceRef{ID: otherID, Code: 2, Name: "Alinhamento"})
+	repo.addService(&ServiceRef{ID: targetID, Code: 1, Name: "Troca de óleo"})
+	repo.addService(&ServiceRef{ID: otherID, Code: 2, Name: "Alinhamento"})
 
 	start := time.Now().Add(-time.Hour)
 	end := start.Add(15 * time.Minute)
@@ -100,7 +100,7 @@ func TestAverageExecutionTimeFiltersByDateRange(t *testing.T) {
 	service := newTestService(repo)
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	serviceID := uuid.New()
-	repo.addService(&serviceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Troca de óleo"})
 
 	oldStart := time.Now().Add(-30 * 24 * time.Hour)
 	oldEnd := oldStart.Add(10 * time.Minute)
@@ -123,8 +123,8 @@ func TestAverageExecutionTimeCombinedFilters(t *testing.T) {
 	customerID, vehicleID := seedActiveCustomerAndVehicle(repo)
 	targetID := uuid.New()
 	otherID := uuid.New()
-	repo.addService(&serviceRef{ID: targetID, Code: 1, Name: "Troca de óleo"})
-	repo.addService(&serviceRef{ID: otherID, Code: 2, Name: "Alinhamento"})
+	repo.addService(&ServiceRef{ID: targetID, Code: 1, Name: "Troca de óleo"})
+	repo.addService(&ServiceRef{ID: otherID, Code: 2, Name: "Alinhamento"})
 
 	recentStart := time.Now().Add(-time.Hour)
 	recentEnd := recentStart.Add(10 * time.Minute)

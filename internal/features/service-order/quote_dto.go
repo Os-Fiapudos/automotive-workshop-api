@@ -2,6 +2,7 @@ package serviceorder
 
 import (
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
 	"strconv"
 	"strings"
 	"time"
@@ -54,13 +55,13 @@ func itemField(index int) string {
 	return "items[" + strconv.Itoa(index) + "]"
 }
 
-func (request ComposeQuoteRequest) toInputs() []QuoteItemInput {
-	inputs := make([]QuoteItemInput, 0, len(request.Items))
+func (request ComposeQuoteRequest) toInputs() []usecase.QuoteItemInput {
+	inputs := make([]usecase.QuoteItemInput, 0, len(request.Items))
 	for _, item := range request.Items {
 		if strings.TrimSpace(item.ProductID) != "" {
-			inputs = append(inputs, QuoteItemInput{Kind: domain.QuoteItemProduct, ProductID: item.ProductID, Quantity: item.Quantity})
+			inputs = append(inputs, usecase.QuoteItemInput{Kind: domain.QuoteItemProduct, ProductID: item.ProductID, Quantity: item.Quantity})
 		} else {
-			inputs = append(inputs, QuoteItemInput{Kind: domain.QuoteItemService, ServiceID: item.ServiceID, Quantity: item.Quantity})
+			inputs = append(inputs, usecase.QuoteItemInput{Kind: domain.QuoteItemService, ServiceID: item.ServiceID, Quantity: item.Quantity})
 		}
 	}
 	return inputs

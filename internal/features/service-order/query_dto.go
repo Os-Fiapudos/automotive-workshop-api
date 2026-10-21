@@ -1,6 +1,9 @@
 package serviceorder
 
-import "time"
+import (
+	"automotive-workshop-api/internal/features/service-order/usecase"
+	"time"
+)
 
 // listItemResponse is one row of the GET /api/v1/service-orders response
 // body — deliberately lighter than DetailResponse (no items/history), same
@@ -27,7 +30,7 @@ type ListResponse struct {
 	TotalPages int                `json:"totalPages"`
 }
 
-func toListResponse(items []*ServiceOrderListItem, page, pageSize, total int) ListResponse {
+func toListResponse(items []*usecase.ServiceOrderListItem, page, pageSize, total int) ListResponse {
 	data := make([]listItemResponse, 0, len(items))
 	for _, item := range items {
 		data = append(data, listItemResponse{
@@ -114,7 +117,7 @@ type DetailResponse struct {
 	UpdatedAt         time.Time              `json:"updatedAt"`
 }
 
-func toDetailResponse(detail *ServiceOrderDetail) DetailResponse {
+func toDetailResponse(detail *usecase.ServiceOrderDetail) DetailResponse {
 	requestedServices := make([]serviceSummary, 0, len(detail.RequestedServices))
 	for _, service := range detail.RequestedServices {
 		requestedServices = append(requestedServices, serviceSummary{
