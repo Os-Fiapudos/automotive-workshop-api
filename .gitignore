@@ -4,3 +4,10 @@ coverage/
 security/
 bruno/environments/*.local.bru
 backups/
+# scripts/deploy.sh (specs/ci-cd-pipeline/): evidence of each deploy, and what
+# terraform apply leaves in infra/ - state and the kind kubeconfig hold credentials.
+deploy-evidence/
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*-config

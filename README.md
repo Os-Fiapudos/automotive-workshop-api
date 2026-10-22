@@ -27,7 +27,8 @@
 8. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
 9. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
 10. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
-11. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
+11. [Pipeline de CI/CD](#pipeline-de-cicd)
+12. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
 
 ---
 
@@ -506,6 +507,66 @@ Executa `govulncheck` e `gosec` fixados em versões sem poluir o `go.mod`:
 
 ---
 
+## Pipeline de CI/CD
+
+Um único workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) valida cada commit e entrega a versão validada num cluster Kubernetes. Spec: [specs/ci-cd-pipeline/](specs/ci-cd-pipeline/).
+
+```text
+push / pull request ─┬─ build ───────┐
+                     ├─ coverage ────┤   (os quatro checks de sempre)
+                     ├─ migrations ──┤
+                     ├─ security ────┤
+                     └─ image ───────┤   build da imagem, sem push
+                                     ▼
+            push na main ou execução manual (workflow_dispatch)
+                                     ▼
+ publish ── push no GHCR: ghcr.io/os-fiapudos/automotive-workshop-api:<sha>
+                                     ▼
+ deploy (ambiente efêmero dentro do runner)
+   check → Terraform (cluster kind + Postgres) → Postgres pronto → Secrets/ConfigMap
+   → Job de migração até Complete → Job de bootstrap do admin → Deployment/Service/HPA
+   → rollout → smoke autenticado → evidências → terraform destroy (sempre)
+```
+
+**Regra de falha:** nada é publicado se `build`, `coverage`, `migrations`, `security` e `image` não passarem para aquele commit; nada é implantado se não foi publicado; nada é *rollout* se o banco ou a migração falharem. Pull requests rodam só os checks e o build da imagem — sem push, sem deploy, sem segredo.
+
+**Imagem:** nome em minúsculas (registries rejeitam maiúsculas), tag com o SHA completo do commit; o deploy usa a referência imutável `nome:<sha>@sha256:<digest>`. Se o pacote for privado, o job cria no cluster um Secret de pull com o próprio `GITHUB_TOKEN` (somente leitura).
+
+**Credenciais:** o ambiente efêmero não usa nenhum secret do repositório. Senha do Postgres, `JWT_SECRET`, os dois `EXTERNAL_*` e a senha do administrador são gerados a cada execução, mascarados no log e morrem com o cluster. O Terraform roda com saída `-json` filtrada (só endereços e progresso), e as evidências são sanitizadas e reconferidas antes do upload.
+
+**Smoke test** ([`scripts/deploy-smoke.sh`](scripts/deploy-smoke.sh)): `/health` não prova schema nem autorização, então o teste também confere `401` sem token, login com o administrador criado pelo `/bootstrap-admin` no banco recém-criado, `GET /api/v1/auth/me` e `GET /api/v1/services` autenticados.
+
+**Evidências:** cada deploy (com sucesso ou não) publica o artefato `deploy-evidence-<id>` e o mesmo resumo na página da execução — id do ambiente (`ci-<run>-<tentativa>`), SHA, imagem e digest efetivamente rodando, resultado de cada etapa, status e logs dos Jobs, rollout e saída do smoke.
+
+### Executar manualmente (vídeo / demonstração)
+
+Em **Actions → CI → Run workflow** (ou `gh workflow run ci.yml --ref <branch>`). A opção **simulate_migration_failure** injeta, só naquela execução, uma migration que sempre falha: a execução termina com falha, o Job de migração fica `Failed`, nenhum `Deployment` é criado, e as evidências e o destroy acontecem do mesmo jeito.
+
+```bash
+gh workflow run ci.yml --ref main                                           # caminho feliz
+gh workflow run ci.yml --ref main -f simulate_migration_failure=true        # falha controlada
+```
+
+O ambiente efêmero existe só durante o job: não há promessa de disponibilidade depois da execução.
+
+### Ambiente de demonstração (máquina local)
+
+O mesmo [`scripts/deploy.sh`](scripts/deploy.sh) que a CI chama etapa por etapa sobe, na sua máquina, um ambiente que **continua no ar** para o vídeo e o consumo da API. Requer Docker, Terraform, `kubectl`, `curl` e `jq`, e os diretórios `infra/` (FP-35) e `k8s/` (FP-34).
+
+```bash
+export IMAGE=ghcr.io/os-fiapudos/automotive-workshop-api:<sha>   # uma imagem já publicada pela CI
+export POSTGRES_PASSWORD=$(openssl rand -hex 24) JWT_SECRET=$(openssl rand -hex 32) \
+       EXTERNAL_NOTIFICATION_SECRET=$(openssl rand -hex 32) \
+       EXTERNAL_STATUS_UPDATE_SECRET=$(openssl rand -hex 32) \
+       ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=$(openssl rand -hex 16)
+make deploy                                    # scripts/deploy.sh up — não destrói nada
+make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes # só quando quiser derrubar
+```
+
+Guarde esses valores: execuções seguintes no mesmo ambiente precisam deles (o Postgres mantém a senha com que foi criado). Se o pacote no GHCR for privado, exporte também `REGISTRY_USERNAME` e `REGISTRY_PASSWORD` (um token com `read:packages`). As etapas também rodam isoladas (`scripts/deploy.sh check|infra|config|migrate|bootstrap|rollout|smoke|evidence|destroy`), e as evidências ficam em `deploy-evidence/<id>/`.
+
+---
+
 ## Estrutura de Pastas do Projeto
 
 ```text
@@ -542,6 +603,8 @@ automotive-workshop-api/
 │   └── insomnia-collection.json    # Coleção Insomnia v4
 ├── scripts/                        # Scripts de automação
 │   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
+│   ├── deploy.sh                   # Deploy em etapas no Kubernetes (CI e ambiente de demonstração)
+│   ├── deploy-smoke.sh             # Smoke autenticado de um ambiente implantado
 │   ├── migrate.sh                  # Migrations: up, version, create, down, baseline, verify
 │   ├── security-scan.sh            # Varredura com gosec e govulncheck
 │   └── smoke.sh                    # Smoke test da stack local (health, login, abrir/consultar OS)
