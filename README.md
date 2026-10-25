@@ -24,6 +24,7 @@
 5. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
 6. [Credenciais de Teste e Dados Iniciais (Seed)](#credenciais-de-teste-e-dados-iniciais-seed)
 7. [Migrações do Banco de Dados](#migrações-do-banco-de-dados)
+   - [Infraestrutura com Terraform e Deploy em Kubernetes](#infraestrutura-com-terraform-e-deploy-em-kubernetes)
 8. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
 9. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
 10. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
@@ -366,6 +367,32 @@ ADMIN_EMAIL=admin@oficina.example ADMIN_PASSWORD='uma-senha-forte-aqui' make boo
 
 ---
 
+## Infraestrutura com Terraform e Deploy em Kubernetes
+
+Ambiente Kubernetes local da Fase 2, provisionado por código. Specs: [specs/infrastructure-provisioning/](specs/infrastructure-provisioning/) (FP-35) e [specs/kubernetes-deployment/](specs/kubernetes-deployment/) (FP-34).
+
+```text
+terraform apply (infra/)                      deploy (k8s/, FP-36 scripts/deploy.sh ou comandos manuais)
+├─ cluster kind (1 nó)                         ├─ Secrets da API e do admin (nunca no Git)
+├─ metrics-server (Helm)                       ├─ ConfigMap de migrations ← migrations/
+├─ namespace automotive-workshop (restricted)  ├─ Job de migração ──► Complete (senão para aqui)
+└─ Postgres 16: StatefulSet + PVC + Service    ├─ Job /bootstrap-admin ──► Complete
+                                               └─ ConfigMap + Deployment + Service + HPA (2–8 pods, CPU 70 % / memória 80 %)
+```
+
+| Etapa | Comandos | Detalhes |
+| --- | --- | --- |
+| Provisionar cluster e banco | `export TF_VAR_postgres_password=$(openssl rand -hex 32)` e `make infra-init infra-apply` | [infra/README.md](infra/README.md): recursos criados, outputs, state, destroy, limites |
+| Implantar a API | `make deploy` (FP-36) ou os comandos do [k8s/README.md](k8s/README.md) | ordem obrigatória; nunca `kubectl apply -f k8s/` |
+| Acessar | `kubectl -n automotive-workshop port-forward svc/automotive-workshop-api 8080:8080` | collection com `baseUrl` `http://localhost:8080` |
+| Demonstrar escala e resiliência | `make k8s-hpa-load`, `make k8s-pod-recovery`, `make k8s-db-persistence` | evidências em `evidence/` (git-ignored) |
+| Validar sem cluster | `make iac-validate` | o mesmo que o workflow [`.github/workflows/iac.yml`](.github/workflows/iac.yml) roda |
+| Derrubar | `make infra-destroy INFRA_CONFIRM_DESTROY=yes` | só em ambiente descartável: apaga os dados |
+
+Pré-requisitos: Docker, Terraform ≥ 1.16 e `kubectl`. Em host com cgroup v1, veja a nota sobre `node_image` em [infra/README.md](infra/README.md#pré-requisitos).
+
+---
+
 ## Documentação dos Endpoints da API
 
 A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
@@ -515,6 +542,8 @@ automotive-workshop-api/
 │   │   └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
 │   └── bootstrap-admin/            # Comando que cria o admin num banco recém-migrado
 ├── migrations/                     # Migrations versionadas (golang-migrate): 0001 = baseline da Fase 1
+├── infra/                          # Terraform: cluster kind, metrics-server, Postgres (FP-35)
+├── k8s/                            # Manifests da API: Deployment, Service, ConfigMap, HPA, Jobs (FP-34)
 ├── internal/
 │   ├── features/                   # Fatias verticais (Vertical Slice Architecture)
 │   │   ├── auth/                   # Autenticação administrativa e login JWT
@@ -542,6 +571,8 @@ automotive-workshop-api/
 │   └── insomnia-collection.json    # Coleção Insomnia v4
 ├── scripts/                        # Scripts de automação
 │   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
+│   ├── iac-validate.sh             # Validação estática de infra/ e k8s/ (terraform validate, kubeconform)
+│   ├── k8s-evidence.sh             # Evidências no cluster: HPA sob carga, reposição de pod, persistência do banco
 │   ├── migrate.sh                  # Migrations: up, version, create, down, baseline, verify
 │   ├── security-scan.sh            # Varredura com gosec e govulncheck
 │   └── smoke.sh                    # Smoke test da stack local (health, login, abrir/consultar OS)
