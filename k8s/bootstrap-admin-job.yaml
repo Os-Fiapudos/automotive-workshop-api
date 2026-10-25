@@ -1,0 +1,59 @@
+# Administrator bootstrap Job (specs/kubernetes-deployment/design.md §6, FP-33 BR10). Runs
+# /bootstrap-admin from the API image (same reference as the Deployment) after the
+# migration Job is Complete. Idempotent: an existing user with ADMIN_EMAIL is left as is.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: automotive-workshop-api-bootstrap-admin
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: bootstrap-admin
+    app.kubernetes.io/part-of: automotive-workshop
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: automotive-workshop-api
+        app.kubernetes.io/component: bootstrap-admin
+        app.kubernetes.io/part-of: automotive-workshop
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap-admin
+          image: ghcr.io/os-fiapudos/automotive-workshop-api
+          imagePullPolicy: IfNotPresent
+          command: ["/bootstrap-admin"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: automotive-workshop-api-secrets
+                  key: DATABASE_URL
+          # ADMIN_EMAIL, ADMIN_PASSWORD and the optional ADMIN_NAME. A Secret of its own,
+          # so API pods never receive the administrator's password.
+          envFrom:
+            - secretRef:
+                name: automotive-workshop-admin-bootstrap
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

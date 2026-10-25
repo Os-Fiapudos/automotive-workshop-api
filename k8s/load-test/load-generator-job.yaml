@@ -1,0 +1,65 @@
+# In-cluster load for the HPA demonstration (specs/kubernetes-deployment/design.md §7).
+# Evidence only — never part of a deploy. Requests go through the Service, so kube-proxy
+# spreads them across every ready API pod (a port-forward would pin a single pod).
+# Run it through `scripts/k8s-evidence.sh hpa-load`, which gives it a unique name, sets
+# the workers/duration and records the replica timeline.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: automotive-workshop-load-generator
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-load-generator
+    app.kubernetes.io/component: load-test
+    app.kubernetes.io/part-of: automotive-workshop
+spec:
+  parallelism: 4
+  completions: 4
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: automotive-workshop-load-generator
+        app.kubernetes.io/component: load-test
+        app.kubernetes.io/part-of: automotive-workshop
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+          env:
+            - name: TARGET_URL
+              value: http://automotive-workshop-api.automotive-workshop.svc.cluster.local:8080/health
+            - name: DURATION_SECONDS
+              value: "240"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              end=$(( $(date +%s) + DURATION_SECONDS ))
+              ok=0; failed=0
+              while [ "$(date +%s)" -lt "$end" ]; do
+                if wget -q -T 2 -O /dev/null "$TARGET_URL"; then ok=$((ok + 1)); else failed=$((failed + 1)); fi
+              done
+              echo "requests ok=$ok failed=$failed"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 16Mi
+            limits:
+              cpu: 500m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
