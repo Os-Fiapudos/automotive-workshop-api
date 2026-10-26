@@ -8,6 +8,7 @@ backups/
 # Terraform (infra/, specs/infrastructure-provisioning/) - the state holds secrets
 infra/.terraform/
 infra/.kube/
+infra/*-config
 *.tfstate
 *.tfstate.*
 *.tfplan
@@ -17,3 +18,6 @@ crash.log
 # Kubernetes (k8s/, specs/kubernetes-deployment/) - local Secret copies and evidence
 k8s/**/*.local.yaml
 evidence/
+
+# scripts/deploy.sh (specs/ci-cd-pipeline/) - evidence of each deploy
+deploy-evidence/

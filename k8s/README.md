@@ -33,9 +33,10 @@ migrations são criados no deploy, nunca commitados com valores.
 
 ## Caminho 1: `scripts/deploy.sh` (FP-36)
 
-Com o pipeline do FP-36 no branch ([PR #42](https://github.com/Os-Fiapudos/automotive-workshop-api/pull/42)),
 `make deploy` (`scripts/deploy.sh up`) executa todas as etapas acima, gera as credenciais
-nos Secrets e coleta evidências. Variáveis: veja `specs/ci-cd-pipeline/design.md` §4 e §10.
+nos Secrets e coleta evidências; é o mesmo script que o job `deploy` da CI roda etapa por
+etapa. Variáveis: seção "Ambiente de demonstração" do README raiz e
+`specs/ci-cd-pipeline/design.md` §4 e §10.
 
 ## Caminho 2: comandos manuais
 

@@ -62,6 +62,10 @@ help: ## Mostra esta ajuda
 	@echo '  make migrate-down MIGRATE_CONFIRM_DOWN=yes — Reverte 1 migration (só banco descartável)'
 	@echo '  make bootstrap-admin  — Cria o admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD'
 	@echo ''
+	@echo '=== Deploy em Kubernetes — ambiente de demonstração (specs/ci-cd-pipeline/) ==='
+	@echo '  make deploy           — Terraform + migrations + bootstrap + rollout + smoke (IMAGE e segredos no ambiente)'
+	@echo '  make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes — Derruba o cluster e o banco'
+	@echo ''
 	@echo '=== Opção 2: Banco no Docker + API local ==='
 	@echo '  make start-db     — Sobe apenas o Postgres (docker)'
 	@echo '  make run          — Roda a API localmente (go run ./cmd/api)'
@@ -304,3 +308,16 @@ migrate-verify: ## Verifica a cadeia de migrations em containers descartáveis (
 bootstrap-admin: ## Cria o usuário admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD (idempotente)
 	@test -n "$$ADMIN_EMAIL" && test -n "$$ADMIN_PASSWORD" || { echo "Uso: ADMIN_EMAIL=... ADMIN_PASSWORD=... make bootstrap-admin"; exit 1; }
 	$(COMPOSE) run --build --rm --no-deps -e ADMIN_EMAIL -e ADMIN_PASSWORD -e ADMIN_NAME api /bootstrap-admin
+
+# ─── Deploy em Kubernetes (specs/ci-cd-pipeline/) ─────────────────────────────
+# The same staged script the CI deploy job runs; locally it builds the demonstration
+# environment and leaves it up. Needs IMAGE and the credentials in the environment
+# (README, "Ambiente de demonstração").
+
+.PHONY: deploy
+deploy: ## Sobe/atualiza o ambiente de demonstração no Kubernetes (não destrói nada)
+	scripts/deploy.sh up
+
+.PHONY: deploy-destroy
+deploy-destroy: ## Derruba o ambiente de demonstração (exige DEPLOY_CONFIRM_DESTROY=yes)
+	@DEPLOY_CONFIRM_DESTROY='$(DEPLOY_CONFIRM_DESTROY)' scripts/deploy.sh destroy

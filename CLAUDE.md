@@ -140,6 +140,17 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   matter), and never give the `Deployment` a `replicas` field (the HPA owns it).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
+  **CD added on 2026-10-21 (FP-36, [specs/ci-cd-pipeline/](specs/ci-cd-pipeline/))**: every
+  push/PR also builds the image (`image`, no push). A push to `main` or a manual
+  `workflow_dispatch` then runs `publish` (GHCR, lowercase name, full-SHA tag, deployed as
+  `name:<sha>@<digest>`) and `deploy` — both `needs:` the `build`, `coverage`, `migrations`,
+  `security` and `image` jobs by name, so renaming one of those jobs means updating the
+  `needs:` lists. `deploy` is an ephemeral environment inside the runner, driven by
+  [scripts/deploy.sh](scripts/deploy.sh): Terraform (`/infra`, FP-35) → migration `Job` →
+  bootstrap `Job` → `/k8s` rollout (FP-34) → authenticated smoke → evidence → destroy. Its
+  credentials are generated per run (no repository secret); the integration contract with
+  `/infra` and `/k8s` is `specs/ci-cd-pipeline/design.md` §9. Pinned: Terraform `1.16.6`,
+  `kubectl` `v1.36.5` — raise them as a reviewed change, like the image pins above.
 
 ## 3. Project structure
 
@@ -148,7 +159,9 @@ cmd/api/main.go             → HTTP entrypoint, wires up the server and registe
 cmd/bootstrap-admin/        → one-off command creating the first admin user on a migrated
                                database (specs/database-migrations/, section 13)
 migrations/                 → versioned schema migrations (golang-migrate), section 14
-scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh
+scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh,
+                               deploy.sh + deploy-smoke.sh (staged Kubernetes deploy, used
+                               by CI and for the demonstration environment — FP-36)
 internal/features/          → one folder per business feature (vertical slice)
   features/auth/            → implemented slice: handler + service + repository + model
                                (login, /me; unit-tested)
@@ -284,6 +297,11 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
   and a render of `k8s/` identical to the deploy's, checked with `kubeconform -strict` plus
   the repository rules (no `replicas`, no Namespace/populated Secret in `k8s/`). Run in CI by
   `.github/workflows/iac.yml` on changes to `infra/**`/`k8s/**`, together with `shellcheck`.
+- `image` — builds the `Dockerfile` on every push/PR without pushing; `publish`/`deploy`
+  only on `main`/manual and only after every check above passed (section 2's CD note).
+  `scripts/deploy.sh check` validates the `/infra` + `/k8s` contract and renders the
+  manifests without a cluster; `scripts/deploy.sh destroy` refuses outside CI unless
+  `DEPLOY_CONFIRM_DESTROY=yes`.
 - No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
   `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
