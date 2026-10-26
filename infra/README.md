@@ -89,8 +89,9 @@ consome os outputs acima.
 - O state contém a senha do Postgres e a chave do cliente do cluster, apesar de a
   variável ser `sensitive`. `.gitignore` cobre `*.tfstate*`, `infra/.terraform/`,
   `infra/.kube/` e `terraform.tfvars`. Nunca commite, anexe ou compartilhe esses arquivos.
-- `.terraform.lock.hcl` (checksums dos providers) deve ser commitado quando gerado contra o
-  registry público: `terraform -chdir=infra providers lock -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64 -platform=windows_amd64`.
+- `.terraform.lock.hcl` (checksums dos providers, gerado contra o registry público) é
+  commitado. Ao subir a versão de um provider em `versions.tf`, regenere-o e commite junto:
+  `terraform -chdir=infra providers lock -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64 -platform=windows_amd64`.
 
 ## Persistência do banco
 

@@ -23,11 +23,10 @@ Jira **FP-35**. Revised 2026-10-25 with `requirements.md` §0.
 - [x] `infra/terraform.tfvars.example`; `.gitignore` covers `infra/.terraform/`,
       `*.tfstate*`, `terraform.tfvars`, `infra/.kube/`, `*.tfplan`.
 - [x] `Makefile` `infra-*` targets.
-- [ ] `.terraform.lock.hcl` committed, generated against the public registry for the team's
-      platforms (`design.md` §8). **Pending**: the registry was unreachable from the
-      environment that wrote this feature (§4), and a lock file built from a local mirror
-      would carry checksums of locally built binaries. First `terraform init` with registry
-      access: run `terraform providers lock` (`infra/README.md`) and commit the file.
+- [x] `.terraform.lock.hcl` committed, generated against the public registry for the team's
+      platforms (`design.md` §8). Done 2026-10-26 with Terraform 1.16.6 (`hashicorp/terraform`
+      image, the CI pin): `terraform providers lock` for linux_amd64, darwin_arm64,
+      darwin_amd64 and windows_amd64; `init -lockfile=readonly` + `validate` pass with it.
 
 ## 3. Static verification
 
