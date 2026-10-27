@@ -215,7 +215,10 @@ depends on another's current state.
 | Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User` and the `Service.active` field. `Customer`, `Vehicle`, `User`, and `Service` are the only entities with a corresponding Go implementation. |
 | API documentation | `docs/openapi.yaml` | Implemented for the Customer Management and Vehicle Management endpoints (schemas, pagination, error envelope, `bearerAuth` security scheme for Vehicle Management). The auth and service catalog endpoints are not documented here â€” `specs/auth/requirements.md` and `specs/service-catalog/requirements.md` both scoped RNF10 out as a separate future feature. |
 | Local environment | `docker-compose.yml`, `Dockerfile`, `.dockerignore`, `scripts/smoke.sh` | Implemented â€” orchestrates `db` (Postgres), the one-shot `migrate` and `seed` (FP-33), `api`, `adminer`, `swagger-ui` and `n8n` (FP-30); `api` requires `JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET` and `EXTERNAL_STATUS_UPDATE_SECRET` (fails fast via compose variable substitution if unset). Since FP-32 (2026-10-19, `specs/containerization/`) the image runs on `alpine:3.24` as non-root UID/GID `10001` with a `HEALTHCHECK` on `/health`, built from an allowlist `.dockerignore`; helper images are pinned; `make smoke` checks health, login and an authenticated service-order opening/query. |
-| CI | `.github/workflows/ci.yml` | Implemented â€” runs `go build ./...`, `go vet ./...`, `go test ./...`. |
+| Infrastructure as code | `infra/` (Terraform) | Implemented (FP-35, 2026-10-25, `specs/infrastructure-provisioning/`): one Terraform root, local backend, creating a single-node `kind` cluster, `metrics-server` (Helm) and the `automotive-workshop` namespace (Pod Security `restricted`), plus Postgres 16 as a `StatefulSet` `postgres` with a PVC and a headless `Service`. Outputs `kubeconfig_path` and `postgres_database_url_template` feed the deploy (FP-36 contract). Tooling only - Terraform, `kind` and `kubectl` are not Go dependencies. |
+| Kubernetes manifests | `k8s/`, `scripts/k8s-evidence.sh` | Implemented (FP-34, 2026-10-25, `specs/kubernetes-deployment/`): the API `Deployment` (no `replicas` - owned by the HPA; restricted security context; probes on `/health`), `ClusterIP` `Service`, `ConfigMap`, `autoscaling/v2` HPA (2-8, CPU 70 % / memory 80 %), the migration and `/bootstrap-admin` `Job`s, a `Secret` key template (never applied) and an in-cluster load generator. Applied in order by the deploy, never wholesale; `scripts/k8s-evidence.sh` records HPA scaling, pod recovery and database persistence. |
+| IaC validation | `.github/workflows/iac.yml`, `scripts/iac-validate.sh` | Implemented (FP-34/FP-35): on changes to `infra/**`/`k8s/**`, `terraform fmt`/`validate`, a render of `/k8s` identical to FP-36's deploy (kustomize image tag + digest, `Job` name suffix) validated with `kubeconform -strict`, repository rules, and `shellcheck`. Separate from `ci.yml`, which FP-36 owns. |
+| CI/CD | `.github/workflows/ci.yml`, `scripts/deploy.sh`, `scripts/deploy-smoke.sh` | Implemented. Every push/PR: `build` (build/vet/test), `coverage` (Postgres built by the migrations + seed, RNF06 gate), `migrations` (`scripts/migrate.sh verify`), `security` (`govulncheck`, `gosec`) and `image` (build, no push). A push to `main` or a manual run adds `publish` (GHCR, `name:<sha>@<digest>`) and `deploy` (FP-36): an ephemeral `kind` cluster inside the runner created by `/infra` Terraform, the migration `Job` (must complete before anything is rolled out), the `/bootstrap-admin` `Job`, the `/k8s` rollout, an authenticated smoke test, sanitized evidence and `terraform destroy`. The same script builds the demonstration environment on a developer machine. See `specs/ci-cd-pipeline/`. |
 
 ## 3. Responsibilities
 
@@ -576,9 +579,9 @@ skipping without `DATABASE_URL` â€” but differ, deliberately, on test libra
 - **Coverage targets**: none set numerically for any feature â€” "every new feature needs
   tests" (`CLAUDE.md` Â§11), not a percentage gate.
 - CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs `go build/vet/test
-  ./...` with no Postgres service configured, so every feature's integration tests currently
-  run in **skip mode** in CI; provisioning a Postgres service for CI to exercise them for
-  real remains **to be defined**.
+  ./...` in the `build` job, and the integration tests against a real Postgres (built by the
+  migrations + seed) in the `coverage` job; the deploy pipeline's own checks are operational
+  (`specs/ci-cd-pipeline/design.md` §12).
 
 ## 10. Identified architectural decisions
 
