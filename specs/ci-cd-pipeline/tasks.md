@@ -58,6 +58,14 @@ Revised 2026-10-21 with `requirements.md` §0 (FP-36).
 - [x] `scripts/deploy-smoke.sh` against an isolated API (migrations + seed admin): passes;
       fails on a wrong password (containing a quote and a backslash), a missing variable and an
       unreachable URL.
+- [x] Local end to end against the real FP-35 `/infra` and FP-34 `/k8s` (not stand-ins),
+      2026-10-27, Terraform 1.16.6 + `tehcyx/kind` 0.13.0 (Kubernetes 1.37) + `kubectl`
+      1.36.5, image built from `4c731a0` and loaded into the node (no GHCR image yet):
+      `check` → `infra` (clean apply, one state) → `config` → `migrate` (`Complete`) →
+      `bootstrap` → `rollout` → `smoke` → `evidence` all ok; second `plan` empty; controlled
+      failure on a fresh ephemeral environment (`Failed`, rollout blocked, no `Deployment`,
+      evidence, destroy with no container left); evidence scanned for every generated value —
+      none found.
 - [ ] Pull request run: `publish`/`deploy` skipped. *(after the PR is opened)*
 
 ## 6. Evidence on GitHub (after FP-34/FP-35 land — AC10)

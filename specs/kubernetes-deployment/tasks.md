@@ -77,21 +77,32 @@ root filesystem, all capabilities dropped, no new privileges):
   container to ~370m CPU — 3.7× the 100m request — so the 70 % target is crossed and the
   HPA would settle around 6 replicas (370m / 70m), below the maximum of 8.
 
-### 4.2 Pending — first run on a real cluster
+### 4.2 First run on a real cluster (2026-10-27)
 
 Record the environment (host, node image, versions) and results here.
 
-- [ ] AC1 — documented order: migration `Job` `Complete`, bootstrap `Job` `Complete`,
-      rollout complete, `/health` 200 through the `Service`.
+**Run of 2026-10-27 (UTC)** — Linux x86_64, cgroup v2, Docker 29.9.2, 8 CPUs / 16 GiB;
+Terraform 1.16.6, kubectl v1.36.5, `kindest/node:v1.37.0` (pinned digest), image built from
+commit `4c731a0` and loaded into the node (no GHCR image published yet). Driven by
+`scripts/deploy.sh` (DEPLOY_ID `local-evidencia`) and `scripts/k8s-evidence.sh`; raw output in
+the git-ignored `evidence/` and `deploy-evidence/` of that machine, summarized in the root
+README ("Evidências da execução").
+
+- [x] AC1 — documented order: migration `Job` `Complete` (2 migrations), bootstrap `Job`
+      `Complete`, rollout complete, `/health` 200 through the `Service` plus the
+      authenticated smoke (401 without token, login, `/auth/me`, `/services`).
 - [x] AC2 — the `Deployment` runs exactly the rendered `name:<sha>@sha256:<digest>`.
-- [ ] AC3 — `kubectl get hpa` with real CPU/memory values, 2–8.
+- [x] AC3 — `kubectl get hpa`: `cpu: 1%/70%, memory: 1%/80%`, min 2, max 8.
 - [x] AC4 — re-apply while scaled out keeps the replica count.
-- [ ] AC5 — `scripts/k8s-evidence.sh hpa-load`: replicas rise and fall; timeline recorded.
-- [ ] AC6 — `scripts/k8s-evidence.sh pod-recovery`: replacement ready, `Service` never
-      without endpoints.
-- [ ] AC7 — failing migration `Job`: no `Deployment` created by that run (gate shown from the
-      timeout path in §4.1; a real `Failed` `Job` needs a running node — FP-36's
-      `simulate_migration_failure` run).
+- [x] AC5 — `scripts/k8s-evidence.sh hpa-load`: 4 workers × 240 s → 2→3→2; 10 workers × 180 s
+      → 2→4→5 (CPU 135 %) → 4→2 after the 120 s stabilization; `AbleToScale`/`ScalingActive`
+      True; timelines recorded.
+- [x] AC6 — `scripts/k8s-evidence.sh pod-recovery`: replacement ready in 6 s, fewest ready
+      `Service` endpoints observed: 1.
+- [x] AC7 — failing migration `Job` on a fresh ephemeral environment
+      (`SIMULATE_MIGRATION_FAILURE=true`, DEPLOY_ID `local-falha-migracao`): `Job` `Failed`,
+      `deploy.sh migrate` stopped with "the rollout is blocked", no `Deployment`/HPA/API
+      `Service` in the namespace. The same check on GitHub Actions is FP-36's pending run.
 - [x] AC8 — no secret committed; `kubectl apply -f k8s/` does not read the template.
 - [x] AC9 — every pod admitted under `restricted` Pod Security.
 

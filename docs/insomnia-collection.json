@@ -30,7 +30,9 @@
         "orderCode": "",
         "executionId": "",
         "movementId": "",
-        "trackingToken": ""
+        "trackingToken": "",
+        "externalNotificationSecret": "",
+        "externalStatusSecret": ""
       },
       "dataPropertyOrder": {
         "&": [
@@ -1295,6 +1297,93 @@
       "settingRebuildPath": true,
       "settingFollowRedirects": "global",
       "body": {}
+    },
+    {
+      "_id": "req_service_orders_external_quote_decision_approve",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "External quote decision - approve",
+      "description": "External-system channel (specs/service-order-quote-decision §9). Authenticated only by X-External-Notification-Secret (must equal the API's EXTERNAL_NOTIFICATION_SECRET) - no JWT. 200 on success, 401 missing/wrong secret, 400 invalid decision, 409 already decided or quote not sent.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote/decision",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "X-External-Notification-Secret",
+          "value": "{{ _.externalNotificationSecret }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 42100,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"decision\": \"approved\"\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_external_quote_decision_reject",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "External quote decision - reject",
+      "description": "External-system channel (specs/service-order-quote-decision §9). Authenticated only by X-External-Notification-Secret (must equal the API's EXTERNAL_NOTIFICATION_SECRET) - no JWT. 200 on success, 401 missing/wrong secret, 400 invalid decision, 409 already decided or quote not sent.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/quote/decision",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "X-External-Notification-Secret",
+          "value": "{{ _.externalNotificationSecret }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 42200,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"decision\": \"rejected\"\n}"
+      }
+    },
+    {
+      "_id": "req_service_orders_external_status_update",
+      "_type": "request",
+      "parentId": "fld_service_orders",
+      "name": "External status update (n8n tool)",
+      "description": "External status-update tool channel (specs/service-order-status-update). Authenticated only by X-External-Status-Secret (must equal the API's EXTERNAL_STATUS_UPDATE_SECRET, distinct from the quote secret) - no JWT. status: IN_DIAGNOSIS | COMPLETED | DELIVERED; notes optional (<=500 chars, saved in history). 200 {id, code, previousStatus, status}; 401 bad secret; 400 out of contract; 404 unknown order; 409 illegal transition / pending executions.",
+      "method": "POST",
+      "url": "{{ _.baseUrl }}/api/v1/service-orders/{{ _.serviceOrderId }}/status",
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "X-External-Status-Secret",
+          "value": "{{ _.externalStatusSecret }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": 47100,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"status\": \"IN_DIAGNOSIS\",\n  \"notes\": \"Car on lift 2\"\n}"
+      }
     },
     {
       "_id": "req_tracking__customer_facing__track_service_order",

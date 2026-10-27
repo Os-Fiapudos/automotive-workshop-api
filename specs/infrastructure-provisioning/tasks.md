@@ -66,23 +66,31 @@ built from its module source) and the chart from the upstream source at `v0.9.0`
 - **AC3/AC5** — outputs reviewed: no credential, `postgres_database_url_template` has
   `<password>`; `git ls-files infra` holds no state, tfvars or kubeconfig.
 
-### 4.2 Pending — first run on a cgroup v2 machine with Docker
+### 4.2 First run on a cgroup v2 machine with Docker (2026-10-27)
 
 Record the environment (host, node image, versions) and results here.
 
-- [ ] AC1 — clean `apply`: cluster, `metrics-server` (`kubectl top nodes`), namespace,
-      Postgres reachable inside the cluster.
-- [ ] AC2 — *partial*: admission and runtime settings verified (§4.1); readiness of the
-      `StatefulSet` on a real node pending.
+**Run of 2026-10-27 (UTC)** — Linux x86_64, cgroup v2, Docker 29.9.2, 8 CPUs / 16 GiB;
+Terraform 1.16.6, kubectl v1.36.5, `kindest/node:v1.37.0` (pinned digest), image built from
+commit `4c731a0` and loaded into the node (no GHCR image published yet). Driven by
+`scripts/deploy.sh` (DEPLOY_ID `local-evidencia`) and `scripts/k8s-evidence.sh`; raw output in
+the git-ignored `evidence/` and `deploy-evidence/` of that machine, summarized in the root
+README ("Evidências da execução").
+
+- [x] AC1 — clean `apply`: cluster, `metrics-server` (`kubectl top nodes`), namespace,
+      Postgres reachable inside the cluster. 6 resources in ~90 s, one root, one state;
+      `kubectl top nodes` answered; the API migrated and served from it.
+- [x] AC2 — `postgres-0` ready under the `restricted` profile on a real node;
+      `deploy.sh infra` confirmed `pg_isready` over TCP before continuing.
 - [x] AC3 — `terraform output`: `kubeconfig_path`, `postgres_database_url_template` with
       `<password>`, no credential.
 - [x] AC4 — no object created by both Terraform and `/k8s`/the deploy flow.
 - [x] AC5 — no secret committed (`git ls-files infra` reviewed).
-- [ ] AC6 — *partial*: second `plan` empty for the namespace/Postgres resources (§4.1);
-      repeat with the full root on a real cluster.
-- [ ] AC7 — `scripts/k8s-evidence.sh db-persistence`: data survives the deletion of
-      `postgres-0`.
-- [ ] AC8 — `destroy` on the disposable environment leaves no `kind` container.
+- [x] AC6 — second `terraform plan -detailed-exitcode` on the full root: exit 0, "No changes".
+- [x] AC7 — `scripts/k8s-evidence.sh db-persistence`: new pod UID, same PVC
+      `data-postgres-0`, marker read back; authenticated smoke passed again afterwards.
+- [x] AC8 — `destroy` on the disposable environment: 6 destroyed, no `automotive-workshop`
+      container, empty state (twice: demo environment and the failed-migration one).
 
 ## 5. Documentation
 
@@ -92,7 +100,7 @@ Record the environment (host, node image, versions) and results here.
 
 ## 6. Hand-off
 
-- [ ] FP-34: `/k8s` deploys against this environment with the `Secret` built from
-      `postgres_database_url_template`.
+- [x] FP-34: `/k8s` deploys against this environment with the `Secret` built from
+      `postgres_database_url_template` (`deploy.sh config`).
 - [x] FP-36: `scripts/deploy.sh check` (PR #42) passes against `infra/` + `k8s/`.
-- [ ] Re-check `requirements.md` AC1–AC9.
+- [x] Re-check `requirements.md` AC1–AC9.
