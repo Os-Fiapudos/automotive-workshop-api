@@ -2701,9 +2701,11 @@ components:
         unitPrice:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         total:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
     ServiceOrderQuote:
       type: object
       properties:
@@ -2719,6 +2721,7 @@ components:
         totalAmount:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         status:
           type: string
           enum:
@@ -3011,7 +3014,8 @@ components:
         price:
           type: number
           format: double
-          description: Required. Must not be negative (BR3).
+          maximum: 9999999999.99
+          description: Required. Must not be negative (BR3). Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         estimated_time:
           type: integer
           nullable: true
@@ -3029,6 +3033,8 @@ components:
         price:
           type: number
           format: double
+          maximum: 9999999999.99
+          description: Optional. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         estimated_time:
           type: integer
     CatalogService:
@@ -3047,6 +3053,7 @@ components:
         price:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         estimated_time:
           type: integer
           nullable: true
@@ -3090,7 +3097,8 @@ components:
         unitPrice:
           type: number
           format: double
-          description: Required. Must not be negative.
+          maximum: 9999999999.99
+          description: Required. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         currentStock:
           type: integer
           description: Required. Must not be negative.
@@ -3114,6 +3122,8 @@ components:
         unitPrice:
           type: number
           format: double
+          maximum: 9999999999.99
+          description: Optional. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         type:
           type: string
           enum:
@@ -3135,6 +3145,7 @@ components:
         unitPrice:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         currentStock:
           type: integer
         type:

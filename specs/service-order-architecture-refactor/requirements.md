@@ -214,3 +214,35 @@ CI's `build` job — with no new CI job. This replaces the grep of direct import
 Besides `CLAUDE.md` §9.1 and `specs/architecture.md` (§6 AC6), `AGENTS.md` (the same
 instructions for other agents) is updated identically, and the dependency map of §7.1 is
 added under `docs/`.
+
+### 7.7 Revision 2026-10-28: integration with FP-31 and the `money` value type
+
+The team chose on 2026-10-28 to merge this refactor into `develop`. Before that,
+`develop@6779547` was preserved as the long-lived branch `vertical-slice-arch`
+(`docs/f2-us01-decision-log.md`). By then `develop` carried FP-31
+(`specs/monetary-value-precision/`), which replaced `float64` money with
+`internal/shared/money.Cents` across `service-order`. That reversed the order §4 assumed:
+money precision landed first, and this refactor absorbs it.
+
+- FP-31's changes are reapplied onto the layers, with no behavior change of their own:
+  - `domain/quote.go`: `QuoteItem`/`Quote` in `money.Cents`, `PriceQuoteItems`,
+    `CalculateTotal` returning `(money.Cents, error)`, `ErrQuoteAmountOutOfRange`.
+  - `usecase/`: `ComposeQuote` prices the items and then sums them with bounds checks.
+    `ServiceRef.Price`, `ProductRef.UnitPrice` and `QuoteNotification.TotalAmount` use
+    `money.Cents`.
+  - `adapter/postgres`: NUMERIC conversions through `database.ScanCents` and
+    `database.NumericFromCents`.
+  - `adapter/httpapi`: DTOs in `money.Cents`, and the `ErrQuoteAmountOutOfRange` → 400
+    mapping.
+- **BR1/BR2 exception (decision A, 2026-10-28):** `domain` and `usecase` may import
+  `internal/shared/money`. It is a pure value type: it imports only the standard library,
+  including `encoding/json`, because `Cents` marshals itself.
+  - `architecture_test.go` treats it as a leaf, like `github.com/google/uuid`, so its own
+    `encoding/json` import does not count against the inner layers.
+  - `TestValueTypePackagesStayInfrastructureFree` fails if the package ever imports
+    anything outside the standard library, or a networking, database or process package.
+  - The rejected alternative (B) was `int64` cents in the domain with conversion in the
+    adapters. It would have meant more conversion code and a larger integration diff for
+    the same guarantee.
+- The regression bar of §5 item 3 now includes `specs/monetary-value-precision/`. Its
+  baseline is `develop@6779547`, not `c6e4677`.

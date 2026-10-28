@@ -1,0 +1,52 @@
+# Autoscaling of the API on CPU and memory (specs/kubernetes-deployment/design.md §5).
+# Utilization is measured against the Deployment's requests (100m CPU / 128Mi). Needs
+# metrics-server, installed by Terraform (infra/metrics-server.tf).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: automotive-workshop-api
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: automotive-workshop
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: automotive-workshop-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+    scaleDown:
+      # 120s instead of the 300s default: short enough for the demo, long enough to
+      # ignore brief dips in load.
+      stabilizationWindowSeconds: 120
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

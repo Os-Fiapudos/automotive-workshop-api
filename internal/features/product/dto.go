@@ -5,16 +5,17 @@ import (
 	"time"
 
 	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // CreateRequest represents the payload for POST /api/v1/products.
 type CreateRequest struct {
-	Code         *int64   `json:"code,omitempty"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	UnitPrice    *float64 `json:"unitPrice"`
-	CurrentStock *int     `json:"currentStock"`
-	Type         string   `json:"type"`
+	Code         *int64       `json:"code,omitempty"`
+	Name         string       `json:"name"`
+	Description  string       `json:"description"`
+	UnitPrice    *money.Cents `json:"unitPrice"`
+	CurrentStock *int         `json:"currentStock"`
+	Type         string       `json:"type"`
 }
 
 // Validate checks fields of CreateRequest and returns any validation error details.
@@ -58,11 +59,11 @@ func (request CreateRequest) Validate() []apierror.Detail {
 
 // UpdateRequest represents the payload for PATCH /api/v1/products/{id}.
 type UpdateRequest struct {
-	Name         *string  `json:"name,omitempty"`
-	Description  *string  `json:"description,omitempty"`
-	UnitPrice    *float64 `json:"unitPrice,omitempty"`
-	CurrentStock *int     `json:"currentStock,omitempty"`
-	Type         *string  `json:"type,omitempty"`
+	Name         *string      `json:"name,omitempty"`
+	Description  *string      `json:"description,omitempty"`
+	UnitPrice    *money.Cents `json:"unitPrice,omitempty"`
+	CurrentStock *int         `json:"currentStock,omitempty"`
+	Type         *string      `json:"type,omitempty"`
 }
 
 // Validate checks fields of UpdateRequest and returns validation error details.
@@ -135,16 +136,16 @@ func (request StockAdjustmentRequest) Validate() []apierror.Detail {
 
 // Response represents the JSON structure of a product returned by the API.
 type Response struct {
-	ID           string    `json:"id"`
-	Code         int64     `json:"code"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description"`
-	UnitPrice    float64   `json:"unitPrice"`
-	CurrentStock int       `json:"currentStock"`
-	Type         string    `json:"type"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID           string      `json:"id"`
+	Code         int64       `json:"code"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	UnitPrice    money.Cents `json:"unitPrice"`
+	CurrentStock int         `json:"currentStock"`
+	Type         string      `json:"type"`
+	Status       string      `json:"status"`
+	CreatedAt    time.Time   `json:"createdAt"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
 }
 
 // StockBalanceResponse represents response for GET /api/v1/products/{id}/stock.

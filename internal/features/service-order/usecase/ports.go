@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 
 	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // Ports are declared here, by their only consumer, and each is only as wide
@@ -102,7 +103,7 @@ type QuoteStore interface {
 
 	// SaveQuote upserts the quote header (incrementing its version on a
 	// recompose) and fully replaces its items.
-	SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error)
+	SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total money.Cents) (*domain.Quote, error)
 
 	// SendQuote records quote as sent (sent_at/sent_version) and transitions
 	// order from IN_DIAGNOSIS to AWAITING_APPROVAL.
@@ -170,7 +171,7 @@ type ExecutionMetricsReader interface {
 // stored only as a hash and cannot be rebuilt here.
 type QuoteNotification struct {
 	OrderCode      int64
-	TotalAmount    float64
+	TotalAmount    money.Cents
 	RecipientEmail string
 }
 

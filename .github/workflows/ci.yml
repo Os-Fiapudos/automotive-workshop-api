@@ -1,5 +1,20 @@
 name: CI
-on: [push, pull_request]
+# Pushes and pull requests run the checks and an image build. Publishing the image and the
+# deploy run only on a push to main or a manual run, and only after the four checks pass
+# (specs/ci-cd-pipeline/design.md §1).
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      simulate_migration_failure:
+        description: "Add a migration that always fails (ephemeral environment only) to prove a failed migration blocks the rollout"
+        type: boolean
+        default: false
+
+# Least privilege: every job reads the repository only, unless it asks for more below.
+permissions:
+  contents: read
 
 env:
   # Pinned scanner versions (specs/quality-and-security/design.md §3.2). Both are run with
@@ -10,6 +25,10 @@ env:
   GOSEC_VERSION: v2.28.0
   # govulncheck reports standard-library advisories for the toolchain it runs on, so the
   # scanner job must use the same Go line as the project (kept in sync with go.mod).
+  # Every setup-go step sets check-latest: true: without it, "1.26" resolves to whatever
+  # 1.26 patch the runner image has cached, which lags behind security releases (on
+  # 2026-10-21 the cached go1.26.9 failed the gate on a crypto/x509 advisory fixed in
+  # go1.26.10).
   SCANNER_GO_VERSION: "1.26"
 
 jobs:
@@ -20,6 +39,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+          check-latest: true
           cache: false
       - run: go build ./...
       - run: go vet ./...
@@ -52,6 +72,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
+          check-latest: true
           cache: false
       # The schema comes from the same migration chain every environment uses
       # (specs/database-migrations/ BR7); scripts/migrate.sh reaches the service on
@@ -91,6 +112,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.SCANNER_GO_VERSION }}
+          check-latest: true
           cache: false
       - name: Dependency and vulnerability analysis (govulncheck)
         run: |
@@ -109,3 +131,140 @@ jobs:
         with:
           name: security-scan
           path: security/
+
+  # Builds the image on every push and pull request without pushing it, so a broken
+  # Dockerfile fails the pull request (specs/ci-cd-pipeline/design.md §2).
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Publishes the image only after the four checks and the image build passed, and only on a
+  # push to main or a manual run (BR1, BR3, BR4). Lowercase name, full-SHA tag; the deploy
+  # gets the immutable reference name:<sha>@<digest>.
+  publish:
+    needs: [build, coverage, migrations, security, image]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.reference.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Image name (registries require lowercase; the organization is Os-Fiapudos)
+        id: name
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/automotive-workshop-api" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.name.outputs.name }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+      - name: Image reference
+        id: reference
+        env:
+          NAME: ${{ steps.name.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          image="$NAME:$GITHUB_SHA@$DIGEST"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Published \`$image\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # Ephemeral validation environment inside the runner: Terraform creates the cluster and
+  # Postgres, the migration Job must complete before anything is rolled out, the smoke test
+  # logs in with the administrator bootstrapped on the fresh database, evidence is collected,
+  # and the environment is destroyed whatever happened (design.md §3). Every credential is
+  # generated for this run only; no repository secret is used.
+  deploy:
+    needs: [build, coverage, migrations, security, image, publish]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: ci-ephemeral
+    concurrency:
+      group: deploy-ci-ephemeral
+      cancel-in-progress: false
+    env:
+      DEPLOY_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOY_EPHEMERAL: "true"
+      IMAGE: ${{ needs.publish.outputs.image }}
+      SIMULATE_MIGRATION_FAILURE: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate_migration_failure }}
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - uses: actions/checkout@v5
+      # The wrapper copies Terraform's stdout into step outputs; scripts/deploy.sh filters
+      # that output itself (design.md §6.3).
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+      - uses: azure/setup-kubectl@v5
+        with:
+          version: v1.36.5
+      - name: Generate ephemeral credentials
+        run: |
+          for name in POSTGRES_PASSWORD JWT_SECRET EXTERNAL_NOTIFICATION_SECRET \
+                      EXTERNAL_STATUS_UPDATE_SECRET ADMIN_PASSWORD; do
+            value=$(openssl rand -hex 32)
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+          echo "ADMIN_EMAIL=admin@$DEPLOY_ID.ci.invalid" >> "$GITHUB_ENV"
+          echo "Environment \`$DEPLOY_ID\` - image \`$IMAGE\`"
+      - name: Check the deploy contract (FP-34 /k8s, FP-35 /infra)
+        run: scripts/deploy.sh check
+      - name: Provision the cluster and Postgres (Terraform) and wait for Postgres
+        run: scripts/deploy.sh infra
+      - name: Create configuration and secrets
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/deploy.sh config
+      - name: Run the migration Job (a failure blocks the rollout)
+        run: scripts/deploy.sh migrate
+      - name: Bootstrap the administrator
+        run: scripts/deploy.sh bootstrap
+      - name: Roll out the API
+        run: scripts/deploy.sh rollout
+      - name: Authenticated smoke test
+        run: scripts/deploy.sh smoke
+      - name: Collect evidence
+        if: always()
+        run: |
+          scripts/deploy.sh evidence
+          cat "deploy-evidence/$DEPLOY_ID/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deploy-evidence-${{ env.DEPLOY_ID }}
+          path: deploy-evidence/
+          if-no-files-found: warn
+      - name: Destroy the ephemeral environment
+        if: always()
+        run: scripts/deploy.sh destroy

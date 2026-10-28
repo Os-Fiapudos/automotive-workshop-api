@@ -90,8 +90,10 @@ func TestRepositoryTransitionGuardsRejectStaleOrders(t *testing.T) {
 	assert.ErrorIs(t, repository.StartDiagnosis(ctx, stale, ""), domain.ErrInvalidStatusTransition)
 
 	// IN_DIAGNOSIS -> AWAITING_APPROVAL; a stale second send is refused.
-	items := []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: serviceID, Description: "Oil Change", Quantity: 1, UnitPrice: 80, Total: 80}}
-	quote, err := repository.SaveQuote(ctx, order, items, domain.CalculateTotal(items))
+	items := []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: serviceID, Description: "Oil Change", Quantity: 1, UnitPrice: 8000, Total: 8000}}
+	total, err := domain.CalculateTotal(items)
+	require.NoError(t, err)
+	quote, err := repository.SaveQuote(ctx, order, items, total)
 	require.NoError(t, err)
 	stale = copyOrder(order)
 	require.NoError(t, order.SendQuote())

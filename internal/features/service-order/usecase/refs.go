@@ -1,6 +1,10 @@
 package usecase
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/money"
+)
 
 // The read models below are this feature's own projections of other
 // features' tables (customers, vehicles, services, products), populated by
@@ -50,7 +54,7 @@ type ServiceRef struct {
 	Code        int64
 	Name        string
 	Description string
-	Price       float64
+	Price       money.Cents
 }
 
 // ProductRef is the minimal product-catalog data needed to price and
@@ -61,6 +65,6 @@ type ProductRef struct {
 	Code        int64
 	Name        string
 	Description string
-	UnitPrice   float64
+	UnitPrice   money.Cents
 	Active      bool
 }

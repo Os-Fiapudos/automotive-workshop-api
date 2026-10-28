@@ -20,6 +20,7 @@ import (
 	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/shared/middleware"
+	"automotive-workshop-api/internal/shared/money"
 	"automotive-workshop-api/internal/shared/token"
 )
 
@@ -723,7 +724,7 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 
 	var quote httpapi.QuoteResponse
 	decodeBody(t, resp, &quote)
-	assert.InDelta(t, 2*35.90+80.00, quote.TotalAmount, 0.0001)
+	assert.Equal(t, money.Cents(15180), quote.TotalAmount) // 2*35.90 + 80.00
 	require.Len(t, quote.Items, 2)
 
 	// Composing a quote no longer transitions the order by itself — only
@@ -741,7 +742,7 @@ func TestServiceOrderComposeQuoteFullFlow(t *testing.T) {
 	require.Equal(t, http.StatusOK, getResp.StatusCode)
 	var fetched httpapi.QuoteResponse
 	decodeBody(t, getResp, &fetched)
-	assert.InDelta(t, quote.TotalAmount, fetched.TotalAmount, 0.0001)
+	assert.Equal(t, quote.TotalAmount, fetched.TotalAmount)
 
 	// A quote_composed history event must exist.
 	var event string
@@ -820,7 +821,7 @@ func TestServiceOrderComposeQuoteSnapshotSurvivesCatalogChange(t *testing.T) {
 	decodeBody(t, getResp, &fetched)
 
 	require.Len(t, fetched.Items, 1)
-	assert.InDelta(t, 35.90, fetched.Items[0].UnitPrice, 0.0001)
+	assert.Equal(t, money.Cents(3590), fetched.Items[0].UnitPrice)
 	assert.NotEqual(t, "Changed description", fetched.Items[0].Description)
 }
 
@@ -1095,7 +1096,7 @@ func TestServiceOrderDetailByIDFullLifecycle(t *testing.T) {
 	assert.Equal(t, order.ID, detail.ID)
 	assert.Equal(t, "IN_DIAGNOSIS", detail.Status, "composing a quote no longer transitions the order — only sending it does (specs/service-order-quote-decision/)")
 	require.NotNil(t, detail.Quote)
-	assert.InDelta(t, 2*35.90, detail.Quote.TotalAmount, 0.0001)
+	assert.Equal(t, money.Cents(7180), detail.Quote.TotalAmount) // 2*35.90
 	require.Len(t, detail.Quote.Items, 1)
 	assert.GreaterOrEqual(t, len(detail.History), 2) // creation + quote_composed (diagnosis_started too)
 }

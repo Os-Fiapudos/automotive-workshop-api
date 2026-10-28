@@ -9,6 +9,7 @@ import (
 
 	"automotive-workshop-api/internal/features/service-order/domain"
 	"automotive-workshop-api/internal/features/service-order/usecase"
+	"automotive-workshop-api/internal/shared/money"
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
@@ -81,8 +82,8 @@ func seedSentQuote(t *testing.T, store *fakeStore, rawToken string) *domain.Serv
 		Version:        version,
 		SentAt:         &sentAt,
 		SentVersion:    &version,
-		Items:          []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: uuid.New(), Quantity: 1, UnitPrice: 100, Total: 100}},
-		TotalAmount:    100,
+		Items:          []domain.QuoteItem{{Kind: domain.QuoteItemService, ServiceID: uuid.New(), Quantity: 1, UnitPrice: 10000, Total: 10000}},
+		TotalAmount:    10000,
 	}
 	store.tokens[order.ID] = trackingtoken.Hash(rawToken)
 	return order
@@ -117,7 +118,7 @@ func (store *fakeStore) FindQuoteByServiceOrderID(_ context.Context, serviceOrde
 	return quote, nil
 }
 
-func (store *fakeStore) SaveQuote(_ context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error) {
+func (store *fakeStore) SaveQuote(_ context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total money.Cents) (*domain.Quote, error) {
 	quote := &domain.Quote{ID: uuid.New(), ServiceOrderID: order.ID, Status: domain.QuoteStatusPending, Version: 1, Items: items, TotalAmount: total}
 	store.quotes[order.ID] = quote
 	return quote, nil

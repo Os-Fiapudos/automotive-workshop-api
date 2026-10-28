@@ -1,0 +1,69 @@
+name: IaC
+# Static validation of /infra (FP-35) and /k8s (FP-34): specs/infrastructure-provisioning/
+# design.md §9 and specs/kubernetes-deployment/design.md §9. Kept out of ci.yml, which the
+# deploy pipeline (FP-36, specs/ci-cd-pipeline/) owns. Nothing here touches a cluster or
+# reads a secret.
+on:
+  push:
+    paths:
+      - "infra/**"
+      - "k8s/**"
+      - "scripts/iac-validate.sh"
+      - "scripts/k8s-evidence.sh"
+      - ".github/workflows/iac.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - "k8s/**"
+      - "scripts/iac-validate.sh"
+      - "scripts/k8s-evidence.sh"
+      - ".github/workflows/iac.yml"
+
+permissions:
+  contents: read
+
+env:
+  # Same pins as the deploy pipeline (specs/ci-cd-pipeline/design.md §11).
+  TERRAFORM_VERSION: "1.16.6"
+  KUBECTL_VERSION: "v1.36.5"
+  KUBECONFORM_VERSION: "v0.7.0"
+  # Kubernetes version of the kind node pinned in infra/variables.tf.
+  KUBERNETES_VERSION: "1.37.0"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: fmt, init -backend=false, validate
+        run: scripts/iac-validate.sh terraform
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-kubectl@v5
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          check-latest: true
+      - name: Install kubeconform
+        run: |
+          go install "github.com/yannh/kubeconform/cmd/kubeconform@${KUBECONFORM_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Render like the deploy, kubeconform -strict, repository rules
+        run: scripts/iac-validate.sh manifests
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # shellcheck is preinstalled on GitHub's Ubuntu runners.
+      - name: shellcheck
+        run: shellcheck scripts/iac-validate.sh scripts/k8s-evidence.sh

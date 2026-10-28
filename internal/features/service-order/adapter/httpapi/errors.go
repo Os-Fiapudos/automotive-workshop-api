@@ -46,6 +46,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		apierror.Write(w, apierror.Validation("quote must have at least one item"))
 	case errors.Is(err, domain.ErrInvalidQuantity):
 		apierror.Write(w, apierror.Validation("item quantity must be greater than zero"))
+	case errors.Is(err, domain.ErrQuoteAmountOutOfRange):
+		apierror.Write(w, apierror.Validation("quote amount exceeds the maximum of 9999999999.99"))
 	case errors.Is(err, domain.ErrProductNotFound):
 		apierror.Write(w, apierror.NotFound("product not found"))
 	case errors.Is(err, domain.ErrProductInactive):

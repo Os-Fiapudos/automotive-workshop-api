@@ -16,6 +16,13 @@ import (
 // module's dependency, and the allowlists below vet which libraries may be
 // reached at all. Being a test, it runs with every `go test ./...`, CI's
 // build job included.
+//
+// valueTypePackages are the one exception inside this module: pure value types
+// the domain is allowed to use (requirements.md §7.7). They are leaves like a
+// third-party library — money.Cents marshals itself to JSON, and that
+// encoding/json import is the type's own business — and
+// TestValueTypePackagesStayInfrastructureFree keeps them standard-library-only
+// so the exception cannot become a path to infrastructure.
 
 const (
 	module      = "automotive-workshop-api"
@@ -35,15 +42,21 @@ var forbiddenForInnerLayers = []string{
 	featureRoot + "/adapter/",
 }
 
+// valueTypePackages may be imported by domain and usecase and are not traversed
+// (see the file comment).
+var valueTypePackages = []string{
+	module + "/internal/shared/money",
+}
+
 func TestDomainDependsOnlyOnStandardLibraryAndUUID(t *testing.T) {
 	graph := loadImportGraph(t, "./domain")
 	root := featureRoot + "/domain"
 
 	assertNoForbidden(t, graph, root, append(forbiddenForInnerLayers, featureRoot+"/usecase"))
-	assertOnlyAllowedNonStandard(t, graph, root, []string{
+	assertOnlyAllowedNonStandard(t, graph, root, append([]string{
 		root,
 		"github.com/google/uuid",
-	})
+	}, valueTypePackages...))
 }
 
 func TestUseCaseDependsOnlyOnDomainAndInfrastructureFreeHelpers(t *testing.T) {
@@ -51,13 +64,35 @@ func TestUseCaseDependsOnlyOnDomainAndInfrastructureFreeHelpers(t *testing.T) {
 	root := featureRoot + "/usecase"
 
 	assertNoForbidden(t, graph, root, forbiddenForInnerLayers)
-	assertOnlyAllowedNonStandard(t, graph, root, []string{
+	assertOnlyAllowedNonStandard(t, graph, root, append([]string{
 		root,
 		featureRoot + "/domain",
 		"github.com/google/uuid",
 		module + "/internal/shared/document",
 		module + "/internal/shared/trackingtoken",
-	})
+	}, valueTypePackages...))
+}
+
+// TestValueTypePackagesStayInfrastructureFree guards the valueTypePackages
+// exception: such a package may import only the standard library, and none of
+// its networking, database or process packages. If it ever needs more, it is
+// no longer a pure value type and must leave the list.
+func TestValueTypePackagesStayInfrastructureFree(t *testing.T) {
+	forbiddenStandard := []string{"net/", "database/sql", "os/exec", "syscall"}
+	for _, pkg := range valueTypePackages {
+		graph := loadImportGraph(t, pkg)
+		for _, dependency := range graph.imports[pkg] {
+			if !graph.standard[dependency] {
+				t.Errorf("value type package %s must import only the standard library, but imports %s", pkg, dependency)
+				continue
+			}
+			for _, rule := range forbiddenStandard {
+				if matches(dependency, rule) {
+					t.Errorf("value type package %s must stay infrastructure-free, but imports %s", pkg, dependency)
+				}
+			}
+		}
+	}
 }
 
 // TestAdaptersDoNotDependOnEachOtherOrOnOtherFeatures keeps the adapters
@@ -156,10 +191,19 @@ func assertNoOtherFeature(t *testing.T, graph importGraph, root string) {
 	}
 }
 
-// ownPackage reports whether path belongs to this module — the only packages
-// whose imports the checks follow.
+// ownPackage reports whether path is this module's code whose imports the
+// checks follow: every package of the module except the valueTypePackages
+// leaves.
 func ownPackage(path string) bool {
-	return strings.HasPrefix(path, module+"/")
+	if !strings.HasPrefix(path, module+"/") {
+		return false
+	}
+	for _, leaf := range valueTypePackages {
+		if path == leaf {
+			return false
+		}
+	}
+	return true
 }
 
 // reachable returns every package reachable from root by following imports

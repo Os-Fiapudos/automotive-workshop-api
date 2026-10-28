@@ -1,13 +1,16 @@
 package postgres
 
 import (
-	"automotive-workshop-api/internal/features/service-order/domain"
-	"automotive-workshop-api/internal/features/service-order/usecase"
 	"context"
 	"errors"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"automotive-workshop-api/internal/features/service-order/domain"
+	"automotive-workshop-api/internal/features/service-order/usecase"
+	"automotive-workshop-api/internal/shared/database"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // FindServiceOrderByID loads a ServiceOrder by id, used by StartDiagnosis
@@ -35,7 +38,7 @@ func (repository *Repository) FindActiveProductByID(ctx context.Context, id uuid
 	ref := &usecase.ProductRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, unit_price, status = 'ACTIVE' FROM products WHERE id = $1`, id,
-	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.UnitPrice, &ref.Active)
+	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, database.ScanCents(&ref.UnitPrice), &ref.Active)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrProductNotFound
@@ -52,7 +55,7 @@ func (repository *Repository) FindServiceByID(ctx context.Context, id uuid.UUID)
 	ref := &usecase.ServiceRef{}
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, name, description, price FROM services WHERE id = $1`, id,
-	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, &ref.Price)
+	).Scan(&ref.ID, &ref.Code, &ref.Name, &ref.Description, database.ScanCents(&ref.Price))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrRequestedServiceNotFound
@@ -104,7 +107,7 @@ func (repository *Repository) StartDiagnosis(ctx context.Context, order *domain.
 // status — specs/service-order-quote-decision/ moved the
 // IN_DIAGNOSIS -> AWAITING_APPROVAL transition to SendQuote, since that
 // feature introduced an explicit "send" step distinct from composition.
-func (repository *Repository) SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error) {
+func (repository *Repository) SaveQuote(ctx context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total money.Cents) (*domain.Quote, error) {
 	tx, err := repository.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -117,7 +120,7 @@ func (repository *Repository) SaveQuote(ctx context.Context, order *domain.Servi
 		 VALUES ($1, $2)
 		 ON CONFLICT (service_order_id) DO UPDATE SET total_amount = EXCLUDED.total_amount, version = quotes.version + 1
 		 RETURNING id, code, status, version, generated_at, sent_at, sent_version, responded_at, created_at, updated_at`,
-		order.ID, total,
+		order.ID, database.NumericFromCents(total),
 	).Scan(&quote.ID, &quote.Code, &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -136,7 +139,7 @@ func (repository *Repository) SaveQuote(ctx context.Context, order *domain.Servi
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_products (quote_id, product_id, quantity, applied_description, applied_unit_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				quote.ID, item.ProductID, item.Quantity, item.Description, item.UnitPrice, item.Total,
+				quote.ID, item.ProductID, item.Quantity, item.Description, database.NumericFromCents(item.UnitPrice), database.NumericFromCents(item.Total),
 			); err != nil {
 				return nil, err
 			}
@@ -144,7 +147,7 @@ func (repository *Repository) SaveQuote(ctx context.Context, order *domain.Servi
 			if _, err := tx.Exec(ctx,
 				`INSERT INTO quote_services (quote_id, service_id, quantity, applied_description, applied_price, applied_total_price)
 				 VALUES ($1, $2, $3, $4, $5, $6)`,
-				quote.ID, item.ServiceID, item.Quantity, item.Description, item.UnitPrice, item.Total,
+				quote.ID, item.ServiceID, item.Quantity, item.Description, database.NumericFromCents(item.UnitPrice), database.NumericFromCents(item.Total),
 			); err != nil {
 				return nil, err
 			}
@@ -292,7 +295,7 @@ func (repository *Repository) FindQuoteByServiceOrderID(ctx context.Context, ser
 	err := repository.pool.QueryRow(ctx,
 		`SELECT id, code, total_amount, status, version, generated_at, sent_at, sent_version, responded_at, created_at, updated_at
 		 FROM quotes WHERE service_order_id = $1`, serviceOrderID,
-	).Scan(&quote.ID, &quote.Code, &quote.TotalAmount, &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
+	).Scan(&quote.ID, &quote.Code, database.ScanCents(&quote.TotalAmount), &quote.Status, &quote.Version, &quote.GeneratedAt, &quote.SentAt, &quote.SentVersion, &quote.RespondedAt, &quote.CreatedAt, &quote.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrQuoteNotFound
@@ -308,7 +311,7 @@ func (repository *Repository) FindQuoteByServiceOrderID(ctx context.Context, ser
 	}
 	for productRows.Next() {
 		item := domain.QuoteItem{Kind: domain.QuoteItemProduct}
-		if err := productRows.Scan(&item.ProductID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
+		if err := productRows.Scan(&item.ProductID, &item.Quantity, &item.Description, database.ScanCents(&item.UnitPrice), database.ScanCents(&item.Total)); err != nil {
 			productRows.Close()
 			return nil, err
 		}
@@ -327,7 +330,7 @@ func (repository *Repository) FindQuoteByServiceOrderID(ctx context.Context, ser
 	}
 	for serviceRows.Next() {
 		item := domain.QuoteItem{Kind: domain.QuoteItemService}
-		if err := serviceRows.Scan(&item.ServiceID, &item.Quantity, &item.Description, &item.UnitPrice, &item.Total); err != nil {
+		if err := serviceRows.Scan(&item.ServiceID, &item.Quantity, &item.Description, database.ScanCents(&item.UnitPrice), database.ScanCents(&item.Total)); err != nil {
 			serviceRows.Close()
 			return nil, err
 		}

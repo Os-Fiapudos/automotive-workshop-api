@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"automotive-workshop-api/internal/shared/money"
 	"automotive-workshop-api/internal/shared/trackingtoken"
 )
 
@@ -139,7 +140,7 @@ func (fake *fakeRepository) recordTransition(order *domain.ServiceOrder, event, 
 	})
 }
 
-func (fake *fakeRepository) SaveQuote(_ context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total float64) (*domain.Quote, error) {
+func (fake *fakeRepository) SaveQuote(_ context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total money.Cents) (*domain.Quote, error) {
 	quote := fake.quotes[order.ID]
 	if quote == nil {
 		quote = &domain.Quote{ID: uuid.New(), ServiceOrderID: order.ID, Version: 1}

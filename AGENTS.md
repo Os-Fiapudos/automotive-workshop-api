@@ -159,7 +159,8 @@ placeholder folder.
 **Clean Architecture inside a slice (since 2026-10-21, F2-US01)**: `service-order` keeps
 the vertical slice — one folder, `internal/features/service-order/` — but organizes it
 internally in layers whose dependencies only point inward: `domain/` (aggregate,
-transitions, errors; standard library + `uuid` only) ← `usecase/` (use cases and the
+transitions, errors; standard library, `uuid` and the `shared/money` value type only) ←
+`usecase/` (use cases and the
 narrow ports they declare in `ports.go`) ← `adapter/postgres`, `adapter/httpapi`,
 `adapter/notifier` (pgx, HTTP and e-mail). Composition happens in `cmd/api`
 (`wiring.go`). The other implemented features keep the flat layout; that their packages

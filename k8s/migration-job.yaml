@@ -1,0 +1,64 @@
+# Schema migration Job (specs/kubernetes-deployment/design.md §6, FP-33 contract in
+# specs/database-migrations/design.md §9). Each deploy creates it under a new name
+# (base name + "-<deploy id>") and waits for condition=complete before anything else.
+# The ConfigMap automotive-workshop-api-migrations is generated at deploy time from
+# migrations/ — it is never committed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: automotive-workshop-api-migrate
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: automotive-workshop
+spec:
+  # A failed migration leaves the database dirty; a retry cannot succeed (FP-33 §6).
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: automotive-workshop-api
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: automotive-workshop
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.20.1
+          args: ["-path=/migrations", "-database", "$(DATABASE_URL)", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: automotive-workshop-api-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: migrations
+          configMap:
+            name: automotive-workshop-api-migrations

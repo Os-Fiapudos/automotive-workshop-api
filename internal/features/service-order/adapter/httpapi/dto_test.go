@@ -1,10 +1,14 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"automotive-workshop-api/internal/features/service-order/domain"
 )
 
 func validCreateRequest(products ...RequestedProductRequest) CreateRequest {
@@ -48,4 +52,26 @@ func TestCreateRequestValidateRejectsDuplicateRequestedProduct(t *testing.T) {
 		assert.Equal(t, "requestedProducts[1].productId", details[0].Field)
 		assert.Contains(t, details[0].Message, "duplicate product")
 	}
+}
+
+// TestQuoteResponseRendersExactTotals keeps the JSON half of the FP-31 test
+// TestComposeQuoteExactTotalsWithQuantities (specs/monetary-value-precision/):
+// 3 × 19.90 + 7 × 0.10 = 60.40 renders as exact decimals, never float drift.
+// The arithmetic half stays with the use case.
+func TestQuoteResponseRendersExactTotals(t *testing.T) {
+	quote := &domain.Quote{
+		ID:             uuid.New(),
+		ServiceOrderID: uuid.New(),
+		Status:         domain.QuoteStatusPending,
+		TotalAmount:    6040,
+		Items: []domain.QuoteItem{
+			{Kind: domain.QuoteItemProduct, ProductID: uuid.New(), Description: "A part", Quantity: 3, UnitPrice: 1990, Total: 5970},
+			{Kind: domain.QuoteItemService, ServiceID: uuid.New(), Description: "A service", Quantity: 7, UnitPrice: 10, Total: 70},
+		},
+	}
+
+	body, err := json.Marshal(toQuoteResponse(quote))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"unitPrice":19.9,"total":59.7}`)
+	assert.Contains(t, string(body), `"totalAmount":60.4,`)
 }

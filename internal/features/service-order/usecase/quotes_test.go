@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"automotive-workshop-api/internal/shared/trackingtoken"
+
+	"automotive-workshop-api/internal/shared/money"
 )
 
 func seedOrder(repo *fakeRepository, status domain.Status) *domain.ServiceOrder {
@@ -54,9 +56,9 @@ func TestComposeQuoteSuccess(t *testing.T) {
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 35.90, Active: true})
+	repo.addProduct(&ProductRef{ID: productID, Code: 1, Name: "Oil Filter", Description: "Engine oil filter.", UnitPrice: 3590, Active: true})
 	serviceID := uuid.New()
-	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change", Description: "Engine oil and filter change.", Price: 80.00})
+	repo.addService(&ServiceRef{ID: serviceID, Code: 1, Name: "Oil Change", Description: "Engine oil and filter change.", Price: 8000})
 
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 2},
@@ -64,7 +66,7 @@ func TestComposeQuoteSuccess(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.InDelta(t, 151.80, quote.TotalAmount, 0.0001) // 2*35.90 + 80.00
+	assert.Equal(t, money.Cents(15180), quote.TotalAmount) // 2*35.90 + 80.00 = 151.80, exact
 	assert.Equal(t, domain.StatusInDiagnosis, order.Status, "composing a quote no longer transitions the order — only SendQuote does (specs/service-order-quote-decision/)")
 	require.Len(t, quote.Items, 2)
 }
@@ -75,7 +77,7 @@ func TestComposeQuoteRejectsBeforeDiagnosis(t *testing.T) {
 	order := seedOrder(repo, domain.StatusReceived)
 
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -108,7 +110,7 @@ func TestComposeQuoteRejectsInvalidQuantity(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 0},
@@ -134,7 +136,7 @@ func TestComposeQuoteRejectsInactiveProduct(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: false, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: false, UnitPrice: 1000})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -160,7 +162,7 @@ func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -171,7 +173,7 @@ func TestComposeQuoteRecomposeWhilePendingReplacesItems(t *testing.T) {
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 3},
 	})
 	require.NoError(t, err)
-	assert.InDelta(t, 30.0, quote.TotalAmount, 0.0001)
+	assert.Equal(t, money.Cents(3000), quote.TotalAmount)
 	require.Len(t, quote.Items, 1)
 }
 
@@ -181,7 +183,7 @@ func TestComposeQuoteRejectsAlreadyDecided(t *testing.T) {
 	order := seedOrder(repo, domain.StatusAwaitingApproval)
 	repo.seedDecidedQuote(order.ID, domain.QuoteStatusApproved)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -205,7 +207,7 @@ func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10, Description: "A part"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000, Description: "A part"})
 
 	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 2},
@@ -214,7 +216,7 @@ func TestGetQuoteReturnsComposedQuote(t *testing.T) {
 
 	quote, err := service.GetQuote(context.Background(), order.ID)
 	require.NoError(t, err)
-	assert.InDelta(t, 20.0, quote.TotalAmount, 0.0001)
+	assert.Equal(t, money.Cents(2000), quote.TotalAmount)
 }
 
 // TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem proves the
@@ -225,7 +227,7 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	service := newTestService(repo)
 	order := seedOrder(repo, domain.StatusInDiagnosis)
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 10, Description: "Original description"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1000, Description: "Original description"})
 
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
@@ -233,10 +235,10 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 	require.NoError(t, err)
 
 	// Simulate a later catalog change.
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 999, Description: "Changed description"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 99900, Description: "Changed description"})
 
 	assert.Equal(t, "Original description", quote.Items[0].Description)
-	assert.InDelta(t, 10.0, quote.Items[0].UnitPrice, 0.0001)
+	assert.Equal(t, money.Cents(1000), quote.Items[0].UnitPrice)
 }
 
 // ---- specs/service-order-quote-decision/ ----
@@ -247,7 +249,7 @@ func TestComposeQuoteCatalogChangeDoesNotAffectPersistedItem(t *testing.T) {
 func composeQuoteForOrder(t *testing.T, service *testServices, repo *fakeRepository, order *domain.ServiceOrder) *domain.Quote {
 	t.Helper()
 	productID := uuid.New()
-	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 42.50, Description: "A part"})
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 4250, Description: "A part"})
 	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
 		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 1},
 	})
@@ -515,4 +517,43 @@ func TestAuthenticateExternalNotificationRejectsWhenUnconfigured(t *testing.T) {
 
 	assert.False(t, service.AuthenticateExternalNotification(""))
 	assert.False(t, service.AuthenticateExternalNotification("anything"))
+}
+
+// specs/monetary-value-precision/: an item total or quote total beyond the
+// NUMERIC(12,2) columns is rejected before anything is persisted, instead of
+// failing in the database.
+func TestComposeQuoteRejectsAmountBeyondNumericLimit(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, domain.StatusInDiagnosis)
+	productID := uuid.New()
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: money.MaxAmount, Description: "A part"})
+
+	_, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
+		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 2},
+	})
+	assert.ErrorIs(t, err, domain.ErrQuoteAmountOutOfRange)
+	assert.Nil(t, repo.quotes[order.ID])
+}
+
+// Totals with quantities are exact: 3 × 19.90 + 7 × 0.10 = 60.40.
+func TestComposeQuoteExactTotalsWithQuantities(t *testing.T) {
+	repo := newFakeRepository()
+	service := newTestService(repo)
+	order := seedOrder(repo, domain.StatusInDiagnosis)
+	productID := uuid.New()
+	repo.addProduct(&ProductRef{ID: productID, Active: true, UnitPrice: 1990, Description: "A part"})
+	serviceID := uuid.New()
+	repo.addService(&ServiceRef{ID: serviceID, Description: "A service", Price: 10})
+
+	quote, err := service.ComposeQuote(context.Background(), order.ID, []QuoteItemInput{
+		{Kind: domain.QuoteItemProduct, ProductID: productID.String(), Quantity: 3},
+		{Kind: domain.QuoteItemService, ServiceID: serviceID.String(), Quantity: 7},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, money.Cents(5970), quote.Items[0].Total)
+	assert.Equal(t, money.Cents(70), quote.Items[1].Total)
+	assert.Equal(t, money.Cents(6040), quote.TotalAmount)
+	// The JSON rendering of these exact totals is asserted next to the DTO, in
+	// adapter/httpapi (TestQuoteResponseRendersExactTotals).
 }
