@@ -118,3 +118,25 @@ start a later numbered section before the previous one's suite is green (`design
       Pre-existing collection issue, out of scope: it deactivates the customer before
       creating the vehicle (`409 CUSTOMER_INACTIVE`), so its service-order requests run
       with empty ids on both versions.
+
+## 11. Integration with `develop` (2026-10-28, `requirements.md` §7.7)
+
+- [x] `develop@6779547` preserved as `vertical-slice-arch`. It is the regression baseline
+      (decision log D13/D16).
+- [x] `develop` merged into the branch (`1fe315c`). Every FP-31 change is reapplied onto the
+      layers (`review-guide.md` §4.0): the same 55 SQL statements and the same
+      7 × `ScanCents` + 5 × `NumericFromCents` as `develop`.
+- [x] `internal/shared/money` allowed as a value-type leaf, guarded by
+      `TestValueTypePackagesStayInfrastructureFree`. Verified to fail on `money → net/http`,
+      `domain → encoding/json` and `usecase → domain → net/http`.
+- [x] All 331 tests of `develop` (slice + `handlers_test`) present and green, plus 8 new.
+- [x] Coverage, fresh Postgres, Go 1.26.10 on both sides: 82.7% (1143/1382) on
+      `vertical-slice-arch` → **83.4%** (1159/1390) on the branch.
+- [x] `make smoke` on the built image. Postman collection as shipped: 50/50 identical status
+      and full bodies. Full-flow regression copy: 50/50 identical status; bodies identical
+      except a wall-clock duration. The quote total is 309.70 on both.
+- [x] `govulncheck`: 0 on both. `gosec`: 6 → 0 is an analyzer-scope artifact, not a fix
+      (decision log D17).
+- [ ] Push, change the base of PR #40 to `develop`, CI green on the PR (decision log A/B).
+- [ ] Review, then merge with a merge commit (decision log C). Remove
+      `fase-2/clean-architecture` (decision log D).
