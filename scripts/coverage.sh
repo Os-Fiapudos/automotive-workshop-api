@@ -17,8 +17,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Packages whose coverage is enforced. Widening the gate is a one-line change here.
+# An entry ending in /... is gated as ONE aggregate over the package and every
+# sub-package under it, so splitting a slice into layers can neither drop code from
+# the gate nor let a new sub-package escape it
+# (specs/service-order-architecture-refactor/requirements.md §7.4).
 GATED_PACKAGES=(
-    automotive-workshop-api/internal/features/service-order
+    automotive-workshop-api/internal/features/service-order/...
     automotive-workshop-api/internal/features/product
     automotive-workshop-api/internal/features/service-order-tracking
 )
@@ -78,44 +82,85 @@ NR > 1 {
     if (count + 0 > 0 && !(id in hit)) { hit[id] = 1; covered[package_name] += statements }
 }
 END {
-    split(gated, gated_list, " ")
-    for (i in gated_list) is_gated[gated_list[i]] = 1
+    gated_count = split(gated, gated_list, " ")
+
+    # Attribute every measured package to the gate entry that covers it (if any) and
+    # sum statements per entry, so a /... entry is one aggregate over its tree.
+    for (package_name in total) {
+        rule = gate_of(package_name)
+        if (rule == "") continue
+        member_of[package_name] = rule
+        gate_total[rule] += total[package_name]
+        gate_covered[rule] += covered[package_name]
+    }
 
     printf "\n%-56s %8s %8s\n", "GATED PACKAGE (RNF06)", "COVERAGE", "RESULT"
     printf "%s\n", sep(74)
     failures = 0
-    for (i = 1; i <= length(gated_list); i++) {
-        package_name = gated_list[i]
-        if (!(package_name in total)) {
-            printf "%-56s %8s %8s\n", short(package_name), "n/a", "FAIL"
+    for (i = 1; i <= gated_count; i++) {
+        rule = gated_list[i]
+        if (!(rule in gate_total) || gate_total[rule] == 0) {
+            printf "%-56s %8s %8s\n", short(rule), "n/a", "FAIL"
             print "  package produced no coverage data — is the name in GATED_PACKAGES correct?"
             failures++
             continue
         }
-        percentage = 100 * covered[package_name] / total[package_name]
+        percentage = 100 * gate_covered[rule] / gate_total[rule]
         result = (percentage + 0.05 >= threshold) ? "PASS" : "FAIL"
         if (result == "FAIL") failures++
-        printf "%-56s %7.1f%% %8s\n", short(package_name), percentage, result
+        printf "%-56s %7.1f%% %8s\n", short(rule), percentage, result
+
+        # A /... entry also lists each sub-package (informational, not gated on its own).
+        if (rule ~ /\/\.\.\.$/) {
+            n = 0
+            for (package_name in member_of) if (member_of[package_name] == rule) members[++n] = package_name
+            sort_list(members, n)
+            for (j = 1; j <= n; j++) {
+                package_name = members[j]
+                printf "  %-54s %7.1f%%   (%d/%d statements)\n", short(package_name),
+                    100 * covered[package_name] / total[package_name], covered[package_name], total[package_name]
+            }
+            printf "  %-54s %8s   (%d/%d statements)\n", "aggregate", "", gate_covered[rule], gate_total[rule]
+            delete members
+        }
     }
 
     printf "\n%-56s %8s\n", "NOT GATED (informational)", "COVERAGE"
     printf "%s\n", sep(74)
     n = 0
-    for (package_name in total) if (!(package_name in is_gated)) ordered[++n] = package_name
-    for (i = 1; i <= n; i++)
-        for (j = i + 1; j <= n; j++)
-            if (ordered[j] < ordered[i]) { swap = ordered[i]; ordered[i] = ordered[j]; ordered[j] = swap }
+    for (package_name in total) if (!(package_name in member_of)) ordered[++n] = package_name
+    sort_list(ordered, n)
     for (i = 1; i <= n; i++) {
         package_name = ordered[i]
         printf "%-56s %7.1f%%\n", short(package_name), 100 * covered[package_name] / total[package_name]
     }
 
-    printf "\nthreshold: %d%% on %d gated package(s)\n", threshold, length(gated_list)
+    printf "\nthreshold: %d%% on %d gated package(s)\n", threshold, gated_count
     if (failures > 0) {
         printf "FAILED: %d gated package(s) below threshold\n", failures
         exit 1
     }
     print "OK: every gated package meets the threshold"
+}
+# gate_of returns the GATED_PACKAGES entry covering name, or "" if none does. An entry
+# ending in /... covers the package itself and everything below it — matched on a
+# "/" boundary, so service-order/... never captures service-order-tracking.
+function gate_of(name,   i, rule, prefix) {
+    for (i = 1; i <= gated_count; i++) {
+        rule = gated_list[i]
+        if (rule ~ /\/\.\.\.$/) {
+            prefix = substr(rule, 1, length(rule) - 4)
+            if (name == prefix || index(name, prefix "/") == 1) return rule
+        } else if (name == rule) {
+            return rule
+        }
+    }
+    return ""
+}
+function sort_list(list, n,   i, j, swap) {
+    for (i = 1; i <= n; i++)
+        for (j = i + 1; j <= n; j++)
+            if (list[j] < list[i]) { swap = list[i]; list[i] = list[j]; list[j] = swap }
 }
 function short(name,   trimmed) {
     trimmed = name

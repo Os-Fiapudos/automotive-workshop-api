@@ -143,6 +143,25 @@ code but are not yet described in this document; the sections below cover `auth`
 > SQL â€” neither imports the other's Go package (CLAUDE.md Â§9.2). See
 > `specs/service-order-stock-usage/design.md` for the full design.
 
+> **Addendum (`specs/service-order-architecture-refactor/`, Fase 2, F2-US01)**: `service-order`
+> is no longer one flat package. It keeps its single slice folder but is organized in Clean
+> Architecture layers whose dependencies only point inward:
+> `domain/` (the `ServiceOrder` aggregate, its exported transitions, quotes, executions,
+> stock movements, history and every sentinel error; standard library + `uuid` only) <-
+> `usecase/` (`Opening`, `Lifecycle`, `Quotes`, `Executions`, `Queries`, `StockUsage`,
+> `Metrics`, plus the 17 narrow ports they declare in `ports.go`, replacing the 20-method
+> `serviceOrderLookups`) <- `adapter/postgres` (`postgres.Repository`, every SQL statement
+> unchanged, `assertions.go` proving it satisfies each port), `adapter/httpapi`
+> (`RegisterRoutes`, one handler file per use case, DTOs, the single error -> status mapping)
+> and `adapter/notifier` (no-op and Resend). `cmd/api/wiring.go` composes them
+> (`buildServiceOrderUseCases`). Routes, status codes and bodies are unchanged.
+> `internal/features/service-order/architecture_test.go` enforces the rule over the
+> transitive import graph on every `go test ./...`, and `scripts/coverage.sh` gates
+> `service-order/...` as one aggregate. The other features keep the flat layout described
+> below: their packages mixing HTTP, SQL and rules is recorded technical debt (decision 22),
+> not the target shape. See `docs/architecture-dependency-map.md` for the before/after
+> dependency map and the inventory of the other modules.
+
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
 handler, service, repository, and model in a single package under
@@ -694,6 +713,17 @@ their source:
     listing has no pagination), while Customer Management's listing carries its own
     pagination shape â€” another consistency item for whoever unifies the response
     conventions.
+22. **Clean Architecture inside the `service-order` slice; flat layout elsewhere is debt**
+    (F2-US01, 2026-10-21, `specs/service-order-architecture-refactor/`). `service-order`
+    is split into `domain/`, `usecase/` and `adapter/{postgres,httpapi,notifier}/`
+    sub-packages inside its one feature folder, with ports declared by their consumer
+    (`usecase/ports.go`) and the dependency rule enforced by `architecture_test.go`. The
+    inventory of `auth`, `customer`, `vehicle`, `product`, `service-catalog` and
+    `service-order-tracking` found no business-rule file importing infrastructure; the one
+    file-level violation (the repository port of `customer`, `vehicle` and `product`
+    declared in `repository.go`) was fixed by moving it to `service.go`. At package level
+    those six modules still mix HTTP, SQL and rules, and the team explicitly scoped their
+    layering out of F2-US01: it is technical debt, to be paid with the same recipe.
 
 Any architectural decision outside this list (linter beyond
 `gofmt`/`go vet`, authorization/roles, refresh tokens, OpenAPI/Swagger documentation for
