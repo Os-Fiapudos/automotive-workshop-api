@@ -1,6 +1,6 @@
 # Design — `service-order` Clean Architecture Refactor
 
-Satisfies: `requirements.md` (all sections). Structural only — no acceptance criterion from
+Satisfies: `requirements.md` (all sections). **Revised 2026-10-21 (F2-US01): §9 refines §1–§7 and takes precedence where they differ.** Structural only — no acceptance criterion from
 any other `service-order-*` spec changes meaning; this document maps existing files to a
 new layout and defines the new port interfaces, nothing else.
 
@@ -230,3 +230,101 @@ architecture linter (`CLAUDE.md` §7).
 | BR6 (still one vertical slice) | §6 |
 | BR7 (no new cross-feature import) | §4 |
 | BR8 (no behavior change) | §5 (staged, suite green at each step) |
+
+## 9. Revision 2026-10-21 — F2-US01 (refines §1–§7)
+
+### 9.1 Final layout
+
+```
+internal/features/service-order/
+├── doc.go                  → package serviceorder: the feature root, documents the layering
+├── architecture_test.go    → the dependency-rule check (requirements.md §7.5)
+├── domain/                 → package domain
+│   ├── service_order.go    → ServiceOrder, Status, NewServiceOrder, exported transitions
+│   ├── quote.go            → Quote, QuoteItem, QuoteStatus, ValidateQuoteItems, CalculateTotal
+│   ├── history.go          → ServiceOrderHistory, fixed history descriptions
+│   ├── execution.go        → ServiceExecution, NewServiceExecution, Finish
+│   ├── stock.go            → StockMovement, StockMovementType
+│   └── errors.go           → every sentinel error (unchanged values and messages)
+├── usecase/                → package usecase
+│   ├── ports.go            → every port, declared by this, its only consumer (§9.2)
+│   ├── refs.go             → CustomerRef/VehicleRef/ServiceRef/ProductRef read models (§4)
+│   ├── opening.go          → Opening.Create
+│   ├── lifecycle.go        → Lifecycle: StartDiagnosis, FinalizeOrder, DeliverOrder,
+│   │                          UpdateStatusExternal (status_update_service.go)
+│   ├── quotes.go           → Quotes: ComposeQuote, GetQuote, SendQuote, ApproveQuote,
+│   │                          RejectQuote, DecideQuoteExternal, quote-sent notification
+│   ├── executions.go       → Executions: StartExecution, FinishExecution
+│   ├── queries.go          → Queries: List, GetDetail, GetDetailByCode
+│   ├── stock_usage.go      → StockUsage: RegisterStockUsage, ReverseStockMovement,
+│   │                          ListStockMovements
+│   ├── metrics.go          → Metrics: AverageExecutionTime
+│   └── secrets.go          → constant-time shared-secret comparison
+└── adapter/
+    ├── postgres/           → package postgres: Repository (was PostgresServiceOrderRepository),
+    │                          every SQL statement unchanged, assertions.go (one compile-time
+    │                          assertion per port)
+    ├── httpapi/            → package httpapi: RegisterRoutes, one handler file per use case,
+    │                          every DTO, errors.go (the single error → apierror mapping)
+    └── notifier/           → package notifier: NoOpQuoteNotifier, ResendQuoteNotifier
+```
+
+The single `ServiceOrderService` is split into one struct per group of use cases (§1's file
+list), so each constructor states exactly the ports it uses. The groups follow the existing
+shared cores: `UpdateStatusExternal` dispatches onto the same `startDiagnosis`/
+`finalizeOrder`/`deliverOrder` cores as the administrative endpoints, so all four live in
+`Lifecycle`; the three quote-decision channels share `decideQuote`, so they live in `Quotes`.
+
+Domain transitions become exported methods (`StartDiagnosis`, `SendQuote`, `ApproveQuote`,
+`RejectQuote`, `Finalize`, `Deliver`, `ServiceExecution.Finish`), since their caller is now in
+another package; `Status` still has no setter method, and the transitions keep their exact
+guards. Raw, unresolved inputs (`CreateInput`, `QuoteItemInput`, `StockUsageItem`) and read
+models (`ListFilter`, `ServiceOrderDetail`, `MetricsFilter`, ...) are use-case types and live in
+`usecase/`, not `domain/`.
+
+### 9.2 Ports (each ≤ 4 methods)
+
+| Port | Methods | Consumers |
+| --- | --- | --- |
+| `OrderCreator` | `Create` | Opening |
+| `OrderFinder` | `FindServiceOrderByID` | Lifecycle, Quotes, Executions, Queries, StockUsage |
+| `OrderCodeFinder` | `FindServiceOrderByCode` | Queries |
+| `TrackedOrderFinder` | `FindServiceOrderByCodeWithTrackingToken` | Quotes |
+| `StatusTransitionStore` | `StartDiagnosis`, `FinalizeOrder`, `DeliverOrder` | Lifecycle |
+| `CustomerLookup` | `FindCustomerByID`, `FindCustomerByDocument` | Opening, Quotes, Queries |
+| `VehicleLookup` | `FindVehicleByID`, `FindVehicleByPlate` | Opening, Queries |
+| `ServiceCatalogLookup` | `FindServiceByID`, `FindServicesByIDs`, `FindMissingServiceIDs` | Opening, Quotes, Executions |
+| `ProductLookup` | `FindActiveProductByID` | Opening, Quotes |
+| `QuoteReader` | `FindQuoteByServiceOrderID` | Lifecycle, Queries |
+| `QuoteStore` | `QuoteReader` + `SaveQuote`, `SendQuote`, `DecideQuote` | Quotes |
+| `ExecutionStore` | `StartExecution`, `FinishExecution`, `FindServiceExecutionByID` | Executions |
+| `ExecutionLister` | `FindServiceExecutionsByServiceOrderID` | Lifecycle |
+| `ServiceOrderQueryStore` | `ListServiceOrders`, `FindRequestedServices`, `FindHistoryByServiceOrderID` | Queries |
+| `StockLedger` | `RegisterStockUsage`, `ReverseStockMovement`, `ListStockMovements` | StockUsage |
+| `ExecutionMetricsReader` | `FindAverageExecutionTimeByService` | Metrics |
+| `QuoteNotifier` | `NotifyQuoteSent` | Quotes |
+
+`postgres.Repository` implements every port except `QuoteNotifier` (asserted at compile time);
+`notifier.NoOpQuoteNotifier`/`ResendQuoteNotifier` implement `QuoteNotifier`.
+
+### 9.3 Composition
+
+`cmd/api/main.go` builds one `postgres.Repository`, passes it to every use-case constructor
+(typed through the narrow port at each parameter), builds the notifier
+(`cmd/api/wiring.go`), and hands the use cases to `httpapi.RegisterRoutes(mux,
+httpapi.UseCases{...}, requireAuth)`. The integration tests in `internal/handlers_test/`
+build the same composition; only their import paths change.
+
+### 9.4 Tests
+
+Tests move with their code. Use-case tests keep one in-memory fake (`usecase/fake_test.go`)
+that implements every port, because it models one consistent in-memory database that several
+use cases share inside a single test (e.g. compose → send → approve). Narrowness is enforced
+by the constructors and by `adapter/postgres/assertions.go`, not by the fake. The HTTP
+adapter's tests use their own fake that implements only the ports the routes under test need.
+
+### 9.5 Coverage and dependency check
+
+As `requirements.md` §7.4/§7.5. `scripts/coverage.sh` gains prefix entries
+(`.../service-order/...`): statements of every package under the prefix are summed before the
+threshold is applied, and each sub-package is listed below the gated row.

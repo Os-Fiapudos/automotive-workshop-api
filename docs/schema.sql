@@ -9,7 +9,11 @@
 --   - created_at/updated_at on "registry" entities (not on event-trail tables,
 --     which already carry the event's own occurred_at).
 --
--- Run with: psql -f docs/schema.sql -d automotive_workshop
+-- Reference only (specs/database-migrations/, FP-33): databases are created and
+-- evolved by migrations/ (golang-migrate) — no environment runs this file to
+-- build a database any more. It must always equal the schema the full migration
+-- chain produces: update it in the same change that adds a migration;
+-- `scripts/migrate.sh verify` (CI job "migrations") fails when they diverge.
 -- =============================================================================
 
 -- ==== Extensions ====
@@ -47,8 +51,9 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- 'CANCELADA') as the single deliberate exception to the "everything in English"
 -- convention; the exception was dropped so the whole domain speaks one language
 -- (see docs/entities.md).
--- This file only runs on the initial creation of the Docker volume, so a database
--- created before that date still holds the old labels. Migrate it in place with:
+-- A database created before that date still holds the old labels, so it matches
+-- no migration version and `scripts/migrate.sh baseline` refuses to adopt it.
+-- Back it up and migrate it in place first with:
 --     ALTER TYPE service_order_status RENAME VALUE 'RECEBIDA' TO 'RECEIVED';
 --     ALTER TYPE service_order_status RENAME VALUE 'EM_DIAGNOSTICO' TO 'IN_DIAGNOSIS';
 --     ALTER TYPE service_order_status RENAME VALUE 'AGUARDANDO_APROVACAO' TO 'AWAITING_APPROVAL';

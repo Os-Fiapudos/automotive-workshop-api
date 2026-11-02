@@ -336,6 +336,13 @@ reuses the existing `quoteDecisionResponse`/`toQuoteDecisionResponse` (§1.7) un
 same reduced public shape, since an external system gets no more internal detail than the
 customer's own browser does.
 
+> **Erratum (2026-10-18, implementation)**: the registration snippet above shows
+> `wrap(handler.decideQuoteExternal)`, but `wrap` is this package's `requireAuth` (JWT)
+> wrapper — using it would contradict §5.1's "No `requireAuth`". The route is registered
+> unwrapped (`mux.HandleFunc`), as §5.1 decides. Likewise, the secret is stored on the
+> service through `WithExternalNotificationSecret`, chained onto `NewServiceOrderService` at
+> wiring time, instead of a new constructor parameter. See `tasks.md`'s implementation notes.
+
 New row in the error-mapping table (`design.md` §1.7):
 
 | Error | Status | `error.code` |

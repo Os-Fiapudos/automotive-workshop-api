@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 // decodeJSON reads and decodes request body into target struct T, returning an apierror.Error on failure.
@@ -20,13 +21,21 @@ import (
 // Returns:
 //
 //	value(T): decoded struct
-//	apiErr(*apierror.Error): error response if JSON is malformed
+//	apiErr(*apierror.Error): error response if JSON is malformed or unitPrice is not an exact cents amount
 func decodeJSON[T any](r *http.Request) (T, *apierror.Error) {
 	var value T
-	if err := json.NewDecoder(r.Body).Decode(&value); err != nil {
+	err := json.NewDecoder(r.Body).Decode(&value)
+	switch {
+	case err == nil:
+		return value, nil
+	case errors.Is(err, money.ErrInvalidAmount):
+		// unitPrice is the only monetary request field: a value with more than
+		// two decimal places or beyond NUMERIC(12,2) is rejected, never rounded
+		// (specs/monetary-value-precision/).
+		return value, apierror.Validation("invalid product data", apierror.Detail{Field: "unitPrice", Message: err.Error()})
+	default:
 		return value, apierror.BadRequest("request body is not valid JSON")
 	}
-	return value, nil
 }
 
 // parseUUIDPathValue parses a path parameter as a valid UUID.

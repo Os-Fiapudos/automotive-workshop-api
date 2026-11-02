@@ -87,6 +87,14 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   (`go.mod` `go 1.26.0`; CI `go-version: "1.26"` resolves to the latest 1.26 patch;
   `SCANNER_GO_VERSION` follows; Dockerfile `golang:1.26-alpine`). Notes above that mention
   1.25 are records of the decision at the time.
+  **Fixed on 2026-10-21**: "resolves to the latest 1.26 patch" only holds with
+  `check-latest: true` on every `actions/setup-go` step — without it, setup-go reuses the
+  1.26 patch cached in the runner image. The cached go1.26.9 failed the `security` job on a
+  `crypto/x509` advisory fixed in go1.26.10 (reachable from `cmd/api`'s
+  `server.ListenAndServe`), so all three jobs now set `check-latest: true`. Locally,
+  `govulncheck` reports for the installed toolchain: keep it on the latest 1.26 patch (or run
+  `GOTOOLCHAIN=go1.26.10 scripts/security-scan.sh`), and rebuild the image with
+  `docker compose build --pull` so `golang:1.26-alpine` is not a stale cached patch.
 - **External dependencies**, all added deliberately after explicit alignment (not assumed —
   see §12): `github.com/jackc/pgx/v5` (Postgres driver/pool, `v5.10.0` — raised from `v5.7.4`
   by the Go 1.25 upgrade, which cleared advisory GO-2026-5004),
@@ -105,17 +113,55 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   `GENERATED ALWAYS AS IDENTITY`). Accessed via `pgx v5` (`pgxpool.Pool`), no ORM/query
   builder — one shared pool built by `internal/shared/database.NewPool` and injected into
   each feature's own `repository.go` from `cmd/api/main.go`.
-- **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), and `api`
+- **Local infra**: Docker Compose with `db` (Postgres), `adminer` (DB UI), `api`,
+  `swagger-ui`, and `n8n` (the external status-update tool, `n8nio/n8n` pinned, workflow
+  imported from `tools/n8n/workflows/` on startup — `specs/service-order-status-update/`)
   services ([docker-compose.yml](docker-compose.yml), [Dockerfile](Dockerfile)). `api` now
   requires `JWT_SECRET` to be set (compose fails fast via `${JWT_SECRET:?...}` if it's
   missing from `.env`).
+  **Hardened on 2026-10-19 (FP-32, [specs/containerization/](specs/containerization/))**:
+  the image runs on `alpine:3.24` as non-root UID/GID `10001`, has a `HEALTHCHECK` on
+  `/health` (BusyBox `wget`), and is built from an allowlist
+  [.dockerignore](.dockerignore) (`go.mod`, `go.sum`, `cmd/`, `internal/` only — a new path
+  the build needs must be re-included there and copied in the `Dockerfile`). Image versions
+  (`alpine:3.24`, `adminer:6.1.1`, `swaggerapi/swagger-ui:v5.33.1`,
+  `migrate/migrate:v4.20.1`, `n8nio/n8n:2.43.8`) are pinned on purpose: raise them as a reviewed change, never
+  back to `:latest`.
+- **Kubernetes and IaC (Fase 2, added 2026-10-25)**: `infra/` is a Terraform root (local
+  backend) that creates a local `kind` cluster, `metrics-server` and Postgres 16 as a
+  StatefulSet (FP-35, [specs/infrastructure-provisioning/](specs/infrastructure-provisioning/));
+  `k8s/` holds the API manifests and the migration/bootstrap Jobs (FP-34,
+  [specs/kubernetes-deployment/](specs/kubernetes-deployment/)). Terraform (`>= 1.16`),
+  `kind` (via the `tehcyx/kind` provider) and `kubectl` are external tools, never Go
+  dependencies; provider versions, node image, chart and Postgres image are pinned exactly in
+  `infra/` and raised only as a reviewed change. Terraform owns the cluster, namespace,
+  metrics-server and Postgres; the deploy owns the API Secrets/ConfigMaps/Jobs — never add an
+  object to both. Never `kubectl apply -f k8s/` wholesale (order and unique Job names
+  matter), and never give the `Deployment` a `replicas` field (the HPA owns it).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
+  **CD added on 2026-10-21 (FP-36, [specs/ci-cd-pipeline/](specs/ci-cd-pipeline/))**: every
+  push/PR also builds the image (`image`, no push). A push to `main` or a manual
+  `workflow_dispatch` then runs `publish` (GHCR, lowercase name, full-SHA tag, deployed as
+  `name:<sha>@<digest>`) and `deploy` — both `needs:` the `build`, `coverage`, `migrations`,
+  `security` and `image` jobs by name, so renaming one of those jobs means updating the
+  `needs:` lists. `deploy` is an ephemeral environment inside the runner, driven by
+  [scripts/deploy.sh](scripts/deploy.sh): Terraform (`/infra`, FP-35) → migration `Job` →
+  bootstrap `Job` → `/k8s` rollout (FP-34) → authenticated smoke → evidence → destroy. Its
+  credentials are generated per run (no repository secret); the integration contract with
+  `/infra` and `/k8s` is `specs/ci-cd-pipeline/design.md` §9. Pinned: Terraform `1.16.6`,
+  `kubectl` `v1.36.5` — raise them as a reviewed change, like the image pins above.
 
 ## 3. Project structure
 
 ```
 cmd/api/main.go             → HTTP entrypoint, wires up the server and registers feature routes
+cmd/bootstrap-admin/        → one-off command creating the first admin user on a migrated
+                               database (specs/database-migrations/, section 13)
+migrations/                 → versioned schema migrations (golang-migrate), section 14
+scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh,
+                               deploy.sh + deploy-smoke.sh (staged Kubernetes deploy, used
+                               by CI and for the demonstration environment — FP-36)
 internal/features/          → one folder per business feature (vertical slice)
   features/auth/            → implemented slice: handler + service + repository + model
                                (login, /me; unit-tested)
@@ -124,23 +170,35 @@ internal/features/          → one folder per business feature (vertical slice)
   features/service-catalog/ → implemented slice: handler + service + repository + model
                                (service catalog CRUD over /api/v1/services; unit- and
                                integration-tested)
+  features/service-order/   → implemented slice in Clean Architecture layers (section 9.1):
+                               domain/, usecase/ (ports.go), adapter/{postgres,httpapi,
+                               notifier}/; architecture_test.go enforces the dependency
+                               rule (specs/service-order-architecture-refactor/)
   features/user/            → placeholder slice: only has doc.go, no implementation yet.
                                NOTE: unrelated to auth's `users` database table — this is a
                                distinct, not-yet-specified future feature; don't conflate them.
 internal/shared/            → cross-cutting code reused across features — implemented:
-                               database (pgx pool), token (JWT), middleware (auth),
+                               database (pgx pool + money.Cents <-> NUMERIC conversion),
+                               token (JWT), middleware (auth),
                                httpx (JSON writer + error envelope, used by auth),
                                apierror (JSON error envelope, used by customer and
                                servicecatalog — see section 8 for why there are currently two
                                and what that means for new code)
-                               document (CPF/CNPJ), config (env var loading)
+                               document (CPF/CNPJ), config (env var loading),
+                               money (exact Cents value type for every price/total:
+                               JSON + bounded arithmetic, stdlib only — never float64;
+                               specs/monetary-value-precision/)
 internal/handlers_test/     → handler/integration tests — implemented (auth_test.go,
                                customer_test.go, service_catalog_test.go), each skipped
                                independently when DATABASE_URL is unset
-docs/                       → domain model (entities.md) and PostgreSQL schema
-                               (schema.sql, seed.sql)
+docs/                       → domain model (entities.md), schema reference (schema.sql —
+                               produced by migrations/, no longer executed) and dev seed
+                               (seed.sql)
 .github/workflows/ci.yml    → CI pipeline
-Dockerfile, docker-compose.yml, .env.example → containerized local environment
+.github/workflows/iac.yml   → static validation of infra/ and k8s/ (scripts/iac-validate.sh)
+infra/                      → Terraform: kind cluster, metrics-server, Postgres StatefulSet (FP-35)
+k8s/                        → API Deployment/Service/ConfigMap/HPA + migration/bootstrap Jobs (FP-34)
+Dockerfile, .dockerignore, docker-compose.yml, .env.example → containerized local environment
 ```
 
 specs/                      → SDD specifications: specs/README.md (process) and
@@ -157,6 +215,18 @@ etc.). This is the pattern declared in [README.md](README.md), now implemented e
 by `internal/features/auth/`, `internal/features/customer/`, and
 `internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
+
+**Clean Architecture inside a slice (since 2026-10-21, F2-US01)**: `service-order` keeps
+the vertical slice — one folder, `internal/features/service-order/` — but organizes it
+internally in layers whose dependencies only point inward: `domain/` (aggregate,
+transitions, errors; standard library, `uuid` and the `shared/money` value type only) ←
+`usecase/` (use cases and the
+narrow ports they declare in `ports.go`) ← `adapter/postgres`, `adapter/httpapi`,
+`adapter/notifier` (pgx, HTTP and e-mail). Composition happens in `cmd/api`
+(`wiring.go`). The other implemented features keep the flat layout; that their packages
+mix HTTP, SQL and rules is recorded technical debt, not a pattern to copy — see
+[docs/architecture-dependency-map.md](docs/architecture-dependency-map.md) and
+[specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/).
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
 pool, shared by every feature), authentication middleware (`internal/shared/middleware`),
@@ -175,33 +245,34 @@ go run ./cmd/api
 (Needs `DATABASE_URL` and `JWT_SECRET` set in the environment — the process fails fast
 without them. See `.env.example` for every variable.)
 
-Bring up the full environment (Postgres + Adminer + API) via Docker Compose:
+Bring up the full environment (Postgres + migrations + seed + API + Adminer + Swagger) via
+Docker Compose:
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
-- API: http://localhost:8080/health
-- Postgres: `localhost:5432` (credentials in `.env`), schema applied automatically on the
-  first startup of the volume.
+- Order: `db` (healthy) → `migrate` (one-shot, applies `migrations/`; the API does not start
+  if it fails) → `api`; `seed` (one-shot, `docs/seed.sql`) runs after `migrate` on every
+  `up`, and nothing waits on it. Postgres' `docker-entrypoint-initdb.d` no longer creates
+  anything (since 2026-10-19, FP-33 — see section 14).
+- API: http://localhost:8080/health (`docker compose ps` shows it `healthy`).
+- Postgres: `localhost:5432` (credentials in `.env`).
 - Adminer: http://localhost:8081 (system `PostgreSQL`, server `db`).
+- Swagger UI: http://localhost:8082 (`docs/openapi.yaml`).
+- Smoke test: `make smoke` (`scripts/smoke.sh`, needs only `curl`) — health, login with the
+  seed admin, opens and reads a service order. After a restart, `SMOKE_EXPECT_ORDER_ID=<id>
+  make smoke` also checks an order created before it survived.
 
-Recreate the database from scratch (e.g. after changing `schema.sql`, which only runs on
-initial volume creation):
+Recreate the database from scratch (destroys its data):
 ```bash
 docker compose down -v
 docker compose up -d
 ```
 
-`docs/seed.sql` is mounted as `/docker-entrypoint-initdb.d/02-seed.sql`, so it runs
-automatically after `schema.sql` on the initial creation of the volume. To re-apply it to an
-existing volume (it is idempotent via `ON CONFLICT DO NOTHING`) — it includes two
-administrative users (`admin@workshop.local` / `admin123` and
+The seed includes two administrative users (`admin@workshop.local` / `admin123` and
 `soat-architecture@workshop.local` / `soat-architecture`, both dev/evaluation-only,
-bcrypt-hashed at insert time):
-```bash
-docker compose cp docs/seed.sql db:/tmp/seed.sql
-docker compose exec db psql -U workshop -d automotive_workshop -f /tmp/seed.sql
-```
+bcrypt-hashed at insert time). It is idempotent (`ON CONFLICT DO NOTHING`); re-run it alone
+with `docker compose up seed` (or `make seed`).
 
 ## 6. How to run the tests
 
@@ -219,19 +290,41 @@ To also run the integration tests against the local compose Postgres:
 ```bash
 DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?sslmode=disable' go test ./...
 ```
+They expect a database migrated to the latest version plus `docs/seed.sql` — what Compose
+builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the seed.
 
 ## 7. Lint, static analysis, and other checks
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
+- `internal/features/service-order/architecture_test.go` — the dependency-rule check: it
+  resolves the transitive import graph with `go list -deps` and fails if `domain`/`usecase`
+  reach `net/http`, `encoding/json`, `pgx`, `apierror`/`httpx`, an adapter or a library
+  outside their allowlist, or if an adapter depends on another adapter or feature. It is
+  a plain test, so `go test ./...` (and CI's `build` job) runs it.
 - `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
   CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
   versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
   [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
   are recorded in [docs/security-report.md](docs/security-report.md).
 - `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
-  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
-  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+  `product`, and `service-order-tracking`; `service-order` is gated as one aggregate over
+  `service-order/...`, so its sub-packages can never drop out of the gate), run in CI by
+  the `coverage` job against a real Postgres. It fails when `DATABASE_URL` is unset rather
+  than measuring skipped tests.
+- `scripts/migrate.sh verify` — run in CI by the `migrations` job (and locally by
+  `make migrate-verify`): on throwaway containers, checks the migration chain against
+  `docs/schema.sql`, re-run/no-op, full down/up, Fase 1 adoption with data preserved,
+  refusal of a non-matching database, and failure/recovery. See section 14.
+- `scripts/iac-validate.sh` (`make iac-validate`) — `terraform fmt`/`validate` on `infra/`
+  and a render of `k8s/` identical to the deploy's, checked with `kubeconform -strict` plus
+  the repository rules (no `replicas`, no Namespace/populated Secret in `k8s/`). Run in CI by
+  `.github/workflows/iac.yml` on changes to `infra/**`/`k8s/**`, together with `shellcheck`.
+- `image` — builds the `Dockerfile` on every push/PR without pushing; `publish`/`deploy`
+  only on `main`/manual and only after every check above passed (section 2's CD note).
+  `scripts/deploy.sh check` validates the `/infra` + `/k8s` contract and renders the
+  manifests without a cluster; `scripts/deploy.sh destroy` refuses outside CI unless
+  `DEPLOY_CONFIRM_DESTROY=yes`.
 - No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
   `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
@@ -308,9 +401,15 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   from any user can still reach every protected route regardless of who they are. Every
   feature's routes are wrapped in `RequireAuth` as of 2026-08-26 (Customer Management and
   Service Order Opening's creation route were the last two — see section 1's note); the only
-  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login)
-  and Service Order Tracking's own route, which validates its own possession-based tracking
-  token instead of a JWT (RF12).
+  intentional exceptions are the public routes listed in `cmd/api/main.go` (health, login),
+  Service Order Tracking's own route and the customer quote approve/reject routes, which
+  validate their own possession-based tracking token instead of a JWT (RF12), and
+  `POST /api/v1/service-orders/{id}/quote/decision`, which authenticates an external system
+  by the `X-External-Notification-Secret` shared secret (`EXTERNAL_NOTIFICATION_SECRET`,
+  `specs/service-order-quote-decision/` §9), and `POST /api/v1/service-orders/{id}/status`,
+  which authenticates the external status-update tool (the n8n workflow in `tools/n8n/`) by
+  its own, separate `X-External-Status-Secret` (`EXTERNAL_STATUS_UPDATE_SECRET`, must differ
+  from the quote secret — `specs/service-order-status-update/`).
 - **Collection responses**: list endpoints return an `{"items": [...]}` envelope (first
   defined by the service catalog listing), leaving room for pagination metadata later.
   Reuse this shape for new list endpoints instead of returning a bare JSON array.
@@ -327,6 +426,15 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
    Do not create cross-cutting technical packages (`internal/handlers/`, `internal/models/`,
    global `internal/services/`) — that breaks the vertical slice organization already
    adopted.
+   A feature that has explicitly adopted Clean Architecture or a Hexagonal layering
+   (currently: `service-order` only, see `specs/service-order-architecture-refactor/`) may
+   organize its internal files into `domain/`, `usecase/`, and `adapter/<name>/`
+   sub-packages, as long as the whole feature still lives under one
+   `internal/features/<name>/` folder and no cross-feature import is introduced. This is
+   additive to, not a replacement for, the vertical-slice rule: the slice is still the
+   feature folder; the sub-packages are internal to it. Ports are declared by their
+   consumer (`usecase/`), never in an adapter, and the dependency direction is enforced
+   by the feature's `architecture_test.go`.
 2. **No direct coupling between features.** A feature must not import internal packages of
    another feature directly. If two features need to share logic or types, that logic must
    move up to `internal/shared/`. (Both `auth` and `customer` today only import
@@ -345,7 +453,8 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 - Every new feature is born from a specification in `specs/` (see section 17) — not
   directly from code.
 - Follow the vertical slice pattern (section 9): handler, service, repository, and model
-  together in `internal/features/<feature>/`.
+  together in `internal/features/<feature>/` — or, for a feature that adopts Clean
+  Architecture, the layered sub-packages of section 9.1.
 - Reuse what already exists in `internal/shared/` before duplicating logic; if something new
   is genuinely cross-cutting, it goes into `internal/shared/`, not repeated in each feature.
   (Exception currently in effect: the error envelope — see section 8 — until that's
@@ -403,6 +512,13 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
   no retry/outbox. Logs from it carry only the order code and an outcome — never the API key,
   the customer's e-mail or name (see
   [specs/service-order-email-notification/](specs/service-order-email-notification/)).
+- **Administrative user bootstrap** (`cmd/bootstrap-admin`, shipped in the API image as
+  `/bootstrap-admin`): reads `ADMIN_EMAIL`/`ADMIN_PASSWORD` (12–72 bytes)/optional
+  `ADMIN_NAME` from the environment — a Kubernetes `Secret` in the cluster, never Git —
+  hashes with bcrypt in-process, inserts only if the e-mail is not taken (an existing user,
+  and its password, are never modified), and logs only the outcome. Deployed environments
+  use it instead of `docs/seed.sql`, whose passwords are public (see
+  [specs/database-migrations/](specs/database-migrations/) BR10/BR11).
 - When implementing database access, use parameterized queries — never concatenate user
   input into SQL (SQL injection protection).
 - Validate and sanitize all input received in handlers before passing it to
@@ -420,26 +536,31 @@ DATABASE_URL='postgres://workshop:workshop@localhost:5432/automotive_workshop?ss
 
 ## 14. Database and migration rules
 
-- The schema is defined in [docs/schema.sql](docs/schema.sql) and applied automatically by
-  Postgres only on the **initial creation of the Docker volume**
-  (`docker-entrypoint-initdb.d`, as `01-schema.sql`; [docs/seed.sql](docs/seed.sql) is
-  mounted next to it as `02-seed.sql` and runs right after). There is no migration tool (e.g. `golang-migrate`,
-  `goose`) configured in the project today. **To be defined**: incremental migration
-  strategy for when the schema needs to evolve after the volume already exists in
-  shared/production environments.
-- **Added 2026-10-18**: `migrations/` holds incremental `golang-migrate`-style files
-  (`NNNN_<name>.up.sql`/`.down.sql`, see `specs/database-migrations/`). The first one is
-  `0002_service_order_requested_products` (FP-27); the `0001_init` baseline and the
-  `migrate` tooling itself belong to the database-migrations feature and are not in the
-  repo yet. Until they land, an `.up.sql` (written with `IF NOT EXISTS`) can be applied to
-  an existing volume by hand:
-  `docker compose exec -T db psql -U workshop -d automotive_workshop -f - < migrations/<file>.up.sql`.
-  Every migration is mirrored into `docs/schema.sql` in the same change.
-- To apply schema changes locally today, the flow is to recreate the volume:
-  ```bash
-  docker compose down -v
-  docker compose up -d
-  ```
+- **Resolved 2026-10-19 (FP-33, [specs/database-migrations/](specs/database-migrations/)) —
+  this section used to list the migration strategy as "to be defined".** The schema is
+  created and evolved **only** by the migrations in `migrations/`, applied with
+  `golang-migrate` `v4.20.1` from the `migrate/migrate` image (pinned in
+  `scripts/migrate.sh` and `docker-compose.yml` — keep the two in sync; not a `go.mod`
+  dependency). The same chain runs in Compose (`migrate` service), CI, and the Kubernetes
+  migration `Job` (FP-34). Postgres' `docker-entrypoint-initdb.d` no longer applies
+  `docs/schema.sql` or `docs/seed.sql`.
+- `0001_init` is the baseline: the Fase 1 schema (`docs/schema.sql` at `0e6f2ab`), with a
+  guard that refuses to run on a database that already has tables. A pre-existing database
+  (e.g. a Fase 1 volume) is adopted with `scripts/migrate.sh baseline` /
+  `make migrate-baseline`: it backs up, proves the schema equals exactly one migration
+  version on a throwaway database, then records that version. Never record ("force") a
+  version without that proof — the script has no raw `force` on purpose. The same command
+  recovers a database left dirty by a failed migration.
+- **Adding a schema change**: `make migrate-create name=<snake_case>` → write the `.up.sql`
+  and its exact-inverse `.down.sql` → update [docs/schema.sql](docs/schema.sql) to the
+  resulting full schema **in the same change** (it is the human-readable reference, no
+  longer executed by any environment) → `make migrate-verify` (CI job `migrations` fails if
+  the chain and `docs/schema.sql` diverge). Never edit a migration that was applied
+  anywhere; add a corrective one. No `BEGIN`/`COMMIT` and nothing that cannot run in a
+  transaction (`CREATE INDEX CONCURRENTLY`, …): each file must stay atomic.
+- `down` (`scripts/migrate.sh down`, `make migrate-down`) is for disposable databases only
+  and refuses without `MIGRATE_CONFIRM_DOWN=yes`; with data that matters, back up and add a
+  corrective migration instead.
 - Any schema change must keep [docs/entities.md](docs/entities.md),
   [docs/schema.sql](docs/schema.sql), and [docs/seed.sql](docs/seed.sql) in sync with each
   other.

@@ -1,0 +1,585 @@
+-- =============================================================================
+-- 0001_init — baseline: the Fase 1 schema (specs/database-migrations/, FP-33)
+--
+-- Everything below the guard is docs/schema.sql exactly as it stood at commit
+-- 0e6f2ab (2026-08-26), its last change before migration 0002. A database
+-- created during Fase 1 therefore corresponds to version 1, and is adopted with
+-- `scripts/migrate.sh baseline` instead of running this file
+-- (requirements.md BR3–BR5). Never edit this file: add a new migration instead.
+--
+-- Conventions:
+--   - snake_case for tables/columns.
+--   - id UUID (technical key, generated via pgcrypto) as PRIMARY KEY.
+--   - code BIGINT IDENTITY (human-readable sequential, shown to the user).
+--   - created_at/updated_at on "registry" entities (not on event-trail tables,
+--     which already carry the event's own occurred_at).
+-- =============================================================================
+
+-- ==== Guard (requirements.md BR4) ====
+-- The statements below are idempotent (IF NOT EXISTS / duplicate_object), so on a
+-- database that already has the schema they would "succeed" and the tool would
+-- record version 1 without any validation. Refuse instead: golang-migrate runs
+-- this file as one transaction, so the refusal changes nothing.
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_tables
+        WHERE schemaname = 'public'
+          AND tablename <> 'schema_migrations'
+    ) THEN
+        RAISE EXCEPTION '0001_init refused: this database already has tables, so it was not created by these migrations (e.g. a Fase 1 database). Nothing was changed. Adopt it instead of recreating it: run "scripts/migrate.sh baseline" (or "make migrate-baseline") - see the README, section "Migrações do banco de dados".';
+    END IF;
+END $$;
+
+-- ==== Extensions ====
+
+CREATE EXTENSION IF NOT EXISTS "pgcrypto"; -- gen_random_uuid()
+-- Optional: enable for fuzzy text search on name/license_plate (see GIN indexes below).
+-- CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+
+-- ==== Enums ====
+-- We use native ENUM (not CHECK) because they are more compact on disk/index
+-- and self-documenting. Cost: evolving values requires ALTER TYPE ... ADD VALUE.
+
+DO $$ BEGIN
+    CREATE TYPE product_type AS ENUM ('PART', 'SUPPLY');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE product_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE customer_document_type AS ENUM ('CPF', 'CNPJ');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE customer_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE vehicle_status AS ENUM ('ACTIVE', 'INACTIVE');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Changed on 2026-08-26: these values used to be kept in Portuguese ('RECEBIDA',
+-- 'EM_DIAGNOSTICO', 'AGUARDANDO_APROVACAO', 'EM_EXECUCAO', 'FINALIZADA', 'ENTREGUE',
+-- 'CANCELADA') as the single deliberate exception to the "everything in English"
+-- convention; the exception was dropped so the whole domain speaks one language
+-- (see docs/entities.md).
+-- This file only runs on the initial creation of the Docker volume, so a database
+-- created before that date still holds the old labels. Migrate it in place with:
+--     ALTER TYPE service_order_status RENAME VALUE 'RECEBIDA' TO 'RECEIVED';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_DIAGNOSTICO' TO 'IN_DIAGNOSIS';
+--     ALTER TYPE service_order_status RENAME VALUE 'AGUARDANDO_APROVACAO' TO 'AWAITING_APPROVAL';
+--     ALTER TYPE service_order_status RENAME VALUE 'EM_EXECUCAO' TO 'IN_PROGRESS';
+--     ALTER TYPE service_order_status RENAME VALUE 'FINALIZADA' TO 'COMPLETED';
+--     ALTER TYPE service_order_status RENAME VALUE 'ENTREGUE' TO 'DELIVERED';
+--     ALTER TYPE service_order_status RENAME VALUE 'CANCELADA' TO 'CANCELED';
+-- RENAME VALUE rewrites only the label, preserving every existing row.
+DO $$ BEGIN
+    CREATE TYPE service_order_status AS ENUM (
+        'RECEIVED',
+        'IN_DIAGNOSIS',
+        'AWAITING_APPROVAL',
+        'IN_PROGRESS',
+        'COMPLETED',
+        'DELIVERED',
+        'CANCELED'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- 'CANCELED' was added by specs/service-order-quote-decision/: a branch from
+-- AWAITING_APPROVAL taken when the customer rejects the quote, since a
+-- REJECTED quote can never be altered (specs/service-order-diagnosis-quote/
+-- requirements.md §3.9) and the order otherwise had no way to leave
+-- AWAITING_APPROVAL.
+
+DO $$ BEGIN
+    CREATE TYPE quote_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- 'diagnosis_started' and 'quote_composed' were added by the Service Order
+-- Diagnosis and Quote Composition feature (specs/service-order-diagnosis-quote/).
+-- 'delivery' was added by the Service Order Execution/Finalization/Delivery feature
+-- (specs/service-order-execution/) for the COMPLETED -> DELIVERED transition; that same
+-- feature reuses 'completion' for IN_PROGRESS -> COMPLETED. 'approval' and
+-- 'cancellation' existed unused until specs/service-order-quote-decision/ became their
+-- first producer: 'approval' for AWAITING_APPROVAL -> IN_PROGRESS (quote approved),
+-- 'cancellation' for AWAITING_APPROVAL -> CANCELED (quote rejected). That same
+-- feature adds 'quote_sent' for IN_DIAGNOSIS -> AWAITING_APPROVAL (quote sent to
+-- the customer).
+DO $$ BEGIN
+    CREATE TYPE history_event AS ENUM (
+        'creation',
+        'diagnosis_started',
+        'quote_composed',
+        'quote_sent',
+        'approval',
+        'completion',
+        'cancellation',
+        'delivery'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Added by specs/service-order-stock-usage/. Shared by both a product's own
+-- manual stock adjustments (internal/features/product, service_order_id
+-- NULL) and a service order's parts/supplies usage deductions and their
+-- reversals (service_order_id set) — see stock_movements below.
+DO $$ BEGIN
+    CREATE TYPE stock_movement_type AS ENUM ('ENTRY', 'EXIT');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ==== Tables ====
+
+-- ---- Customer ----
+
+CREATE TABLE IF NOT EXISTS customers (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code          BIGINT GENERATED ALWAYS AS IDENTITY,
+    name          TEXT NOT NULL,
+    document      TEXT NOT NULL,
+    document_type customer_document_type NOT NULL,
+    phone         TEXT NOT NULL,
+    email         TEXT,
+    status        customer_status NOT NULL DEFAULT 'ACTIVE',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE customers IS 'Workshop customer, an individual or a company.';
+COMMENT ON COLUMN customers.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN customers.code IS 'Human-readable/sequential identifier shown to the user (e.g. on screens, receipts, search).';
+COMMENT ON COLUMN customers.name IS 'Full name or company name of the customer.';
+COMMENT ON COLUMN customers.document IS 'CPF or CNPJ of the customer, always stored normalized (digits only), used for tax identification.';
+COMMENT ON COLUMN customers.document_type IS 'Document kind: CPF (individual) or CNPJ (company), derived from the document at write time.';
+COMMENT ON COLUMN customers.phone IS 'Main contact phone number.';
+COMMENT ON COLUMN customers.email IS 'Contact e-mail, used for notifications and communication.';
+COMMENT ON COLUMN customers.status IS 'Customer situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically.';
+COMMENT ON COLUMN customers.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN customers.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- ---- Vehicle ----
+
+CREATE TABLE IF NOT EXISTS vehicles (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code           BIGINT GENERATED ALWAYS AS IDENTITY,
+    license_plate  TEXT NOT NULL,
+    brand          TEXT NOT NULL,
+    model          TEXT NOT NULL,
+    year           SMALLINT NOT NULL,
+    color          TEXT NOT NULL,
+    customer_id    UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
+    status         vehicle_status NOT NULL DEFAULT 'ACTIVE',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE vehicles IS 'Vehicle belonging to a customer.';
+COMMENT ON COLUMN vehicles.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN vehicles.code IS 'Human-readable/sequential identifier shown to the user.';
+COMMENT ON COLUMN vehicles.license_plate IS 'Vehicle license plate.';
+COMMENT ON COLUMN vehicles.brand IS 'Vehicle manufacturer (e.g. Fiat, Volkswagen).';
+COMMENT ON COLUMN vehicles.model IS 'Vehicle model (e.g. Uno, Gol).';
+COMMENT ON COLUMN vehicles.year IS 'Vehicle manufacturing/model year.';
+COMMENT ON COLUMN vehicles.color IS 'Vehicle predominant color.';
+COMMENT ON COLUMN vehicles.customer_id IS 'Reference to the owning Customer.';
+COMMENT ON COLUMN vehicles.status IS 'Vehicle situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete), never reactivated automatically. Also consulted by other features (e.g. Service Order Opening) to reject an INACTIVE vehicle before use.';
+COMMENT ON COLUMN vehicles.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN vehicles.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- ---- Product ----
+
+CREATE TABLE IF NOT EXISTS products (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code           BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    name           TEXT NOT NULL,
+    description    TEXT NOT NULL,
+    unit_price     NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
+    current_stock  INTEGER NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
+    type           product_type NOT NULL,
+    status         product_status NOT NULL DEFAULT 'ACTIVE',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE products IS 'Replacement part or consumable supply.';
+COMMENT ON COLUMN products.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN products.code IS 'Human-readable/sequential identifier shown to the user.';
+COMMENT ON COLUMN products.name IS 'Product name.';
+COMMENT ON COLUMN products.description IS 'Detailed product description.';
+COMMENT ON COLUMN products.unit_price IS 'Unit sale price of the product.';
+COMMENT ON COLUMN products.current_stock IS 'Quantity currently available in stock at query time.';
+COMMENT ON COLUMN products.type IS 'Product category: PART (replacement part) or SUPPLY (consumable material).';
+COMMENT ON COLUMN products.status IS 'Product situation: ACTIVE or INACTIVE. Starts ACTIVE; moved to INACTIVE only via explicit deactivation (logical delete).';
+COMMENT ON COLUMN products.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN products.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- ---- Service ----
+
+CREATE TABLE IF NOT EXISTS services (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- GENERATED BY DEFAULT (not ALWAYS): the catalog API accepts a caller-supplied
+    -- code and rejects collisions with 409 (specs/service-catalog/design.md D1).
+    code           BIGINT GENERATED BY DEFAULT AS IDENTITY,
+    name           TEXT NOT NULL,
+    description    TEXT NOT NULL,
+    price          NUMERIC(12, 2) NOT NULL CHECK (price >= 0),
+    estimated_time INTEGER CHECK (estimated_time IS NULL OR estimated_time > 0),
+    active         BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE services IS 'Service offered by the workshop (e.g. oil change, wheel alignment).';
+COMMENT ON COLUMN services.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN services.code IS 'Human-readable/sequential identifier shown to the user.';
+COMMENT ON COLUMN services.name IS 'Name of the offered service (e.g. oil change, wheel alignment).';
+COMMENT ON COLUMN services.description IS 'Detailed description of what the service covers.';
+COMMENT ON COLUMN services.price IS 'Price charged for performing the service.';
+COMMENT ON COLUMN services.estimated_time IS 'Estimated execution time, in minutes. Optional field.';
+COMMENT ON COLUMN services.active IS 'Whether the service is offered in new quotes. Deletion is logical: a retired service is deactivated, never removed (specs/service-catalog).';
+COMMENT ON COLUMN services.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN services.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- ---- ServiceOrder ----
+
+CREATE TABLE IF NOT EXISTS service_orders (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code         BIGINT GENERATED ALWAYS AS IDENTITY,
+    customer_id  UUID NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
+    vehicle_id   UUID NOT NULL REFERENCES vehicles (id) ON DELETE RESTRICT,
+    opened_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status       service_order_status NOT NULL DEFAULT 'RECEIVED',
+    notes        TEXT NOT NULL DEFAULT '',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE service_orders IS 'Service order opened for a vehicle/customer.';
+COMMENT ON COLUMN service_orders.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN service_orders.code IS 'Human-readable/sequential identifier of the service order, used for lookup and communication with the customer.';
+COMMENT ON COLUMN service_orders.customer_id IS 'Reference to the requesting Customer.';
+COMMENT ON COLUMN service_orders.vehicle_id IS 'Reference to the Vehicle being serviced.';
+COMMENT ON COLUMN service_orders.opened_at IS 'Date/time the service order was opened.';
+COMMENT ON COLUMN service_orders.status IS 'RECEIVED -> IN_DIAGNOSIS -> AWAITING_APPROVAL -> IN_PROGRESS -> COMPLETED -> DELIVERED; AWAITING_APPROVAL branches to CANCELED when the customer rejects the quote (see docs/entities.md).';
+COMMENT ON COLUMN service_orders.notes IS 'Free-form notes about the service (e.g. customer report, vehicle condition).';
+COMMENT ON COLUMN service_orders.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN service_orders.updated_at IS 'Record last update date/time, generated automatically.';
+-- Note: the doc models ServiceOrder.quote <-> Quote.serviceOrderId as a circular
+-- 1:1 reference. The physical FK lives only on quotes.service_order_id (UNIQUE),
+-- avoiding two redundant FKs pointing at each other; a service order's quote is
+-- obtained through that reverse index.
+
+-- ---- ServiceOrder <-> Service (requested at opening, N:N) ----
+-- Unlike quote_services, this join has no price column: it records the
+-- customer's initial demand at order-opening time (see
+-- specs/service-order-opening/), not the definitive priced quote.
+
+CREATE TABLE IF NOT EXISTS service_order_requested_services (
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    service_id        UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
+    PRIMARY KEY (service_order_id, service_id)
+);
+
+COMMENT ON TABLE service_order_requested_services IS 'Services initially requested when a service order was opened — the customer''s stated demand, not the definitive priced quote.';
+COMMENT ON COLUMN service_order_requested_services.service_order_id IS 'Reference to the ServiceOrder this request belongs to.';
+COMMENT ON COLUMN service_order_requested_services.service_id IS 'Reference to the requested Service.';
+
+-- ---- Quote ----
+
+CREATE TABLE IF NOT EXISTS quotes (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code              BIGINT GENERATED ALWAYS AS IDENTITY,
+    service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
+    total_amount      NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
+    status            quote_status NOT NULL DEFAULT 'PENDING',
+    version           INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    generated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sent_at           TIMESTAMPTZ,
+    sent_version      INTEGER,
+    responded_at      TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (sent_at IS NULL OR sent_at >= generated_at),
+    CHECK (responded_at IS NULL OR sent_at IS NULL OR responded_at >= sent_at),
+    CHECK (responded_at IS NULL OR responded_at >= generated_at)
+);
+
+COMMENT ON TABLE quotes IS 'Quote linked 1:1 to a service order.';
+COMMENT ON COLUMN quotes.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN quotes.code IS 'Human-readable/sequential identifier of the quote.';
+COMMENT ON COLUMN quotes.service_order_id IS 'Reference to the ServiceOrder this quote belongs to.';
+COMMENT ON COLUMN quotes.total_amount IS 'Total quote amount (sum of products and services).';
+COMMENT ON COLUMN quotes.status IS 'Quote status: PENDING (awaiting customer response), APPROVED (customer accepted) or REJECTED (customer declined).';
+COMMENT ON COLUMN quotes.version IS 'Incremented every time the quote is (re)composed (specs/service-order-diagnosis-quote/); sent_version records which version was actually sent to the customer.';
+COMMENT ON COLUMN quotes.generated_at IS 'Date/time the quote was first generated (composed).';
+COMMENT ON COLUMN quotes.sent_at IS 'Date/time the quote was sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
+COMMENT ON COLUMN quotes.sent_version IS 'The value of version that was actually sent to the customer (specs/service-order-quote-decision/). Optional, filled only once sent.';
+COMMENT ON COLUMN quotes.responded_at IS 'Date/time the customer responded (approved/rejected). Optional, filled only after a response.';
+COMMENT ON COLUMN quotes.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN quotes.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- ---- Quote <-> Product / Service (N:N) ----
+-- The doc models Quote.products/services as arrays; physically this becomes
+-- join tables. applied_unit_price/applied_price snapshot the price at the time
+-- of the quote, since the catalog price may change afterward.
+
+CREATE TABLE IF NOT EXISTS quote_products (
+    quote_id              UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
+    product_id            UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    quantity              INTEGER NOT NULL CHECK (quantity > 0),
+    applied_description   TEXT NOT NULL,
+    applied_unit_price    NUMERIC(12, 2) NOT NULL CHECK (applied_unit_price >= 0),
+    applied_total_price   NUMERIC(12, 2) NOT NULL CHECK (applied_total_price >= 0),
+    PRIMARY KEY (quote_id, product_id)
+);
+
+COMMENT ON TABLE quote_products IS 'Products/parts included in a quote, with the description/price applied at the time.';
+COMMENT ON COLUMN quote_products.quote_id IS 'Reference to the Quote this item belongs to.';
+COMMENT ON COLUMN quote_products.product_id IS 'Reference to the Product included in the quote.';
+COMMENT ON COLUMN quote_products.quantity IS 'Quantity of the product included in the quote.';
+COMMENT ON COLUMN quote_products.applied_description IS 'Product description at the time it was included in the quote (snapshot) — later catalog changes must not alter it.';
+COMMENT ON COLUMN quote_products.applied_unit_price IS 'Unit price of the product at the time it was included in the quote (snapshot).';
+COMMENT ON COLUMN quote_products.applied_total_price IS 'quantity * applied_unit_price, calculated by the server at composition time (snapshot).';
+
+CREATE TABLE IF NOT EXISTS quote_services (
+    quote_id              UUID NOT NULL REFERENCES quotes (id) ON DELETE CASCADE,
+    service_id            UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
+    quantity               INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    applied_description    TEXT NOT NULL,
+    applied_price          NUMERIC(12, 2) NOT NULL CHECK (applied_price >= 0),
+    applied_total_price    NUMERIC(12, 2) NOT NULL CHECK (applied_total_price >= 0),
+    PRIMARY KEY (quote_id, service_id)
+);
+
+COMMENT ON TABLE quote_services IS 'Services included in a quote, with the description/price applied at the time.';
+COMMENT ON COLUMN quote_services.quote_id IS 'Reference to the Quote this item belongs to.';
+COMMENT ON COLUMN quote_services.service_id IS 'Reference to the Service included in the quote.';
+COMMENT ON COLUMN quote_services.quantity IS 'Quantity of the service included in the quote.';
+COMMENT ON COLUMN quote_services.applied_description IS 'Service description at the time it was included in the quote (snapshot) — later catalog changes must not alter it.';
+COMMENT ON COLUMN quote_services.applied_price IS 'Unit price of the service at the time it was included in the quote (snapshot).';
+COMMENT ON COLUMN quote_services.applied_total_price IS 'quantity * applied_price, calculated by the server at composition time (snapshot).';
+
+-- ---- ServiceOrderHistory ----
+
+CREATE TABLE IF NOT EXISTS service_order_history (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    occurred_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    event             history_event NOT NULL,
+    description       TEXT NOT NULL,
+    previous_status   service_order_status NOT NULL,
+    new_status        service_order_status NOT NULL
+);
+
+COMMENT ON TABLE service_order_history IS 'Trail of events and status changes of a service order, for audit and traceability.';
+COMMENT ON COLUMN service_order_history.id IS 'Technical identifier of the history record.';
+COMMENT ON COLUMN service_order_history.service_order_id IS 'Reference to the ServiceOrder this event belongs to.';
+COMMENT ON COLUMN service_order_history.occurred_at IS 'Date/time the event occurred.';
+COMMENT ON COLUMN service_order_history.event IS 'Type of recorded event: creation, diagnosis_started, quote_composed, approval, completion or cancellation.';
+COMMENT ON COLUMN service_order_history.description IS 'Details of what happened in the event.';
+COMMENT ON COLUMN service_order_history.previous_status IS 'Service order status immediately before the event.';
+COMMENT ON COLUMN service_order_history.new_status IS 'Service order status immediately after the event.';
+
+-- ---- ServiceOrderTrackingToken ----
+-- Grants a customer read-only access to their own service order's tracking
+-- view without the administrative JWT (specs/service-order-tracking/). One
+-- token is auto-generated per service order at creation time
+-- (service_order_id UNIQUE); only its hash is ever stored.
+
+CREATE TABLE IF NOT EXISTS service_order_tracking_tokens (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_order_id  UUID NOT NULL UNIQUE REFERENCES service_orders (id) ON DELETE CASCADE,
+    token_hash        TEXT NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at        TIMESTAMPTZ
+);
+
+COMMENT ON TABLE service_order_tracking_tokens IS 'Grants a customer read-only tracking access to their own service order, without the administrative JWT.';
+COMMENT ON COLUMN service_order_tracking_tokens.id IS 'Technical identifier of the token record.';
+COMMENT ON COLUMN service_order_tracking_tokens.service_order_id IS 'Reference to the ServiceOrder this token grants access to. One token per order.';
+COMMENT ON COLUMN service_order_tracking_tokens.token_hash IS 'SHA-256 hash of the token. The raw token is returned to the caller once, at issuance, and never persisted.';
+COMMENT ON COLUMN service_order_tracking_tokens.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN service_order_tracking_tokens.revoked_at IS 'Date/time the token was revoked. NULL while active.';
+
+-- ---- AuditServices (ServiceExecution in Go — specs/service-order-execution/) ----
+-- One row per execution of a service within a service order, not an event log: started_at
+-- is set when execution begins, ended_at stays NULL until it finishes. Restructured from an
+-- earlier start/end event-log shape (specs/service-order-execution/design.md 1.3) before any
+-- Go feature ever implemented this table, so no data migration was needed.
+
+CREATE TABLE IF NOT EXISTS audit_services (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_order_id  UUID NOT NULL REFERENCES service_orders (id) ON DELETE CASCADE,
+    service_id        UUID NOT NULL REFERENCES services (id) ON DELETE RESTRICT,
+    started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at          TIMESTAMPTZ
+);
+
+COMMENT ON TABLE audit_services IS 'One row per execution of a service within a service order (started_at/ended_at), for time/productivity tracking.';
+COMMENT ON COLUMN audit_services.id IS 'Technical identifier of the execution record.';
+COMMENT ON COLUMN audit_services.service_order_id IS 'Reference to the ServiceOrder in progress.';
+COMMENT ON COLUMN audit_services.service_id IS 'Reference to the Service being executed.';
+COMMENT ON COLUMN audit_services.started_at IS 'Date/time the execution started.';
+COMMENT ON COLUMN audit_services.ended_at IS 'Date/time the execution finished. NULL while still in progress.';
+
+-- ---- StockMovement ----
+-- Ledger of every stock balance change (specs/service-order-stock-usage/design.md §0):
+-- both a product's own manual ENTRY/EXIT adjustment (internal/features/product,
+-- service_order_id NULL) and a service order's parts/supplies usage EXIT (and its
+-- ENTRY reversal), service_order_id set. Written from each feature's own SQL — no
+-- Go-level import between the product and service-order packages (CLAUDE.md §9.2).
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id            UUID NOT NULL REFERENCES products (id) ON DELETE RESTRICT,
+    service_order_id      UUID REFERENCES service_orders (id) ON DELETE CASCADE,
+    type                  stock_movement_type NOT NULL,
+    quantity              INTEGER NOT NULL CHECK (quantity > 0),
+    previous_stock        INTEGER NOT NULL,
+    new_stock             INTEGER NOT NULL,
+    reason                TEXT,
+    reversed_movement_id  UUID REFERENCES stock_movements (id) ON DELETE RESTRICT,
+    occurred_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE stock_movements IS 'Ledger of every stock balance change: manual product adjustments and service-order usage deductions/reversals.';
+COMMENT ON COLUMN stock_movements.id IS 'Technical identifier of the movement record.';
+COMMENT ON COLUMN stock_movements.product_id IS 'Reference to the Product whose balance changed.';
+COMMENT ON COLUMN stock_movements.service_order_id IS 'Reference to the ServiceOrder this movement was deducted for/restored to, when applicable. NULL for a manual product adjustment. ON DELETE CASCADE, matching audit_services/service_order_history — deleting an order removes its own audit trail.';
+COMMENT ON COLUMN stock_movements.type IS 'ENTRY (adds to stock) or EXIT (removes from stock).';
+COMMENT ON COLUMN stock_movements.quantity IS 'Absolute quantity moved. Always positive; direction is given by type.';
+COMMENT ON COLUMN stock_movements.previous_stock IS 'Product current_stock immediately before this movement.';
+COMMENT ON COLUMN stock_movements.new_stock IS 'Product current_stock immediately after this movement.';
+COMMENT ON COLUMN stock_movements.reason IS 'Free-form justification, required for a manual product adjustment. NULL for a service-order usage/reversal movement, whose service_order_id already explains it.';
+COMMENT ON COLUMN stock_movements.reversed_movement_id IS 'For a reversal ENTRY, the original EXIT movement it undoes. NULL for every other movement. A movement is reversed at most once (enforced at the application layer).';
+COMMENT ON COLUMN stock_movements.occurred_at IS 'Date/time the movement occurred.';
+
+-- =============================================================================
+-- ==== Indexes ====
+-- =============================================================================
+
+-- ---- Human-readable codes (lookup by the number shown to the user) ----
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_customers_code ON customers (code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_vehicles_code ON vehicles (code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_code ON products (code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_services_code ON services (code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_service_orders_code ON service_orders (code);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_quotes_code ON quotes (code);
+
+-- ---- Business uniqueness ----
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_customers_document ON customers (document);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_vehicles_license_plate ON vehicles (license_plate);
+-- Partial unique: e-mail is optional, but when present it cannot repeat.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_customers_email ON customers (email) WHERE email IS NOT NULL;
+
+-- ---- Foreign keys (Postgres does not index FKs automatically) ----
+
+CREATE INDEX IF NOT EXISTS ix_vehicles_customer_id ON vehicles (customer_id);
+CREATE INDEX IF NOT EXISTS ix_service_orders_customer_id ON service_orders (customer_id);
+CREATE INDEX IF NOT EXISTS ix_service_orders_vehicle_id ON service_orders (vehicle_id);
+CREATE INDEX IF NOT EXISTS ix_quote_products_product_id ON quote_products (product_id);
+CREATE INDEX IF NOT EXISTS ix_quote_services_service_id ON quote_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_service_order_requested_services_service_id ON service_order_requested_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_service_order_history_service_order_id ON service_order_history (service_order_id);
+CREATE INDEX IF NOT EXISTS ix_audit_services_service_order_id ON audit_services (service_order_id);
+CREATE INDEX IF NOT EXISTS ix_audit_services_service_id ON audit_services (service_id);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_product_id ON stock_movements (product_id);
+CREATE INDEX IF NOT EXISTS ix_stock_movements_service_order_id ON stock_movements (service_order_id);
+-- quotes.service_order_id and service_order_tracking_tokens.service_order_id already have
+-- unique indexes (UNIQUE above creates one for each).
+
+-- Lookup key for GET /api/v1/acompanhamento/{codigo} (validator hashes the
+-- incoming token, then matches it here).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_service_order_tracking_tokens_token_hash
+    ON service_order_tracking_tokens (token_hash);
+
+-- ---- Frequent workshop queries ----
+
+-- List of service orders by customer, most recent first.
+CREATE INDEX IF NOT EXISTS ix_service_orders_customer_opened
+    ON service_orders (customer_id, opened_at DESC);
+
+-- "Which service orders are in progress" is the most common query on the
+-- operations dashboard; the partial index keeps this subset small and fast,
+-- ignoring service orders already completed/delivered (most of the history).
+CREATE INDEX IF NOT EXISTS ix_service_orders_status_active
+    ON service_orders (status, opened_at DESC)
+    WHERE status NOT IN ('COMPLETED', 'DELIVERED');
+
+-- Filter by product type (PART/SUPPLY) on catalog/stock screens.
+CREATE INDEX IF NOT EXISTS ix_products_type ON products (type);
+
+-- Filter the service catalog by activation state (active/inactive listing).
+CREATE INDEX IF NOT EXISTS ix_services_active ON services (active);
+
+-- Restock alert: products with low stock.
+CREATE INDEX IF NOT EXISTS ix_products_low_stock
+    ON products (current_stock)
+    WHERE current_stock < 10;
+
+-- Quotes pending a customer response.
+CREATE INDEX IF NOT EXISTS ix_quotes_status_pending
+    ON quotes (status, generated_at DESC)
+    WHERE status = 'PENDING';
+
+-- Service execution audit by service order.
+CREATE INDEX IF NOT EXISTS ix_audit_services_order_service
+    ON audit_services (service_order_id, service_id, started_at);
+
+-- ---- Text search (optional) ----
+-- Requires the pg_trgm extension (commented out at the top of the file).
+-- Speeds up ILIKE '%term%' searches on customer name and vehicle license plate.
+-- CREATE INDEX IF NOT EXISTS ix_customers_name_trgm ON customers USING GIN (name gin_trgm_ops);
+-- CREATE INDEX IF NOT EXISTS ix_vehicles_license_plate_trgm ON vehicles USING GIN (license_plate gin_trgm_ops);
+
+-- ---- User (administrative) ----
+
+CREATE TABLE IF NOT EXISTS users (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code          BIGINT GENERATED ALWAYS AS IDENTITY,
+    name          TEXT NOT NULL,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE users IS 'Administrative user able to authenticate against the API (specs/auth).';
+COMMENT ON COLUMN users.id IS 'Secure technical identifier, generated by the system.';
+COMMENT ON COLUMN users.code IS 'Human-readable/sequential identifier shown to the user.';
+COMMENT ON COLUMN users.name IS 'Administrative user''s display name.';
+COMMENT ON COLUMN users.email IS 'Login identifier, unique across users.';
+COMMENT ON COLUMN users.password_hash IS 'bcrypt hash of the password. Plaintext passwords are never stored (BR1).';
+COMMENT ON COLUMN users.created_at IS 'Record creation date/time, generated automatically.';
+COMMENT ON COLUMN users.updated_at IS 'Record last update date/time, generated automatically.';
+
+-- =============================================================================
+-- ==== updated_at utility trigger ====
+-- =============================================================================
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at := now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+DECLARE
+    tbl TEXT;
+BEGIN
+    FOREACH tbl IN ARRAY ARRAY['customers', 'vehicles', 'products', 'services', 'service_orders', 'quotes', 'users']
+    LOOP
+        EXECUTE format(
+            'DROP TRIGGER IF EXISTS trg_set_updated_at ON %I; '
+            'CREATE TRIGGER trg_set_updated_at BEFORE UPDATE ON %I '
+            'FOR EACH ROW EXECUTE FUNCTION set_updated_at();',
+            tbl, tbl
+        );
+    END LOOP;
+END $$;

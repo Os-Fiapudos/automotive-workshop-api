@@ -1,0 +1,109 @@
+{
+  "id": "fp30StatusUpdate",
+  "name": "Service order status update (FP-30)",
+  "nodes": [
+    {
+      "id": "6f1d3a52-1c5e-4b8e-9a51-0c6b8f0d1a01",
+      "name": "Workshop operator form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [0, 0],
+      "webhookId": "0d6a4c1e-6f0b-4d3e-8a2f-3c1b9e7d5a10",
+      "parameters": {
+        "formTitle": "Update service order status",
+        "formDescription": "Moves a service order to its next stage through POST /api/v1/service-orders/{id}/status. Only IN_DIAGNOSIS, COMPLETED and DELIVERED are accepted; the API still enforces every transition rule.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Service order ID",
+              "placeholder": "UUID of the service order",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Target status",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "IN_DIAGNOSIS" },
+                  { "option": "COMPLETED" },
+                  { "option": "DELIVERED" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Notes",
+              "fieldType": "textarea",
+              "placeholder": "Optional, up to 500 characters - saved in the order history"
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "path": "service-order-status",
+          "buttonLabel": "Update status",
+          "appendAttribution": false
+        }
+      }
+    },
+    {
+      "id": "6f1d3a52-1c5e-4b8e-9a51-0c6b8f0d1a02",
+      "name": "POST service order status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WORKSHOP_API_URL }}/api/v1/service-orders/{{ encodeURIComponent($json['Service order ID'].trim()) }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-External-Status-Secret",
+              "value": "={{ $env.EXTERNAL_STATUS_UPDATE_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: $json['Target status'], notes: $json['Notes'] || undefined }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "6f1d3a52-1c5e-4b8e-9a51-0c6b8f0d1a03",
+      "name": "Show API result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.3,
+      "position": [520, 0],
+      "webhookId": "0d6a4c1e-6f0b-4d3e-8a2f-3c1b9e7d5a11",
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "text",
+        "completionTitle": "={{ $json.statusCode === 200 ? 'Status updated: ' + $json.body.previousStatus + ' -> ' + $json.body.status : 'Update rejected (HTTP ' + $json.statusCode + ')' }}",
+        "completionMessage": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Workshop operator form": {
+      "main": [[{ "node": "POST service order status", "type": "main", "index": 0 }]]
+    },
+    "POST service order status": {
+      "main": [[{ "node": "Show API result", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "active": false
+}

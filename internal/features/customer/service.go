@@ -8,6 +8,22 @@ import (
 	"automotive-workshop-api/internal/shared/document"
 )
 
+// CustomerRepository is the persistence boundary for the Customer aggregate.
+// It is defined next to its only consumer (CustomerService) rather than in a
+// separate "contracts" package — see specs/customer-management/design.md
+// §1.1/§1.3. Implemented by repository.go's Postgres type
+// (specs/service-order-architecture-refactor/requirements.md §7.2).
+type CustomerRepository interface {
+	Create(ctx context.Context, customer *Customer) error
+	FindByID(ctx context.Context, id uuid.UUID) (*Customer, error)
+	FindByDocument(ctx context.Context, normalizedDocument string) (*Customer, error)
+	// ExistsByDocument reports whether normalizedDocument already belongs to
+	// a customer other than excludeID (nil to check against every customer).
+	ExistsByDocument(ctx context.Context, normalizedDocument string, excludeID *uuid.UUID) (bool, error)
+	List(ctx context.Context, page, pageSize int) ([]*Customer, int, error)
+	Update(ctx context.Context, customer *Customer) error
+}
+
 // CustomerService orchestrates the customer use cases on top of a
 // CustomerRepository. There is one method per use case; no CQRS-style
 // command/query split (see specs/customer-management/design.md §1.1).

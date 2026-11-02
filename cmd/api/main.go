@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +15,9 @@ import (
 	"automotive-workshop-api/internal/features/customer"
 	"automotive-workshop-api/internal/features/product"
 	servicecatalog "automotive-workshop-api/internal/features/service-catalog"
-	serviceorder "automotive-workshop-api/internal/features/service-order"
 	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/features/vehicle"
 	"automotive-workshop-api/internal/shared/config"
 	"automotive-workshop-api/internal/shared/database"
@@ -70,8 +72,27 @@ func main() {
 		log.Println("RESEND_API_KEY not set - quote-sent e-mail notifications are disabled")
 	}
 
-	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, quoteNotifier)
+	serviceOrderRepository := orderpostgres.NewRepository(pool)
+	// Shared secret for the external quote-decision channel
+	// (specs/service-order-quote-decision/design.md §5.4): fails fast like
+	// JWT_SECRET, so a misconfigured deployment is caught at startup rather
+	// than on the first external call.
+	externalNotificationSecret := os.Getenv("EXTERNAL_NOTIFICATION_SECRET")
+	if externalNotificationSecret == "" {
+		log.Fatalf("EXTERNAL_NOTIFICATION_SECRET environment variable is not set")
+	}
+	// Shared secret for the external status-update tool
+	// (specs/service-order-status-update/design.md §3): required, and must
+	// differ from the quote-decision secret so each integration can be
+	// rotated/revoked on its own (requirements.md BR4).
+	externalStatusUpdateSecret := os.Getenv("EXTERNAL_STATUS_UPDATE_SECRET")
+	if externalStatusUpdateSecret == "" {
+		log.Fatalf("EXTERNAL_STATUS_UPDATE_SECRET environment variable is not set")
+	}
+	if externalStatusUpdateSecret == externalNotificationSecret {
+		log.Fatalf("EXTERNAL_STATUS_UPDATE_SECRET must differ from EXTERNAL_NOTIFICATION_SECRET")
+	}
+	serviceOrderUseCases := buildServiceOrderUseCases(serviceOrderRepository, quoteNotifier, externalNotificationSecret, externalStatusUpdateSecret)
 
 	productRepository := product.NewPostgresProductRepository(pool)
 	productService := product.NewProductService(productRepository)
@@ -125,7 +146,7 @@ func main() {
 	// it let an unauthenticated caller confirm a CPF/CNPJ was a registered
 	// customer and open orders in their name — see
 	// docs/owasp-vulnerability-and-coverage-report.md VULN-02.
-	serviceorder.RegisterRoutes(router, serviceOrderService, requireAuth)
+	httpapi.RegisterRoutes(router, serviceOrderUseCases, requireAuth)
 
 	// Service Order Tracking (specs/service-order-tracking, RF12): a
 	// customer-facing route that deliberately never requires the

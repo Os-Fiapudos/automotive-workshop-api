@@ -1,0 +1,20 @@
+# In-cluster entry point of the API (specs/kubernetes-deployment/design.md §4). The demo
+# reaches it with `kubectl port-forward svc/automotive-workshop-api 8080:8080`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: automotive-workshop-api
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: automotive-workshop
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

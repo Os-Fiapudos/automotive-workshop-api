@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 const (
@@ -61,7 +62,7 @@ func (handler *productHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	unitPrice := 0.0
+	var unitPrice money.Cents
 	if request.UnitPrice != nil {
 		unitPrice = *request.UnitPrice
 	}

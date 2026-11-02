@@ -78,3 +78,37 @@ func Load() (Config, error) {
 		ResendFromEmail: resendFromEmail,
 	}, nil
 }
+
+// AdminBootstrapConfig is what cmd/bootstrap-admin needs
+// (specs/database-migrations/design.md §7.1).
+type AdminBootstrapConfig struct {
+	DatabaseURL   string
+	AdminName     string // optional
+	AdminEmail    string
+	AdminPassword string
+}
+
+// LoadAdminBootstrap reads DATABASE_URL, ADMIN_EMAIL and ADMIN_PASSWORD
+// (required) and ADMIN_NAME (optional). It does not require JWT_SECRET: the
+// bootstrap command issues no token. Validating the e-mail and password is
+// the auth slice's job (auth.BootstrapAdmin); errors here never include a
+// value.
+func LoadAdminBootstrap() (AdminBootstrapConfig, error) {
+	cfg := AdminBootstrapConfig{
+		DatabaseURL:   os.Getenv("DATABASE_URL"),
+		AdminName:     os.Getenv("ADMIN_NAME"),
+		AdminEmail:    os.Getenv("ADMIN_EMAIL"),
+		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
+	}
+	required := []struct{ name, value string }{
+		{"DATABASE_URL", cfg.DatabaseURL},
+		{"ADMIN_EMAIL", cfg.AdminEmail},
+		{"ADMIN_PASSWORD", cfg.AdminPassword},
+	}
+	for _, variable := range required {
+		if variable.value == "" {
+			return AdminBootstrapConfig{}, fmt.Errorf("%s environment variable is not set", variable.name)
+		}
+	}
+	return cfg, nil
+}

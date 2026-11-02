@@ -16,8 +16,9 @@ import (
 
 	"automotive-workshop-api/internal/features/auth"
 	"automotive-workshop-api/internal/features/customer"
-	serviceorder "automotive-workshop-api/internal/features/service-order"
 	servicetracking "automotive-workshop-api/internal/features/service-order-tracking"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
+	orderpostgres "automotive-workshop-api/internal/features/service-order/adapter/postgres"
 	"automotive-workshop-api/internal/shared/token"
 )
 
@@ -60,8 +61,8 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	customerRepository := customer.NewPostgresCustomerRepository(pool)
 	customerService := customer.NewCustomerService(customerRepository)
 
-	serviceOrderRepository := serviceorder.NewPostgresServiceOrderRepository(pool)
-	serviceOrderService := serviceorder.NewServiceOrderService(serviceOrderRepository, serviceOrderRepository, nil)
+	serviceOrderRepository := orderpostgres.NewRepository(pool)
+	serviceOrderUseCases := newServiceOrderUseCases(serviceOrderRepository, "", "")
 
 	trackingRepository := servicetracking.NewPostgresTrackingRepository(pool)
 	trackingService := servicetracking.NewTrackingService(trackingRepository)
@@ -80,7 +81,7 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 	router := http.NewServeMux()
 	router.HandleFunc("POST /api/v1/auth/login", authHandler.Login)
 	customer.RegisterRoutes(router, customerService, nil)
-	serviceorder.RegisterRoutes(router, serviceOrderService, nil)
+	httpapi.RegisterRoutes(router, serviceOrderUseCases, nil)
 	servicetracking.RegisterRoutes(router, trackingService)
 
 	server := httptest.NewServer(router)
@@ -92,19 +93,19 @@ func testTrackingServer(t *testing.T) (*pgxpool.Pool, string) {
 // createTrackingOrder creates a service order through the real API and
 // returns both its admin response and the raw tracking token issued at
 // creation (requirements.md §0 item 1).
-func createTrackingOrder(t *testing.T, server string, pool *pgxpool.Pool) serviceorder.Response {
+func createTrackingOrder(t *testing.T, server string, pool *pgxpool.Pool) httpapi.Response {
 	t.Helper()
 
 	createdCustomer := insertActiveCustomer(t, server, pool)
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 
-	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	resp := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID: createdCustomer.ID,
 		VehicleID:  vehicleID,
 	}, loginAsAdmin(t, server))
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	var created serviceorder.Response
+	var created httpapi.Response
 	decodeBody(t, resp, &created)
 	cleanupServiceOrder(t, pool, created.ID)
 	require.NotEmpty(t, created.TrackingToken)

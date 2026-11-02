@@ -131,3 +131,66 @@ func TestLoadResendConfiguration(t *testing.T) {
 		})
 	}
 }
+
+func setAdminBootstrapEnv(t *testing.T, databaseURL, email, password, name string) {
+	t.Helper()
+	t.Setenv("DATABASE_URL", databaseURL)
+	t.Setenv("ADMIN_EMAIL", email)
+	t.Setenv("ADMIN_PASSWORD", password)
+	t.Setenv("ADMIN_NAME", name)
+}
+
+func TestLoadAdminBootstrapReadsVariables(t *testing.T) {
+	setAdminBootstrapEnv(t, "postgres://user:pass@localhost:5432/db", "ops@workshop.example", "a-long-password", "Ops")
+	// The bootstrap command issues no token, so JWT_SECRET must not be required.
+	t.Setenv("JWT_SECRET", "")
+
+	cfg, err := LoadAdminBootstrap()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := AdminBootstrapConfig{
+		DatabaseURL:   "postgres://user:pass@localhost:5432/db",
+		AdminName:     "Ops",
+		AdminEmail:    "ops@workshop.example",
+		AdminPassword: "a-long-password",
+	}
+	if cfg != want {
+		t.Errorf("cfg = %+v, want %+v", cfg, want)
+	}
+}
+
+func TestLoadAdminBootstrapNameIsOptional(t *testing.T) {
+	setAdminBootstrapEnv(t, "postgres://user:pass@localhost:5432/db", "ops@workshop.example", "a-long-password", "")
+	cfg, err := LoadAdminBootstrap()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AdminName != "" {
+		t.Errorf("AdminName = %q, want empty (auth applies the default)", cfg.AdminName)
+	}
+}
+
+func TestLoadAdminBootstrapRequiresVariables(t *testing.T) {
+	const password = "a-long-password"
+	cases := []struct {
+		missing                   string
+		databaseURL, email, admin string
+	}{
+		{"DATABASE_URL", "", "ops@workshop.example", password},
+		{"ADMIN_EMAIL", "postgres://localhost/db", "", password},
+		{"ADMIN_PASSWORD", "postgres://localhost/db", "ops@workshop.example", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.missing, func(t *testing.T) {
+			setAdminBootstrapEnv(t, tc.databaseURL, tc.email, tc.admin, "")
+			_, err := LoadAdminBootstrap()
+			if err == nil || !strings.Contains(err.Error(), tc.missing) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.missing)
+			}
+			if strings.Contains(err.Error(), password) {
+				t.Errorf("error leaks the password: %v", err)
+			}
+		})
+	}
+}

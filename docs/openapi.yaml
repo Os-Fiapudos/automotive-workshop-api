@@ -1502,6 +1502,184 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/service-orders/{id}/quote/decision:
+    post:
+      tags:
+      - service-orders
+      summary: Relay a customer's quote decision from an external system
+      description: 'External-system notification channel (specs/service-order-quote-decision/requirements.md
+        §9, Fase 2). Authenticated ONLY by the shared secret in X-External-Notification-Secret
+        — the administrative JWT is neither required nor accepted as a substitute.
+        The secret is checked before the order or the body are looked at, so a missing/wrong
+        secret is always 401 with no side effect and reveals nothing about whether
+        {id} exists. Applies exactly the same rules as the customer-facing .../orcamento/aprovar|reprovar
+        routes, through the same decision core and transaction: the quote must have
+        been sent (order AWAITING_APPROVAL) and still be PENDING; "approved" moves
+        the quote to APPROVED and the order to IN_PROGRESS, "rejected" moves the quote
+        to REJECTED and the order to CANCELED, and one history entry (approval/cancellation)
+        is written in the same transaction. Retry guidance for the external caller:
+        a 409 QUOTE_ALREADY_DECIDED means a decision is already recorded (through
+        either channel) — do not retry; a network failure or 5xx can be retried safely,
+        since a decision that did commit makes the retry a 409 rather than a duplicate.
+
+        '
+      operationId: decideServiceOrderQuoteExternal
+      security:
+      - externalNotificationSecret: []
+      parameters:
+      - $ref: '#/components/parameters/ServiceOrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalQuoteDecisionRequest'
+            examples:
+              approved:
+                value:
+                  decision: approved
+              rejected:
+                value:
+                  decision: rejected
+      responses:
+        '200':
+          description: The decision was recorded — same reduced projection as the
+            customer-facing decision routes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceOrderQuoteDecision'
+        '400':
+          description: 'Body is not valid JSON (code `BAD_REQUEST`), or `decision`
+            is not exactly `approved`/`rejected` (code `VALIDATION_ERROR`). No decision
+            is applied.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: 'X-External-Notification-Secret is missing or incorrect (code
+            `INVALID_EXTERNAL_SECRET`). No decision is applied.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: 'No service order with this id, or no quote composed for it
+            (code `NOT_FOUND`).
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: 'The quote has already been decided, through this or the customer
+            channel, whether the same or a different decision (code `QUOTE_ALREADY_DECIDED`),
+            or the quote has not been sent yet / the order is not AWAITING_APPROVAL
+            (code `INVALID_STATUS_TRANSITION`). Nothing is changed and no history entry
+            is written.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/service-orders/{id}/status:
+    post:
+      tags:
+      - service-orders
+      summary: Update a service order's status from the external tool
+      description: 'External status-update channel (specs/service-order-status-update/,
+        Fase 2 F2-US05). Called by the n8n workflow in tools/n8n/ (or any tool holding
+        the secret). Authenticated ONLY by the shared secret in X-External-Status-Secret,
+        which is separate from the quote-decision secret; the administrative JWT is
+        neither required nor accepted as a substitute. The secret is checked before
+        the order or the body are looked at, and the body is validated before the
+        order is loaded. Only IN_DIAGNOSIS, COMPLETED and DELIVERED can be requested;
+        each one is delegated to the same use case, preconditions and transaction
+        as POST .../diagnosis, .../finalize and .../deliver respectively, so quote
+        approval can never be skipped and an order with pending executions cannot
+        be completed. Each success writes the same history entry as the dedicated
+        endpoint; optional notes are appended to that entry''s description
+        ("<event text> Notes: <notes>"). No failure changes the status or the history.
+
+        '
+      operationId: updateServiceOrderStatusExternal
+      security:
+      - externalStatusSecret: []
+      parameters:
+      - $ref: '#/components/parameters/ServiceOrderId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalStatusUpdateRequest'
+            examples:
+              diagnosis:
+                value:
+                  status: IN_DIAGNOSIS
+                  notes: Car on lift 2
+              completed:
+                value:
+                  status: COMPLETED
+              delivered:
+                value:
+                  status: DELIVERED
+                  notes: Picked up by owner
+      responses:
+        '200':
+          description: The transition was applied. Reduced result, just enough for
+            the tool to confirm the outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalStatusUpdateResponse'
+        '400':
+          description: 'Body is not valid JSON (code `BAD_REQUEST`), or `status` is
+            not one of IN_DIAGNOSIS/COMPLETED/DELIVERED, or `notes` is longer than 500
+            characters after trimming (code `VALIDATION_ERROR`, with `details`). Nothing
+            is changed.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: 'X-External-Status-Secret is missing or incorrect (code `INVALID_EXTERNAL_SECRET`),
+            including when the quote-decision secret or a JWT is sent instead. Nothing
+            is changed and nothing is revealed about the order.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: No service order with this id (code `NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: 'The transition is not legal for the order''s current status
+            (code `INVALID_STATUS_TRANSITION`, e.g. DELIVERED on a RECEIVED order or
+            COMPLETED while AWAITING_APPROVAL), or COMPLETED was requested with a required
+            service execution still pending (code `EXECUTIONS_NOT_COMPLETED`) — the
+            same codes the dedicated endpoints return. Nothing is changed and no history
+            entry is written.
+
+            '
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
   /api/v1/service-orders/{id}/executions:
     post:
       tags:
@@ -2057,7 +2235,8 @@ components:
         route except creation (RNF02) — that includes the Service Order Query routes
         plus the diagnosis/quote/execution routes added by specs/service-order-diagnosis-quote/,
         specs/service-order-quote-decision/ (only its send-quote endpoint; approve/reject
-        are customer-facing, see trackingToken), and specs/service-order-execution/.
+        are customer-facing, see trackingToken, and the external decision route uses
+        externalNotificationSecret), and specs/service-order-execution/.
         Not required on Customer Management routes (see specs/customer-management/requirements.md
         §7.2) nor on POST /api/v1/service-orders (CLAUDE.md §1), and not accepted
         at all by the Service Order Tracking route or the customer-facing quote approve/reject
@@ -2073,6 +2252,29 @@ components:
         issuance endpoint). Deliberately a distinct header, not Authorization: Bearer,
         so it can never be confused with the administrative JWT (specs/service-order-tracking/requirements.md
         §0).
+
+        '
+    externalNotificationSecret:
+      type: apiKey
+      in: header
+      name: X-External-Notification-Secret
+      description: 'Shared secret an external system presents to relay a customer''s
+        quote decision (POST /api/v1/service-orders/{id}/quote/decision only). Configured
+        server-side via the EXTERNAL_NOTIFICATION_SECRET environment variable (a Kubernetes
+        Secret in cluster deployments); compared in constant time. Independent of
+        the administrative JWT, which this route neither requires nor accepts (specs/service-order-quote-decision/design.md
+        §5).
+
+        '
+    externalStatusSecret:
+      type: apiKey
+      in: header
+      name: X-External-Status-Secret
+      description: 'Shared secret the external status-update tool presents (POST
+        /api/v1/service-orders/{id}/status only). Configured server-side via EXTERNAL_STATUS_UPDATE_SECRET,
+        which must differ from EXTERNAL_NOTIFICATION_SECRET (the API refuses to start
+        otherwise); compared in constant time (specs/service-order-status-update/design.md
+        §3).
 
         '
   parameters:
@@ -2499,9 +2701,11 @@ components:
         unitPrice:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         total:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
     ServiceOrderQuote:
       type: object
       properties:
@@ -2517,6 +2721,7 @@ components:
         totalAmount:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         status:
           type: string
           enum:
@@ -2809,7 +3014,8 @@ components:
         price:
           type: number
           format: double
-          description: Required. Must not be negative (BR3).
+          maximum: 9999999999.99
+          description: Required. Must not be negative (BR3). Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         estimated_time:
           type: integer
           nullable: true
@@ -2827,6 +3033,8 @@ components:
         price:
           type: number
           format: double
+          maximum: 9999999999.99
+          description: Optional. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         estimated_time:
           type: integer
     CatalogService:
@@ -2845,6 +3053,7 @@ components:
         price:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         estimated_time:
           type: integer
           nullable: true
@@ -2888,7 +3097,8 @@ components:
         unitPrice:
           type: number
           format: double
-          description: Required. Must not be negative.
+          maximum: 9999999999.99
+          description: Required. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         currentStock:
           type: integer
           description: Required. Must not be negative.
@@ -2912,6 +3122,8 @@ components:
         unitPrice:
           type: number
           format: double
+          maximum: 9999999999.99
+          description: Optional. Must not be negative. Exact amount in BRL with at most two decimal places and at most 9999999999.99 (the NUMERIC(12,2) column). A value with more decimal places is rejected with 400 VALIDATION_ERROR, never rounded (specs/monetary-value-precision/).
         type:
           type: string
           enum:
@@ -2933,6 +3145,7 @@ components:
         unitPrice:
           type: number
           format: double
+          description: Exact amount in BRL, serialized as a JSON number with at most two decimal places (e.g. 19.9 for R$ 19,90); computed and stored in integer cents, never through floating point (specs/monetary-value-precision/).
         currentStock:
           type: integer
         type:
@@ -3222,6 +3435,51 @@ components:
           type: string
           format: date-time
           nullable: true
+    ExternalQuoteDecisionRequest:
+      type: object
+      required:
+      - decision
+      properties:
+        decision:
+          type: string
+          enum:
+          - approved
+          - rejected
+    ExternalStatusUpdateRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - IN_DIAGNOSIS
+          - COMPLETED
+          - DELIVERED
+        notes:
+          type: string
+          maxLength: 500
+          description: Optional. Trimmed; persisted in the history entry of this transition.
+    ExternalStatusUpdateResponse:
+      type: object
+      required:
+      - id
+      - code
+      - previousStatus
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: integer
+          format: int64
+        previousStatus:
+          type: string
+          example: RECEIVED
+        status:
+          type: string
+          example: IN_DIAGNOSIS
     StartExecutionRequest:
       type: object
       required:

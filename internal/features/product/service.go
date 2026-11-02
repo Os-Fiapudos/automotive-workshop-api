@@ -4,7 +4,25 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/money"
 )
+
+// ProductRepository defines persistence operations for the Product aggregate.
+// It is declared here, by its only consumer (ProductService), and implemented
+// by PostgresProductRepository in repository.go
+// (specs/service-order-architecture-refactor/requirements.md §7.2).
+type ProductRepository interface {
+	Create(ctx context.Context, product *Product) error
+	FindByID(ctx context.Context, id uuid.UUID) (*Product, error)
+	FindByCode(ctx context.Context, code int64) (*Product, error)
+	ExistsByCode(ctx context.Context, code int64, excludeID *uuid.UUID) (bool, error)
+	List(ctx context.Context, page, pageSize int, productType *Type, status *Status) ([]*Product, int, error)
+	Update(ctx context.Context, product *Product) error
+	AdjustStock(ctx context.Context, id uuid.UUID, movement *StockMovement) (*Product, error)
+	ListMovements(ctx context.Context, productID uuid.UUID, page, pageSize int) ([]*StockMovement, int, error)
+	IsUsedInQuotesOrOrders(ctx context.Context, id uuid.UUID) (bool, error)
+}
 
 // ProductService orchestrates product use cases on top of ProductRepository.
 type ProductService struct {
@@ -32,7 +50,7 @@ func NewProductService(repository ProductRepository) *ProductService {
 //	code(*int64): optional manual code pointer
 //	name(string): product display name
 //	description(string): product description
-//	unitPrice(float64): unit sale price
+//	unitPrice(money.Cents): unit sale price, in exact cents
 //	currentStock(int): initial stock quantity
 //	productType(string): product type string ("PART" or "SUPPLY")
 //
@@ -40,7 +58,7 @@ func NewProductService(repository ProductRepository) *ProductService {
 //
 //	product(*Product): created product aggregate
 //	err(error): error if validation or code pre-check fails
-func (service *ProductService) Create(ctx context.Context, code *int64, name, description string, unitPrice float64, currentStock int, productType string) (*Product, error) {
+func (service *ProductService) Create(ctx context.Context, code *int64, name, description string, unitPrice money.Cents, currentStock int, productType string) (*Product, error) {
 	product, err := NewProduct(code, name, description, unitPrice, currentStock, productType)
 	if err != nil {
 		return nil, err
@@ -129,7 +147,7 @@ func (service *ProductService) List(ctx context.Context, page, pageSize int, raw
 type UpdateInput struct {
 	Name         *string
 	Description  *string
-	UnitPrice    *float64
+	UnitPrice    *money.Cents
 	CurrentStock *int
 	Type         *string
 }

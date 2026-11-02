@@ -95,6 +95,25 @@ code but are not yet described in this document; the sections below cover `auth`
 > `specs/service-order-diagnosis-quote/design.md` Â§1.6. See
 > `specs/service-order-quote-decision/design.md` for the full design.
 
+> **Addendum (`specs/service-order-quote-decision/` §9, Fase 2)**: one more `service-order`
+> route, `POST /api/v1/service-orders/{id}/quote/decision`, for an external system relaying
+> the customer's decision (`{"decision":"approved"|"rejected"}`). It is registered without
+> `requireAuth` and authenticates instead with the `X-External-Notification-Secret` header,
+> compared in constant time against `EXTERNAL_NOTIFICATION_SECRET` (read in `cmd/api/main.go`,
+> which fails fast if it is unset). After resolving the order by id it calls the same private
+> `decideQuote` core and `DecideQuote` transaction as the tracking-token routes, so the rules
+> and the conflict behavior are shared rather than duplicated.
+
+> **Addendum (`specs/service-order-status-update/`, Fase 2)**: `POST /api/v1/service-orders/{id}/status`,
+> also registered without `requireAuth`, authenticates with `X-External-Status-Secret`
+> against `EXTERNAL_STATUS_UPDATE_SECRET` (required, and must differ from
+> `EXTERNAL_NOTIFICATION_SECRET` — `cmd/api/main.go` fails fast otherwise). It dispatches
+> `IN_DIAGNOSIS`/`COMPLETED`/`DELIVERED` to the same private cores behind
+> `StartDiagnosis`/`FinalizeOrder`/`DeliverOrder`; the repository transition methods now take
+> a `notes` argument appended to the history description (always `""` from the
+> administrative routes). The calling tool is an n8n service in `docker-compose.yml` whose
+> workflow is versioned in `tools/n8n/` and imported on startup.
+
 > **Addendum (`specs/service-order-metrics/`)**: `service-order` gained one more
 > `requireAuth`-wrapped route, `GET /api/v1/service-orders/metrics/average-execution-time`,
 > a read-only aggregate over `specs/service-order-execution/`'s `audit_services`/
@@ -123,6 +142,25 @@ code but are not yet described in this document; the sections below cover `auth`
 > codebase, `service-order` and `product` each write to `stock_movements` through their own
 > SQL â€” neither imports the other's Go package (CLAUDE.md Â§9.2). See
 > `specs/service-order-stock-usage/design.md` for the full design.
+
+> **Addendum (`specs/service-order-architecture-refactor/`, Fase 2, F2-US01)**: `service-order`
+> is no longer one flat package. It keeps its single slice folder but is organized in Clean
+> Architecture layers whose dependencies only point inward:
+> `domain/` (the `ServiceOrder` aggregate, its exported transitions, quotes, executions,
+> stock movements, history and every sentinel error; standard library + `uuid` only) <-
+> `usecase/` (`Opening`, `Lifecycle`, `Quotes`, `Executions`, `Queries`, `StockUsage`,
+> `Metrics`, plus the 17 narrow ports they declare in `ports.go`, replacing the 20-method
+> `serviceOrderLookups`) <- `adapter/postgres` (`postgres.Repository`, every SQL statement
+> unchanged, `assertions.go` proving it satisfies each port), `adapter/httpapi`
+> (`RegisterRoutes`, one handler file per use case, DTOs, the single error -> status mapping)
+> and `adapter/notifier` (no-op and Resend). `cmd/api/wiring.go` composes them
+> (`buildServiceOrderUseCases`). Routes, status codes and bodies are unchanged.
+> `internal/features/service-order/architecture_test.go` enforces the rule over the
+> transitive import graph on every `go test ./...`, and `scripts/coverage.sh` gates
+> `service-order/...` as one aggregate. The other features keep the flat layout described
+> below: their packages mixing HTTP, SQL and rules is recorded technical debt (decision 22),
+> not the target shape. See `docs/architecture-dependency-map.md` for the before/after
+> dependency map and the inventory of the other modules.
 
 The folder organization follows the **cmd/ + internal/** pattern, with **vertical slice
 (organization by feature)** as the adopted convention: each business feature gathers
@@ -174,26 +212,32 @@ depends on another's current state.
 | Component | Path | State |
 | --- | --- | --- |
 | HTTP entrypoint | `cmd/api/main.go` | Implemented â€” loads config (`DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT`), opens the shared Postgres pool, wires `auth`, `customer`, `vehicle`, and `servicecatalog`, registers `/health`, the public/protected auth routes, the customer routes, the vehicle routes, and the five catalog routes, starts the server. |
+| Admin bootstrap command | `cmd/bootstrap-admin/` | Implemented (FP-33): a second entrypoint, shipped in the API image as `/bootstrap-admin`. Loads `config.LoadAdminBootstrap` (`DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, optional `ADMIN_NAME`), opens the shared pool, calls `auth.BootstrapAdmin` (`internal/features/auth/bootstrap.go`: validation + in-process bcrypt + `Repository.CreateIfAbsent`, idempotent), logs only the outcome. See `specs/database-migrations/` design 7. |
 | `auth` feature | `internal/features/auth/` | Implemented â€” `handler.go` (HTTP), `service.go` (login/lookup logic), `repository.go` (pgx queries), `model.go` (`User`). Unit-tested (`handler_test.go`, `service_test.go`). See `specs/auth/`. |
 | `customer` feature | `internal/features/customer/` | Implemented â€” model, DTOs, Postgres repository, service, HTTP handlers for all 6 endpoints. See `specs/customer-management/`. |
 | `vehicle` feature | `internal/features/vehicle/` | Implemented â€” model, plate validation, DTOs, Postgres repository, service, HTTP handlers for all 7 endpoints, every route JWT-protected. See `specs/vehicle-management/`. |
 | `servicecatalog` feature | `internal/features/service-catalog/` | Implemented â€” `handler.go` (five REST endpoints), `service.go` (`Catalog`: catalog business rules), `repository.go` (pgx queries over `services`), `model.go` (`Service`). Unit-tested (`handler_test.go`, `service_test.go`). See `specs/service-catalog/`. |
 | `user` feature | `internal/features/user/` | Not implemented â€” only `doc.go` declaring the package (placeholder for a future feature; unrelated to auth's `users` table). |
 | `features` package (root) | `internal/features/doc.go` | Not implemented â€” only a package comment. |
-| Shared: `database` | `internal/shared/database/` | Implemented â€” `NewPool` builds and pings a `pgxpool.Pool` from a `postgres://` URL. Used by every feature's repositories. (Consolidated from two independent implementations, `NewPool` and `Connect`, that each branch introduced â€” see Â§10.) |
+| Shared: `database` | `internal/shared/database/` | Implemented â€” `NewPool` builds and pings a `pgxpool.Pool` from a `postgres://` URL. Used by every feature's repositories. Also the Postgres adapter for money (2026-10-20): `NumericFromCents`/`CentsFromNumeric`/`ScanCents` convert `money.Cents` to and from NUMERIC(12,2) without float64. (Consolidated from two independent implementations, `NewPool` and `Connect`, that each branch introduced â€” see Â§10.) |
 | Shared: `token` | `internal/shared/token/` | Implemented â€” `Manager` issues and verifies HS256 JWTs (`golang-jwt/jwt/v5`). Unit-tested (`token_test.go`), including alg-confusion regression coverage. |
 | Shared: `middleware` | `internal/shared/middleware/` | Implemented â€” `RequireAuth` extracts and verifies the `Authorization: Bearer` header, injects the user id into the request context, or responds 401. Unit-tested (`auth_test.go`). |
 | Shared: `httpx` | `internal/shared/httpx/` | Implemented â€” `JSON`/`Error` helpers producing `{"error":{"code","message"}}`. `Error` is used by `auth` and `middleware`; `JSON` is also the success-response writer of `servicecatalog`. Unit-tested (`respond_test.go`). See Â§8 re: overlap with `apierror`. |
 | Shared: `apierror` | `internal/shared/apierror/` | Implemented â€” the JSON error envelope and HTTP status mapping used by `customer`, `vehicle`, and `servicecatalog` (`{"error":{"code","message","details"?}}`). See Â§8 re: overlap with `httpx`. |
 | Shared: `document` | `internal/shared/document/` | Implemented â€” CPF/CNPJ normalize/detect-type/validate (check-digit algorithm, no third-party library), including the alphanumeric CNPJ format. |
+| Shared: `money` | `internal/shared/money/` | Implemented (2026-10-20, `specs/monetary-value-precision/`) - `Cents` (int64 cents), the type of every price and total in `servicecatalog`, `product` and `service-order`: exact JSON parse/format (same wire text as the old float64 fields; more than two decimal places or beyond NUMERIC(12,2) rejected, never rounded) and bounded `MulQuantity`/`Add`/`Sum`. Standard library only, so domain types holding it do not depend on pgx. Unit-tested (`money_test.go`). |
 | Shared: `config` | `internal/shared/config/` | Implemented â€” reads `DATABASE_URL`, `JWT_SECRET`, `JWT_TTL`, `PORT` from the environment. |
 | Handler/integration tests | `internal/handlers_test/` | Implemented â€” `auth_test.go`, `customer_test.go`, `vehicle_test.go`, and `service_catalog_test.go`, each driving real HTTP against a real Postgres, each independently skipping (not failing) without `DATABASE_URL`/a reachable database. |
 | Database schema | `docs/schema.sql` | Implemented as plain SQL; consumed by every feature's repository (`users` table for auth, `customers` table â€” with its `document_type`/`status` columns/enums â€” for Customer Management, `vehicles` table â€” with its new `status` column/enum â€” for Vehicle Management, `services` â€” with the `active` flag and `GENERATED BY DEFAULT` code added by the catalog â€” for the service catalog). |
-| Sample data | `docs/seed.sql` | Implemented as plain SQL; applied manually via `psql`. Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`), four sample customers, five sample vehicles (one `INACTIVE`, owned by the one `INACTIVE` customer), and six sample services (one deliberately inactive). |
+| Schema migrations | `migrations/`, `scripts/migrate.sh` | Implemented (FP-33): `golang-migrate` `v4.20.1` run from its container image (not a Go dependency). `0001_init` is the Fase 1 baseline with a guard against existing schemas; later files are incremental. Applied by the Compose `migrate` service, CI (`coverage` job), and the Kubernetes migration Job (FP-34); `scripts/migrate.sh baseline` adopts an existing database after a backup and a schema-equivalence proof. See `specs/database-migrations/`. |
+| Sample data | `docs/seed.sql` | Implemented as plain SQL; applied by the Compose `seed` service after the migrations (local and CI test databases only, never a deployed environment). Includes one seeded administrative user (bcrypt-hashed via pgcrypto `crypt()`), four sample customers, five sample vehicles (one `INACTIVE`, owned by the one `INACTIVE` customer), and six sample services (one deliberately inactive). |
 | Domain model | `docs/entities.md` | Domain documentation for all entities, now including `User` and the `Service.active` field. `Customer`, `Vehicle`, `User`, and `Service` are the only entities with a corresponding Go implementation. |
 | API documentation | `docs/openapi.yaml` | Implemented for the Customer Management and Vehicle Management endpoints (schemas, pagination, error envelope, `bearerAuth` security scheme for Vehicle Management). The auth and service catalog endpoints are not documented here â€” `specs/auth/requirements.md` and `specs/service-catalog/requirements.md` both scoped RNF10 out as a separate future feature. |
-| Local environment | `docker-compose.yml`, `Dockerfile` | Implemented â€” orchestrates `db` (Postgres), `adminer`, and `api`; `api` now requires `JWT_SECRET` (fails fast via compose variable substitution if unset). |
-| CI | `.github/workflows/ci.yml` | Implemented â€” runs `go build ./...`, `go vet ./...`, `go test ./...`. |
+| Local environment | `docker-compose.yml`, `Dockerfile`, `.dockerignore`, `scripts/smoke.sh` | Implemented â€” orchestrates `db` (Postgres), the one-shot `migrate` and `seed` (FP-33), `api`, `adminer`, `swagger-ui` and `n8n` (FP-30); `api` requires `JWT_SECRET`, `EXTERNAL_NOTIFICATION_SECRET` and `EXTERNAL_STATUS_UPDATE_SECRET` (fails fast via compose variable substitution if unset). Since FP-32 (2026-10-19, `specs/containerization/`) the image runs on `alpine:3.24` as non-root UID/GID `10001` with a `HEALTHCHECK` on `/health`, built from an allowlist `.dockerignore`; helper images are pinned; `make smoke` checks health, login and an authenticated service-order opening/query. |
+| Infrastructure as code | `infra/` (Terraform) | Implemented (FP-35, 2026-10-25, `specs/infrastructure-provisioning/`): one Terraform root, local backend, creating a single-node `kind` cluster, `metrics-server` (Helm) and the `automotive-workshop` namespace (Pod Security `restricted`), plus Postgres 16 as a `StatefulSet` `postgres` with a PVC and a headless `Service`. Outputs `kubeconfig_path` and `postgres_database_url_template` feed the deploy (FP-36 contract). Tooling only - Terraform, `kind` and `kubectl` are not Go dependencies. |
+| Kubernetes manifests | `k8s/`, `scripts/k8s-evidence.sh` | Implemented (FP-34, 2026-10-25, `specs/kubernetes-deployment/`): the API `Deployment` (no `replicas` - owned by the HPA; restricted security context; probes on `/health`), `ClusterIP` `Service`, `ConfigMap`, `autoscaling/v2` HPA (2-8, CPU 70 % / memory 80 %), the migration and `/bootstrap-admin` `Job`s, a `Secret` key template (never applied) and an in-cluster load generator. Applied in order by the deploy, never wholesale; `scripts/k8s-evidence.sh` records HPA scaling, pod recovery and database persistence. |
+| IaC validation | `.github/workflows/iac.yml`, `scripts/iac-validate.sh` | Implemented (FP-34/FP-35): on changes to `infra/**`/`k8s/**`, `terraform fmt`/`validate`, a render of `/k8s` identical to FP-36's deploy (kustomize image tag + digest, `Job` name suffix) validated with `kubeconform -strict`, repository rules, and `shellcheck`. Separate from `ci.yml`, which FP-36 owns. |
+| CI/CD | `.github/workflows/ci.yml`, `scripts/deploy.sh`, `scripts/deploy-smoke.sh` | Implemented. Every push/PR: `build` (build/vet/test), `coverage` (Postgres built by the migrations + seed, RNF06 gate), `migrations` (`scripts/migrate.sh verify`), `security` (`govulncheck`, `gosec`) and `image` (build, no push). A push to `main` or a manual run adds `publish` (GHCR, `name:<sha>@<digest>`) and `deploy` (FP-36): an ephemeral `kind` cluster inside the runner created by `/infra` Terraform, the migration `Job` (must complete before anything is rolled out), the `/bootstrap-admin` `Job`, the `/k8s` rollout, an authenticated smoke test, sanitized evidence and `terraform destroy`. The same script builds the demonstration environment on a developer machine. See `specs/ci-cd-pipeline/`. |
 
 ## 3. Responsibilities
 
@@ -382,10 +426,12 @@ pool for the whole process:
 - **Connection**: `internal/shared/database.NewPool(ctx, url)` opens a `pgxpool.Pool` and
   validates it with a `Ping`. Called once from `cmd/api/main.go` with `DATABASE_URL`; the
   pool is closed via `defer` on shutdown and shared by both features' repositories.
-- **Schema**: [docs/schema.sql](../docs/schema.sql) defines all tables, applied
-  automatically by the `db` container only on initial Docker volume creation
-  (`docker-entrypoint-initdb.d`), not by application code. No migration tool is used to
-  evolve the schema after initial creation â€” **to be defined**, see `CLAUDE.md` Â§14.
+- **Schema**: created and evolved only by the versioned migrations in
+  [migrations/](../migrations/) (golang-migrate, run outside the application: Compose
+  `migrate` service, CI, Kubernetes Job), never by application code or by
+  `docker-entrypoint-initdb.d`. [docs/schema.sql](../docs/schema.sql) is the human-readable
+  reference of the resulting schema, checked against the migration chain in CI
+  (`scripts/migrate.sh verify`). See `CLAUDE.md` section 14 and `specs/database-migrations/`.
   - `users` (auth): `id UUID`, `code BIGINT IDENTITY`, `name`, `email UNIQUE`,
     `password_hash`, `created_at`/`updated_at`.
   - `customers` (Customer Management): the pre-existing table plus two columns added by
@@ -415,7 +461,7 @@ pool for the whole process:
   database-constraint mapping) as `customer`'s document uniqueness. `servicecatalog`'s
   `Repository` maps `pgx.ErrNoRows` to `ErrServiceNotFound` and a `23505` unique-violation to
   `ErrCodeAlreadyExists`.
-- **Seed**: [docs/seed.sql](../docs/seed.sql) populates sample data via manual `psql`: one
+- **Seed**: [docs/seed.sql](../docs/seed.sql) populates sample data (Compose `seed` service, local only): one
   administrative user (`admin@workshop.local`) with a bcrypt hash produced by pgcrypto's
   `crypt()` at insert time (plaintext dev-only password documented only in the seed file's
   SQL comment, never in Go code or logs), four sample customers with normalized CPF/CNPJ
@@ -552,9 +598,9 @@ skipping without `DATABASE_URL` â€” but differ, deliberately, on test libra
 - **Coverage targets**: none set numerically for any feature â€” "every new feature needs
   tests" (`CLAUDE.md` Â§11), not a percentage gate.
 - CI ([.github/workflows/ci.yml](../.github/workflows/ci.yml)) runs `go build/vet/test
-  ./...` with no Postgres service configured, so every feature's integration tests currently
-  run in **skip mode** in CI; provisioning a Postgres service for CI to exercise them for
-  real remains **to be defined**.
+  ./...` in the `build` job, and the integration tests against a real Postgres (built by the
+  migrations + seed) in the `coverage` job; the deploy pipeline's own checks are operational
+  (`specs/ci-cd-pipeline/design.md` §12).
 
 ## 10. Identified architectural decisions
 
@@ -667,8 +713,19 @@ their source:
     listing has no pagination), while Customer Management's listing carries its own
     pagination shape â€” another consistency item for whoever unifies the response
     conventions.
+22. **Clean Architecture inside the `service-order` slice; flat layout elsewhere is debt**
+    (F2-US01, 2026-10-21, `specs/service-order-architecture-refactor/`). `service-order`
+    is split into `domain/`, `usecase/` and `adapter/{postgres,httpapi,notifier}/`
+    sub-packages inside its one feature folder, with ports declared by their consumer
+    (`usecase/ports.go`) and the dependency rule enforced by `architecture_test.go`. The
+    inventory of `auth`, `customer`, `vehicle`, `product`, `service-catalog` and
+    `service-order-tracking` found no business-rule file importing infrastructure; the one
+    file-level violation (the repository port of `customer`, `vehicle` and `product`
+    declared in `repository.go`) was fixed by moving it to `service.go`. At package level
+    those six modules still mix HTTP, SQL and rules, and the team explicitly scoped their
+    layering out of F2-US01: it is technical debt, to be paid with the same recipe.
 
-Any architectural decision outside this list (migration tool, linter beyond
+Any architectural decision outside this list (linter beyond
 `gofmt`/`go vet`, authorization/roles, refresh tokens, OpenAPI/Swagger documentation for
 auth and the service catalog, external integrations) **has not been made yet in code** and
 should be treated as **"To be defined"** until resolved by a specification in

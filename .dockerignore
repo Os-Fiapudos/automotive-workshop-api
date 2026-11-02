@@ -1,0 +1,14 @@
+# Allowlist: the image is built only from the module files and the Go source
+# (Dockerfile). Everything else - .env, backups/, Terraform state, kubeconfigs,
+# .git, coverage/security outputs - never enters the build context, including
+# files added to the repository later. A path the build really needs must be
+# re-included here and copied in the Dockerfile, both on purpose.
+*
+!go.mod
+!go.sum
+!cmd
+!internal
+# Tests are not compiled into the image; leaving them out also keeps a test-only
+# change from invalidating the build layer.
+**/*_test.go
+**/testdata

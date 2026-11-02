@@ -1,3 +1,11 @@
+# Local environment (specs/containerization/, specs/database-migrations/).
+#
+# Startup order: db (healthy) -> migrate (exits 0) -> api (healthy); seed runs
+# after migrate and nothing waits on it; adminer waits for db; n8n starts
+# after api.
+# Host ports (set in .env): API_PORT 8080, ADMINER_PORT 8081,
+# SWAGGER_UI_PORT 8082, N8N_PORT 5678, POSTGRES_PORT 5432.
+# Image versions are pinned on purpose - review them before raising.
 services:
   db:
     image: postgres:16-alpine
@@ -8,25 +16,60 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-automotive_workshop}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    # No docker-entrypoint-initdb.d scripts: the schema is created only by the
+    # migrate service below (specs/database-migrations/, one initialization path).
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./docs/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./docs/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  adminer:
-    image: adminer:latest
-    restart: unless-stopped
-    ports:
-      - "${ADMINER_PORT:-8085}:8080"
+  # One-shot: applies migrations/ before the API starts. A failure (e.g. a Fase 1
+  # volume, which must be adopted with `make migrate-baseline` first) stops
+  # `docker compose up` and the API is not started.
+  migrate:
+    image: migrate/migrate:v4.20.1 # keep in sync with MIGRATE_IMAGE in scripts/migrate.sh
+    command:
+      - -path=/migrations
+      - -database
+      - postgres://${POSTGRES_USER:-workshop}:${POSTGRES_PASSWORD:-workshop}@db:5432/${POSTGRES_DB:-automotive_workshop}?sslmode=disable
+      - up
+    volumes:
+      - ./migrations:/migrations:ro
     depends_on:
       db:
         condition: service_healthy
 
+  # One-shot: development sample data and users (docs/seed.sql, idempotent),
+  # after the migrations, on every `up`. Nothing waits on it, so a seed failure
+  # never keeps the API down.
+  seed:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-workshop}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-workshop}
+      PGDATABASE: ${POSTGRES_DB:-automotive_workshop}
+    command: ["psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "/seed/seed.sql"]
+    volumes:
+      - ./docs/seed.sql:/seed/seed.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  adminer:
+    image: adminer:6.1.1
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Health is reported by the image's HEALTHCHECK (GET /health). PORT is not set:
+  # inside the container the API stays on 8080; API_PORT only changes the host side.
   api:
     build: .
     restart: unless-stopped
@@ -34,6 +77,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-workshop}:${POSTGRES_PASSWORD:-workshop}@db:5432/${POSTGRES_DB:-automotive_workshop}?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - set it in .env}
       JWT_TTL: ${JWT_TTL:-1h}
+      EXTERNAL_NOTIFICATION_SECRET: ${EXTERNAL_NOTIFICATION_SECRET:?EXTERNAL_NOTIFICATION_SECRET is required - set it in .env}
+      EXTERNAL_STATUS_UPDATE_SECRET: ${EXTERNAL_STATUS_UPDATE_SECRET:?EXTERNAL_STATUS_UPDATE_SECRET is required - set it in .env}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:
@@ -41,16 +86,49 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # External status-update tool (specs/service-order-status-update/, FP-30):
+  # imports and publishes tools/n8n/workflows on every start, so the
+  # integration is reproducible with no manual setup. The workflow reads the
+  # API URL and secret from this environment ($env), never from the
+  # versioned JSON. Operator form: http://localhost:5678/form/service-order-status
+  n8n:
+    image: n8nio/n8n:2.43.8
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        n8n import:workflow --separate --input=/workflows &&
+        n8n publish:workflow --id=fp30StatusUpdate &&
+        exec n8n start
+    environment:
+      WORKSHOP_API_URL: http://api:8080
+      EXTERNAL_STATUS_UPDATE_SECRET: ${EXTERNAL_STATUS_UPDATE_SECRET:?EXTERNAL_STATUS_UPDATE_SECRET is required - set it in .env}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      GENERIC_TIMEZONE: America/Sao_Paulo
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./tools/n8n/workflows:/workflows:ro
+    depends_on:
+      - api
 
   swagger-ui:
-    image: swaggerapi/swagger-ui:latest
+    image: swaggerapi/swagger-ui:v5.33.1
     restart: unless-stopped
     environment:
       SWAGGER_JSON: /openapi.yaml
     volumes:
       - ./docs/openapi.yaml:/openapi.yaml:ro
     ports:
-      - "${SWAGGER_UI_PORT:-8083}:8080"
+      - "${SWAGGER_UI_PORT:-8082}:8080"
 
 volumes:
   db_data:
+  n8n_data:

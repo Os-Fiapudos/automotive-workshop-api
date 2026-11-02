@@ -1,0 +1,558 @@
+package usecase
+
+import (
+	"automotive-workshop-api/internal/features/service-order/domain"
+	"context"
+	"sort"
+	"time"
+
+	"github.com/google/uuid"
+
+	"automotive-workshop-api/internal/shared/money"
+	"automotive-workshop-api/internal/shared/trackingtoken"
+)
+
+// fakeRepository is an in-memory ServiceOrderRepository + serviceOrderLookups
+// used only by the service-level unit tests in this package — no mocking
+// framework, same convention as internal/features/customer/fake_repository_test.go.
+type fakeRepository struct {
+	orders            []*domain.ServiceOrder
+	customers         map[uuid.UUID]*CustomerRef
+	customersByDoc    map[string]*CustomerRef
+	vehicles          map[uuid.UUID]*VehicleRef
+	services          map[uuid.UUID]*ServiceRef
+	products          map[uuid.UUID]*ProductRef
+	quotes            map[uuid.UUID]*domain.Quote                 // keyed by service order id
+	requestedServices map[uuid.UUID][]*ServiceRef                 // keyed by service order id
+	history           map[uuid.UUID][]*domain.ServiceOrderHistory // keyed by service order id
+	executions        map[uuid.UUID][]*domain.ServiceExecution    // keyed by service order id
+	trackingTokens    map[uuid.UUID]string                        // keyed by service order id, value is the token hash
+	productStock      map[uuid.UUID]int                           // keyed by product id — specs/service-order-stock-usage/
+	movements         []*domain.StockMovement                     // specs/service-order-stock-usage/
+}
+
+func newFakeRepository() *fakeRepository {
+	return &fakeRepository{
+		customers:         make(map[uuid.UUID]*CustomerRef),
+		customersByDoc:    make(map[string]*CustomerRef),
+		vehicles:          make(map[uuid.UUID]*VehicleRef),
+		services:          make(map[uuid.UUID]*ServiceRef),
+		products:          make(map[uuid.UUID]*ProductRef),
+		quotes:            make(map[uuid.UUID]*domain.Quote),
+		requestedServices: make(map[uuid.UUID][]*ServiceRef),
+		history:           make(map[uuid.UUID][]*domain.ServiceOrderHistory),
+		executions:        make(map[uuid.UUID][]*domain.ServiceExecution),
+		trackingTokens:    make(map[uuid.UUID]string),
+		productStock:      make(map[uuid.UUID]int),
+	}
+}
+
+// addTrackingToken registers orderID's tracking token hash, so
+// findServiceOrderByCodeWithTrackingToken can validate it — used by
+// quote_service_test.go's ApproveQuote/RejectQuote tests
+// (specs/service-order-quote-decision/).
+func (fake *fakeRepository) addTrackingToken(orderID uuid.UUID, tokenHash string) {
+	fake.trackingTokens[orderID] = tokenHash
+}
+
+func (fake *fakeRepository) addCustomer(ref *CustomerRef, document string) {
+	fake.customers[ref.ID] = ref
+	fake.customersByDoc[document] = ref
+}
+func (fake *fakeRepository) addVehicle(ref *VehicleRef) { fake.vehicles[ref.ID] = ref }
+func (fake *fakeRepository) addService(ref *ServiceRef) { fake.services[ref.ID] = ref }
+func (fake *fakeRepository) addProduct(ref *ProductRef) { fake.products[ref.ID] = ref }
+
+// setProductStock seeds productID's balance for
+// stockusage_service_test.go — separate from addProduct since existing
+// callers (quote_service_test.go) never needed a stock quantity.
+func (fake *fakeRepository) setProductStock(productID uuid.UUID, quantity int) {
+	fake.productStock[productID] = quantity
+}
+
+// addOrder registers an already-built order so quote_service_test.go can
+// exercise StartDiagnosis/ComposeQuote without going through Create.
+func (fake *fakeRepository) addOrder(order *domain.ServiceOrder) {
+	if order.Code == 0 {
+		order.Code = int64(len(fake.orders) + 1)
+	}
+	fake.orders = append(fake.orders, order)
+}
+
+// seedDecidedQuote registers a quote already APPROVED/REJECTED for order,
+// so tests can exercise ErrQuoteAlreadyDecided without a real compose call.
+func (fake *fakeRepository) seedDecidedQuote(orderID uuid.UUID, status domain.QuoteStatus) {
+	fake.quotes[orderID] = &domain.Quote{ID: uuid.New(), ServiceOrderID: orderID, Status: status}
+}
+
+func (fake *fakeRepository) Create(_ context.Context, order *domain.ServiceOrder) (string, error) {
+	order.Code = int64(len(fake.orders) + 1)
+	fake.orders = append(fake.orders, order)
+	rawToken, err := trackingtoken.Generate()
+	if err != nil {
+		return "", err
+	}
+	return rawToken, nil
+}
+
+func (fake *fakeRepository) FindServiceOrderByID(_ context.Context, id uuid.UUID) (*domain.ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.ID == id {
+			return order, nil
+		}
+	}
+	return nil, domain.ErrServiceOrderNotFound
+}
+
+func (fake *fakeRepository) FindActiveProductByID(_ context.Context, id uuid.UUID) (*ProductRef, error) {
+	ref, ok := fake.products[id]
+	if !ok {
+		return nil, domain.ErrProductNotFound
+	}
+	return ref, nil
+}
+
+func (fake *fakeRepository) FindServiceByID(_ context.Context, id uuid.UUID) (*ServiceRef, error) {
+	ref, ok := fake.services[id]
+	if !ok {
+		return nil, domain.ErrRequestedServiceNotFound
+	}
+	return ref, nil
+}
+
+func (fake *fakeRepository) StartDiagnosis(_ context.Context, order *domain.ServiceOrder, notes string) error {
+	fake.recordTransition(order, "diagnosis_started", domain.HistoryDescription(domain.HistoryDiagnosisStarted, notes), domain.StatusReceived)
+	return nil
+}
+
+// recordTransition appends the history entry the Postgres repository's
+// transition methods write in the same transaction, so service-level tests
+// can assert on it (specs/service-order-status-update/).
+func (fake *fakeRepository) recordTransition(order *domain.ServiceOrder, event, description string, previous domain.Status) {
+	fake.history[order.ID] = append(fake.history[order.ID], &domain.ServiceOrderHistory{
+		ID:             uuid.New(),
+		ServiceOrderID: order.ID,
+		OccurredAt:     time.Now().UTC(),
+		Event:          event,
+		Description:    description,
+		PreviousStatus: previous,
+		NewStatus:      order.Status,
+	})
+}
+
+func (fake *fakeRepository) SaveQuote(_ context.Context, order *domain.ServiceOrder, items []domain.QuoteItem, total money.Cents) (*domain.Quote, error) {
+	quote := fake.quotes[order.ID]
+	if quote == nil {
+		quote = &domain.Quote{ID: uuid.New(), ServiceOrderID: order.ID, Version: 1}
+	} else {
+		quote.Version++
+	}
+	quote.TotalAmount = total
+	quote.Status = domain.QuoteStatusPending
+	quote.Items = items
+	fake.quotes[order.ID] = quote
+	return quote, nil
+}
+
+// SendQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) SendQuote(_ context.Context, _ *domain.ServiceOrder, quote *domain.Quote) (*domain.Quote, error) {
+	now := time.Now().UTC()
+	quote.SentAt = &now
+	sentVersion := quote.Version
+	quote.SentVersion = &sentVersion
+	return quote, nil
+}
+
+// DecideQuote implements ServiceOrderRepository
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) DecideQuote(_ context.Context, _ *domain.ServiceOrder, quote *domain.Quote, decision domain.QuoteStatus) (*domain.Quote, error) {
+	if quote.Status != domain.QuoteStatusPending {
+		return nil, domain.ErrQuoteAlreadyDecided
+	}
+	now := time.Now().UTC()
+	quote.Status = decision
+	quote.RespondedAt = &now
+	return quote, nil
+}
+
+// findServiceOrderByCodeWithTrackingToken implements serviceOrderLookups
+// (specs/service-order-quote-decision/) for the service-level unit tests.
+func (fake *fakeRepository) FindServiceOrderByCodeWithTrackingToken(_ context.Context, code int64, tokenHash string) (*domain.ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code != code {
+			continue
+		}
+		if fake.trackingTokens[order.ID] != tokenHash {
+			return nil, domain.ErrTrackingTokenInvalid
+		}
+		return order, nil
+	}
+	return nil, domain.ErrServiceOrderNotFound
+}
+
+func (fake *fakeRepository) FindQuoteByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) (*domain.Quote, error) {
+	quote, ok := fake.quotes[serviceOrderID]
+	if !ok {
+		return nil, domain.ErrQuoteNotFound
+	}
+	return quote, nil
+}
+
+func (fake *fakeRepository) FindCustomerByID(_ context.Context, id uuid.UUID) (*CustomerRef, error) {
+	ref, ok := fake.customers[id]
+	if !ok {
+		return nil, domain.ErrCustomerNotFound
+	}
+	return ref, nil
+}
+
+func (fake *fakeRepository) FindCustomerByDocument(_ context.Context, normalizedDocument string) (*CustomerRef, error) {
+	ref, ok := fake.customersByDoc[normalizedDocument]
+	if !ok {
+		return nil, domain.ErrCustomerNotFound
+	}
+	return ref, nil
+}
+
+func (fake *fakeRepository) FindVehicleByID(_ context.Context, id uuid.UUID) (*VehicleRef, error) {
+	ref, ok := fake.vehicles[id]
+	if !ok {
+		return nil, domain.ErrVehicleNotFound
+	}
+	return ref, nil
+}
+
+func (fake *fakeRepository) FindVehicleByPlate(_ context.Context, plate string) (*VehicleRef, error) {
+	for _, ref := range fake.vehicles {
+		if ref.LicensePlate == plate {
+			return ref, nil
+		}
+	}
+	return nil, domain.ErrVehicleNotFound
+}
+
+func (fake *fakeRepository) FindMissingServiceIDs(_ context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	var missing []uuid.UUID
+	for _, id := range ids {
+		if _, ok := fake.services[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	return missing, nil
+}
+
+func (fake *fakeRepository) FindServicesByIDs(_ context.Context, ids []uuid.UUID) ([]*ServiceRef, error) {
+	refs := make([]*ServiceRef, 0, len(ids))
+	for _, id := range ids {
+		if ref, ok := fake.services[id]; ok {
+			refs = append(refs, ref)
+		}
+	}
+	return refs, nil
+}
+
+// setRequestedServices/addHistory seed the query-only projections
+// findRequestedServices/findHistoryByServiceOrderID read back, used by
+// query_service_test.go (specs/service-order-query/).
+func (fake *fakeRepository) setRequestedServices(orderID uuid.UUID, refs []*ServiceRef) {
+	fake.requestedServices[orderID] = refs
+}
+
+func (fake *fakeRepository) addHistory(orderID uuid.UUID, entry *domain.ServiceOrderHistory) {
+	fake.history[orderID] = append(fake.history[orderID], entry)
+}
+
+func (fake *fakeRepository) FindServiceOrderByCode(_ context.Context, code int64) (*domain.ServiceOrder, error) {
+	for _, order := range fake.orders {
+		if order.Code == code {
+			return order, nil
+		}
+	}
+	return nil, domain.ErrServiceOrderNotFound
+}
+
+func (fake *fakeRepository) FindRequestedServices(_ context.Context, serviceOrderID uuid.UUID) ([]*ServiceRef, error) {
+	return fake.requestedServices[serviceOrderID], nil
+}
+
+func (fake *fakeRepository) FindHistoryByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceOrderHistory, error) {
+	return fake.history[serviceOrderID], nil
+}
+
+// ---- specs/service-order-execution/ ----
+
+func (fake *fakeRepository) StartExecution(_ context.Context, execution *domain.ServiceExecution) error {
+	execution.StartedAt = time.Now().UTC()
+	fake.executions[execution.ServiceOrderID] = append(fake.executions[execution.ServiceOrderID], execution)
+	return nil
+}
+
+func (fake *fakeRepository) FinishExecution(_ context.Context, execution *domain.ServiceExecution) error {
+	for _, existing := range fake.executions[execution.ServiceOrderID] {
+		if existing.ID == execution.ID {
+			endedAt := execution.EndedAt
+			if endedAt == nil {
+				now := time.Now().UTC()
+				endedAt = &now
+			}
+			existing.EndedAt = endedAt
+			execution.EndedAt = endedAt
+			return nil
+		}
+	}
+	return domain.ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) FinalizeOrder(_ context.Context, order *domain.ServiceOrder, notes string) error {
+	fake.recordTransition(order, "completion", domain.HistoryDescription(domain.HistoryOrderFinalized, notes), domain.StatusInProgress)
+	return nil
+}
+
+func (fake *fakeRepository) DeliverOrder(_ context.Context, order *domain.ServiceOrder, notes string) error {
+	fake.recordTransition(order, "delivery", domain.HistoryDescription(domain.HistoryVehicleDelivered, notes), domain.StatusCompleted)
+	return nil
+}
+
+func (fake *fakeRepository) FindServiceExecutionByID(_ context.Context, serviceOrderID, executionID uuid.UUID) (*domain.ServiceExecution, error) {
+	for _, execution := range fake.executions[serviceOrderID] {
+		if execution.ID == executionID {
+			return execution, nil
+		}
+	}
+	return nil, domain.ErrServiceExecutionNotFound
+}
+
+func (fake *fakeRepository) FindServiceExecutionsByServiceOrderID(_ context.Context, serviceOrderID uuid.UUID) ([]*domain.ServiceExecution, error) {
+	return fake.executions[serviceOrderID], nil
+}
+
+// findAverageExecutionTimeByService is an in-memory equivalent of
+// PostgresServiceOrderRepository.findAverageExecutionTimeByService, filtering
+// and aggregating the same way the real SQL query does
+// (specs/service-order-metrics/design.md §1.6), for the service-layer unit
+// tests to exercise without a database.
+func (fake *fakeRepository) FindAverageExecutionTimeByService(_ context.Context, filter MetricsFilter) ([]*ServiceMetric, error) {
+	type accumulator struct {
+		ref   *ServiceRef
+		count int
+		total time.Duration
+	}
+	byService := make(map[uuid.UUID]*accumulator)
+
+	for _, executions := range fake.executions {
+		for _, execution := range executions {
+			if execution.EndedAt == nil {
+				continue
+			}
+			if filter.ServiceID != nil && execution.ServiceID != *filter.ServiceID {
+				continue
+			}
+			if filter.StartDate != nil && execution.StartedAt.Before(*filter.StartDate) {
+				continue
+			}
+			if filter.EndDate != nil && execution.StartedAt.After(*filter.EndDate) {
+				continue
+			}
+
+			acc, ok := byService[execution.ServiceID]
+			if !ok {
+				acc = &accumulator{ref: fake.services[execution.ServiceID]}
+				byService[execution.ServiceID] = acc
+			}
+			acc.count++
+			acc.total += execution.EndedAt.Sub(execution.StartedAt)
+		}
+	}
+
+	var metrics []*ServiceMetric
+	for serviceID, acc := range byService {
+		if acc.ref == nil || acc.count == 0 {
+			continue
+		}
+		metrics = append(metrics, &ServiceMetric{
+			ServiceID:              serviceID,
+			ServiceCode:            acc.ref.Code,
+			ServiceName:            acc.ref.Name,
+			ExecutionCount:         acc.count,
+			AverageDurationMinutes: acc.total.Minutes() / float64(acc.count),
+		})
+	}
+	sort.Slice(metrics, func(i, j int) bool { return metrics[i].ServiceName < metrics[j].ServiceName })
+	return metrics, nil
+}
+
+// statusPriority mirrors the ORDER BY CASE PostgresServiceOrderRepository.
+// listServiceOrders uses for the default, no-status-filter view
+// (design.md §1.4): lower is higher priority, and a status absent from the
+// CASE (i.e. not one of these four) never reaches this ordering because it's
+// excluded by statusExcludedByDefault below.
+func statusPriority(status domain.Status) int {
+	switch status {
+	case domain.StatusInProgress:
+		return 1
+	case domain.StatusAwaitingApproval:
+		return 2
+	case domain.StatusInDiagnosis:
+		return 3
+	case domain.StatusReceived:
+		return 4
+	default:
+		return 5
+	}
+}
+
+// statusExcludedByDefault reports whether status is left out of the
+// default, no-status-filter listing (design.md §1.4).
+func statusExcludedByDefault(status domain.Status) bool {
+	return status == domain.StatusCompleted || status == domain.StatusDelivered || status == domain.StatusCanceled
+}
+
+// listServiceOrders is an in-memory equivalent of
+// PostgresServiceOrderRepository.listServiceOrders, filtering/sorting/paging
+// the same way the real SQL query does (design.md §1.3/§1.4), for the
+// service-layer unit tests to exercise without a database.
+func (fake *fakeRepository) ListServiceOrders(_ context.Context, filter ListFilter, page, pageSize int) ([]*ServiceOrderListItem, int, error) {
+	var matched []*ServiceOrderListItem
+	for _, order := range fake.orders {
+		if filter.Code != nil && order.Code != *filter.Code {
+			continue
+		}
+		if filter.Status != nil && string(order.Status) != *filter.Status {
+			continue
+		}
+		if filter.Status == nil && statusExcludedByDefault(order.Status) {
+			continue
+		}
+		customer := fake.customers[order.CustomerID]
+		if filter.CustomerDocument != "" && (customer == nil || customer.Document != filter.CustomerDocument) {
+			continue
+		}
+		vehicle := fake.vehicles[order.VehicleID]
+		if filter.LicensePlate != "" && (vehicle == nil || vehicle.LicensePlate != filter.LicensePlate) {
+			continue
+		}
+		if filter.CreatedFrom != nil && order.CreatedAt.Before(*filter.CreatedFrom) {
+			continue
+		}
+		if filter.CreatedTo != nil && order.CreatedAt.After(*filter.CreatedTo) {
+			continue
+		}
+		matched = append(matched, &ServiceOrderListItem{Order: order, Customer: customer, Vehicle: vehicle})
+	}
+
+	sort.Slice(matched, func(i, j int) bool {
+		if filter.Status == nil {
+			pi, pj := statusPriority(matched[i].Order.Status), statusPriority(matched[j].Order.Status)
+			if pi != pj {
+				return pi < pj
+			}
+		}
+		if !matched[i].Order.CreatedAt.Equal(matched[j].Order.CreatedAt) {
+			return matched[i].Order.CreatedAt.Before(matched[j].Order.CreatedAt)
+		}
+		return matched[i].Order.Code < matched[j].Order.Code
+	})
+
+	total := len(matched)
+	start := (page - 1) * pageSize
+	if start > total {
+		start = total
+	}
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+	return matched[start:end], total, nil
+}
+
+// ---- specs/service-order-stock-usage/ ----
+//
+// Replicates the guarded-update disambiguation
+// PostgresServiceOrderRepository.RegisterStockUsage performs atomically in
+// SQL, so the service-layer unit tests can exercise it without a database
+// (design.md §9).
+
+func (fake *fakeRepository) RegisterStockUsage(_ context.Context, orderID uuid.UUID, items []StockUsageItem) ([]*domain.StockMovement, error) {
+	movements := make([]*domain.StockMovement, 0, len(items))
+	for _, item := range items {
+		productID, err := uuid.Parse(item.ProductID)
+		if err != nil {
+			return nil, domain.ErrProductNotFound
+		}
+
+		ref, ok := fake.products[productID]
+		if !ok {
+			return nil, domain.ErrProductNotFound
+		}
+		if !ref.Active {
+			return nil, domain.ErrProductInactive
+		}
+		currentStock := fake.productStock[productID]
+		if currentStock < item.Quantity {
+			return nil, domain.ErrInsufficientStock
+		}
+
+		fake.productStock[productID] = currentStock - item.Quantity
+		movement := &domain.StockMovement{
+			ID:             uuid.New(),
+			ProductID:      productID,
+			ServiceOrderID: &orderID,
+			Type:           domain.StockMovementExit,
+			Quantity:       item.Quantity,
+			PreviousStock:  currentStock,
+			NewStock:       currentStock - item.Quantity,
+			OccurredAt:     time.Now().UTC(),
+		}
+		fake.movements = append(fake.movements, movement)
+		movements = append(movements, movement)
+	}
+	return movements, nil
+}
+
+func (fake *fakeRepository) ReverseStockMovement(_ context.Context, orderID, movementID uuid.UUID) (*domain.StockMovement, error) {
+	var original *domain.StockMovement
+	for _, movement := range fake.movements {
+		if movement.ID == movementID && movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			original = movement
+			break
+		}
+	}
+	if original == nil {
+		return nil, domain.ErrStockMovementNotFound
+	}
+	if original.Type != domain.StockMovementExit {
+		return nil, domain.ErrStockMovementNotReversible
+	}
+	for _, movement := range fake.movements {
+		if movement.ReversedMovementID != nil && *movement.ReversedMovementID == movementID {
+			return nil, domain.ErrStockMovementAlreadyReversed
+		}
+	}
+
+	currentStock := fake.productStock[original.ProductID]
+	fake.productStock[original.ProductID] = currentStock + original.Quantity
+	reversal := &domain.StockMovement{
+		ID:                 uuid.New(),
+		ProductID:          original.ProductID,
+		ServiceOrderID:     &orderID,
+		Type:               domain.StockMovementEntry,
+		Quantity:           original.Quantity,
+		PreviousStock:      currentStock,
+		NewStock:           currentStock + original.Quantity,
+		ReversedMovementID: &movementID,
+		OccurredAt:         time.Now().UTC(),
+	}
+	fake.movements = append(fake.movements, reversal)
+	return reversal, nil
+}
+
+func (fake *fakeRepository) ListStockMovements(_ context.Context, orderID uuid.UUID) ([]*domain.StockMovement, error) {
+	var movements []*domain.StockMovement
+	for _, movement := range fake.movements {
+		if movement.ServiceOrderID != nil && *movement.ServiceOrderID == orderID {
+			movements = append(movements, movement)
+		}
+	}
+	return movements, nil
+}

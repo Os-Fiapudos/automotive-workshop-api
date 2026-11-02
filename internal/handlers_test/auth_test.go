@@ -1,6 +1,6 @@
 // Package handlers_test: HTTP integration tests. They require DATABASE_URL
-// pointing at a database with docs/schema.sql + docs/seed.sql applied and are
-// skipped when it is not set.
+// pointing at a database migrated to the latest version (scripts/migrate.sh up)
+// with docs/seed.sql applied, and are skipped when it is not set.
 package handlers_test
 
 import (

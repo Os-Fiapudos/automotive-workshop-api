@@ -1,14 +1,20 @@
 package product
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"automotive-workshop-api/internal/shared/apierror"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 func TestCreateRequestValidate(t *testing.T) {
-	validPrice := 10.0
+	validPrice := money.Cents(1000)
 	validStock := 5
 
 	t.Run("valid request has no details", func(t *testing.T) {
@@ -33,7 +39,7 @@ func TestCreateRequestValidate(t *testing.T) {
 	})
 
 	t.Run("negative unit price and stock are rejected", func(t *testing.T) {
-		negativePrice := -1.0
+		negativePrice := money.Cents(-100)
 		negativeStock := -1
 		request := CreateRequest{Name: "Filtro", UnitPrice: &negativePrice, CurrentStock: &negativeStock, Type: "PART"}
 		details := request.Validate()
@@ -80,7 +86,7 @@ func TestUpdateRequestValidate(t *testing.T) {
 	})
 
 	t.Run("negative unit price is rejected", func(t *testing.T) {
-		negative := -0.01
+		negative := money.Cents(-1)
 		details := UpdateRequest{UnitPrice: &negative}.Validate()
 		require.Len(t, details, 1)
 		assert.Equal(t, "unitPrice", details[0].Field)
@@ -120,4 +126,30 @@ func TestStockAdjustmentRequestValidate(t *testing.T) {
 		require.Len(t, details, 1)
 		assert.Equal(t, "quantity", details[0].Field)
 	})
+}
+
+// specs/monetary-value-precision/: a unitPrice with more than two decimal
+// places or beyond NUMERIC(12,2) is a validation error on unitPrice (never
+// rounded); a non-number unitPrice stays a malformed-body error.
+func TestDecodeJSONUnitPricePolicy(t *testing.T) {
+	decode := func(body string) (CreateRequest, *apierror.Error) {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/products", strings.NewReader(body))
+		return decodeJSON[CreateRequest](request)
+	}
+
+	request, apiError := decode(`{"unitPrice": 19.90}`)
+	require.Nil(t, apiError)
+	assert.Equal(t, money.Cents(1990), *request.UnitPrice)
+
+	for _, body := range []string{`{"unitPrice": 19.999}`, `{"unitPrice": 10000000000}`} {
+		_, apiError = decode(body)
+		require.NotNil(t, apiError, body)
+		assert.Equal(t, http.StatusBadRequest, apiError.Status, body)
+		require.Len(t, apiError.Details, 1, body)
+		assert.Equal(t, "unitPrice", apiError.Details[0].Field, body)
+	}
+
+	_, apiError = decode(`{"unitPrice": "19.90"}`)
+	require.NotNil(t, apiError)
+	assert.Empty(t, apiError.Details)
 }

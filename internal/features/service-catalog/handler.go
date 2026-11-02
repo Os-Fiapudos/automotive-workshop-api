@@ -12,6 +12,7 @@ import (
 
 	"automotive-workshop-api/internal/shared/apierror"
 	"automotive-workshop-api/internal/shared/httpx"
+	"automotive-workshop-api/internal/shared/money"
 )
 
 type Handler struct {
@@ -21,30 +22,30 @@ type Handler struct {
 func NewHandler(catalog *Catalog) *Handler { return &Handler{catalog: catalog} }
 
 type createRequest struct {
-	Code          *int64   `json:"code"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Price         *float64 `json:"price"`
-	EstimatedTime *int     `json:"estimated_time"`
+	Code          *int64       `json:"code"`
+	Name          string       `json:"name"`
+	Description   string       `json:"description"`
+	Price         *money.Cents `json:"price"`
+	EstimatedTime *int         `json:"estimated_time"`
 }
 
 type updateRequest struct {
-	Name          *string  `json:"name"`
-	Description   *string  `json:"description"`
-	Price         *float64 `json:"price"`
-	EstimatedTime *int     `json:"estimated_time"`
+	Name          *string      `json:"name"`
+	Description   *string      `json:"description"`
+	Price         *money.Cents `json:"price"`
+	EstimatedTime *int         `json:"estimated_time"`
 }
 
 type serviceResponse struct {
-	ID            string    `json:"id"`
-	Code          int64     `json:"code"`
-	Name          string    `json:"name"`
-	Description   string    `json:"description"`
-	Price         float64   `json:"price"`
-	EstimatedTime *int      `json:"estimated_time"`
-	Active        bool      `json:"active"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string      `json:"id"`
+	Code          int64       `json:"code"`
+	Name          string      `json:"name"`
+	Description   string      `json:"description"`
+	Price         money.Cents `json:"price"`
+	EstimatedTime *int        `json:"estimated_time"`
+	Active        bool        `json:"active"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 type listResponse struct {
@@ -67,8 +68,7 @@ func toResponse(s *Service) serviceResponse {
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apierror.Write(w, apierror.BadRequest("request body is not valid JSON"))
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	if req.Price == nil {
@@ -132,8 +132,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		apierror.Write(w, apierror.BadRequest("request body is not valid JSON"))
+	if !decodeBody(w, r, &req) {
 		return
 	}
 	updated, err := h.catalog.Update(r.Context(), id, Changes{
@@ -160,6 +159,24 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// decodeBody decodes the JSON request body into dst. A price the money type
+// rejects (more than two decimal places, or beyond NUMERIC(12,2)) is a
+// validation error on that field; anything else undecodable stays a 400
+// BAD_REQUEST, as before (specs/monetary-value-precision/).
+func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {
+	err := json.NewDecoder(r.Body).Decode(dst)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, money.ErrInvalidAmount):
+		apierror.Write(w, apierror.Validation("invalid service data",
+			apierror.Detail{Field: "price", Message: "price " + err.Error()}))
+	default:
+		apierror.Write(w, apierror.BadRequest("request body is not valid JSON"))
+	}
+	return false
 }
 
 // serviceID validates the path id before it reaches the database, so a malformed

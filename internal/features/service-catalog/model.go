@@ -1,6 +1,10 @@
 package servicecatalog
 
-import "time"
+import (
+	"time"
+
+	"automotive-workshop-api/internal/shared/money"
+)
 
 // Service is a service offered by the workshop (docs/entities.md "Service").
 type Service struct {
@@ -8,7 +12,7 @@ type Service struct {
 	Code          int64
 	Name          string
 	Description   string
-	Price         float64
+	Price         money.Cents
 	EstimatedTime *int // optional, in minutes (BR4)
 	Active        bool
 	CreatedAt     time.Time
