@@ -137,6 +137,9 @@ start a later numbered section before the previous one's suite is green (`design
       except a wall-clock duration. The quote total is 309.70 on both.
 - [x] `govulncheck`: 0 on both. `gosec`: 6 → 0 is an analyzer-scope artifact, not a fix
       (decision log D17).
-- [ ] Push, change the base of PR #40 to `develop`, CI green on the PR (decision log A/B).
-- [ ] Review, then merge with a merge commit (decision log C). Remove
-      `fase-2/clean-architecture` (decision log D).
+- [x] Push, change the base of PR #40 to `develop`, CI green on the PR (decision log A/B).
+      CI run 40717713446 green on `f157e51`.
+- [x] Review, then merge with a merge commit (decision log C). Merged into `develop` as
+      `b99b2a9` and into `main` with PR #44 (`f005f79`, 2026-11-02).
+- [ ] Remove `fase-2/clean-architecture` (decision log D). Still on the remote as of
+      2026-11-02; it is fully contained in `develop`/`main`, so deleting it loses nothing.

@@ -15,8 +15,9 @@ Revised 2026-10-21 with `requirements.md` §0 (FP-36).
 
 - [x] FP-32 image (`specs/containerization/`) and FP-33 migrations + `/bootstrap-admin`
       (`specs/database-migrations/`) on `develop`.
-- [ ] FP-35 `/infra` and FP-34 `/k8s` on `develop`, matching `design.md` §9 (owner: the
-      teammate; the `check` stage reports what is missing).
+- [x] FP-35 `/infra` and FP-34 `/k8s` on `develop`, matching `design.md` §9 (owner: the
+      teammate; the `check` stage reports what is missing). Merged via PR #43; `check`
+      passed on GitHub in run 41368399908.
 
 ## 3. Workflow (`design.md` §1–§3)
 
@@ -66,15 +67,23 @@ Revised 2026-10-21 with `requirements.md` §0 (FP-36).
       failure on a fresh ephemeral environment (`Failed`, rollout blocked, no `Deployment`,
       evidence, destroy with no container left); evidence scanned for every generated value —
       none found.
-- [ ] Pull request run: `publish`/`deploy` skipped. *(after the PR is opened)*
+- [x] Pull request run: `publish`/`deploy` skipped. PR #44 (`develop` → `main`), run
+      41360629362 (2026-11-01): the five checks green, `publish` and `deploy` skipped.
 
 ## 6. Evidence on GitHub (after FP-34/FP-35 land — AC10)
 
 - [ ] Manual run, success: URL, SHA, image reference, migration `Job` `Complete`, rollout,
-      authenticated smoke, duration.
+      authenticated smoke, duration. *(Not triggered yet; the push run below covers the same
+      stages.)*
 - [ ] Manual run with `simulate_migration_failure`: URL, migration `Job` `Failed`, no
-      `Deployment`, environment destroyed.
-- [ ] Push to `main` (when `develop` is merged): automatic deploy run.
+      `Deployment`, environment destroyed. *(Not triggered yet; demonstrated locally on
+      2026-10-27, see §5.)*
+- [x] Push to `main` (when `develop` is merged): automatic deploy run.
+      https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41368399908 —
+      2026-11-02, SHA `f005f79` (PR #44 merge), every job green: `publish` pushed the image to
+      GHCR; `deploy` ran check → Terraform → config → migration `Job` → bootstrap → rollout →
+      authenticated smoke → evidence → destroy. Whole run ~4 min 15 s, `deploy` ~2 min 14 s;
+      artifact `deploy-evidence-ci-41368399908-1`.
 
 ## 7. Documentation
 
