@@ -43,15 +43,17 @@ implementation being far enough along to describe or demo truthfully.
 
 ## 5. Video (`design.md` §4)
 
-- [ ] Record following the four-beat outline, after every other Fase 2 spec has been
+- [x] Record following the four-beat outline, after every other Fase 2 spec has been
       deployed at least once end to end.
-- [ ] Publish to YouTube or Vimeo (public or unlisted), confirm it is ≤15 minutes.
-- [ ] Add the link to the README's "Vídeo demonstrativo" subsection.
+- [x] Publish to YouTube or Vimeo (public or unlisted), confirm it is ≤15 minutes.
+      2026-11-03: https://youtu.be/Cw9C57M0s0I, unlisted, 900 s (exactly 15:00).
+- [x] Add the link to the README's "Vídeo demonstrativo" subsection.
 
 ## 6. PDF (`design.md` §5)
 
-- [ ] Assemble: repository link (access already granted, task 1), finalized architecture
-      diagram, video link.
+- [x] Assemble: repository link (access already granted, task 1), finalized architecture
+      diagram, video link. 2026-11-03: `entrega-fase-2.pdf` at the repository root (not
+      versioned), with the team members and RMs; access for task 1 still to be confirmed.
 - [ ] Upload to the student portal before the deadline.
 
 ## 7. Verification

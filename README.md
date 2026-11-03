@@ -9,8 +9,8 @@
 
 - **Jean Ferreira dos Santos Cruz Junior** — RM376169
 - **João Victor dos Santos Cerqueira** — RM376742
-- **Giovane Kenuy Soares Colognesi Rubira Cardona** — RM376443
-- **Augusto José Rizzi** — RM376822
+- **Giovane Kenuy Soares Colognesi Rubira Cardona** — RM377047
+- **Augusto José Rizzi** — RM376119
 - **Lucas Guimarães Fabris** — RM376444
 
 ---
@@ -112,7 +112,7 @@ Com o aumento da demanda e a expansão para novas unidades, a Fase 2 evolui a ap
 | Terraform: cluster Kubernetes e banco de dados, documentados | ✅ validado em cluster real | [`infra/`](infra/README.md) |
 | CI/CD: build, testes, imagem, deploy do banco, deploy no cluster, manifestos | ✅ executado no GitHub Actions: [execução na `main`](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41368399908) com `publish` e `deploy` aprovados | [Pipeline de CI/CD](#pipeline-de-cicd) |
 | README com arquitetura, instruções e collection | ✅ | esta seção |
-| Vídeo demonstrativo (até 15 min) | ⚠️ **pendente** | [Vídeo](#vídeo-demonstrativo) |
+| Vídeo demonstrativo (até 15 min) | ✅ [no YouTube](https://youtu.be/Cw9C57M0s0I) (não listado, 15 min) | [Vídeo](#vídeo-demonstrativo) |
 
 ### Arquitetura proposta
 
@@ -278,14 +278,16 @@ A falha controlada (`simulate_migration_failure`) foi demonstrada localmente (ta
 
 ### Vídeo demonstrativo
 
-> ⚠️ **Pendente.** O link (YouTube ou Vimeo, público ou não listado, até 15 minutos) entra aqui depois da gravação. O vídeo deve mostrar o deploy da aplicação, a execução do CI/CD, o consumo das APIs e a escalabilidade automática; o roteiro sugerido está em [specs/phase-2-deliverables/design.md](specs/phase-2-deliverables/design.md) §4.
+**[Automotive Workshop: Solução para o Tech Challenge da Postech FIAP | Fase 2](https://youtu.be/Cw9C57M0s0I)** (YouTube, não listado, 15 minutos).
+
+O vídeo mostra o deploy da aplicação, a execução do CI/CD, o consumo das APIs e a escalabilidade automática, seguindo o roteiro de [specs/phase-2-deliverables/design.md](specs/phase-2-deliverables/design.md) §4.
 
 ### Pendências
 
 > ⚠️ Itens que ainda não puderam ser concluídos:
 >
-> 1. **Vídeo demonstrativo**: gravar e publicar, e adicionar o link acima.
-> 2. **Entrega no portal**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e montar o PDF com o link do repositório, o desenho da arquitetura e o link do vídeo.
+> 1. **Acesso do `soat-architecture` ao repositório**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e confirmar que o convite foi aceito ou está pendente.
+> 2. **Entrega no portal**: enviar o PDF de entrega (link do repositório, desenho da arquitetura, link do vídeo e integrantes) no portal do aluno dentro do prazo.
 > 3. **Falha controlada no GitHub** (opcional, reforça a evidência): `gh workflow run ci.yml --ref main -f simulate_migration_failure=true`, e registrar o link da execução na tabela de evidências. O caminho feliz já rodou no push da `main`.
 
 ---
