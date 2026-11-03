@@ -165,8 +165,9 @@ flowchart LR
 
     db[("PostgreSQL 16")]
 
-    client --> mw --> features
-    client --> tracking
+    client -- "Bearer JWT" --> mw
+    mw --> auth & customer & vehicle & catalog & product & order
+    client -- "X-Tracking-Token" --> tracking
     n8n -- "X-External-Status-Secret" --> order
     ext -- "X-External-Notification-Secret" --> order
     order -. "orçamento enviado" .-> resend
