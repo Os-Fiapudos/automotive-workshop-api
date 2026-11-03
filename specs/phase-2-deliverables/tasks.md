@@ -27,29 +27,33 @@ implementation being far enough along to describe or demo truthfully.
 
 ## 4. Architecture diagrams (`design.md` §3)
 
-- [ ] Diagram 1 (application components) — drafted once
-      `specs/service-order-architecture-refactor/` (if implemented) has landed. **Partial**:
-      the README has a diagram of the current flat vertical slices, flagged as to be redrawn
-      when the refactor (FP-29) merges.
+- [x] Diagram 1 (application components) — drafted once
+      `specs/service-order-architecture-refactor/` (if implemented) has landed. 2026-11-02:
+      redrawn after the refactor reached `main` (PR #40 via #44): flat slices plus
+      `service-order`'s `domain/` ← `usecase/` ← `adapter/` layers. The README's
+      "Arquitetura e Padrões" section now records why the other modules stay flat
+      (vertical slices as the future microservice boundaries).
 - [x] Diagram 2 (infrastructure provisioned) — drafted once
       `specs/infrastructure-provisioning/` and `specs/kubernetes-deployment/` have landed.
 - [x] Diagram 3 (deploy flow) — drafted once `specs/ci-cd-pipeline/` has a working run to
-      reference (local `scripts/deploy.sh` run of 2026-10-27; the GitHub run is still
-      pending, see `specs/ci-cd-pipeline/tasks.md`).
+      reference (local `scripts/deploy.sh` run of 2026-10-27; GitHub run on `main`
+      2026-11-02, run 41368399908).
 - [x] Embed all three in the README's "Arquitetura proposta" subsection (Mermaid, checked
       with `mermaid-cli` 11.4.2).
 
 ## 5. Video (`design.md` §4)
 
-- [ ] Record following the four-beat outline, after every other Fase 2 spec has been
+- [x] Record following the four-beat outline, after every other Fase 2 spec has been
       deployed at least once end to end.
-- [ ] Publish to YouTube or Vimeo (public or unlisted), confirm it is ≤15 minutes.
-- [ ] Add the link to the README's "Vídeo demonstrativo" subsection.
+- [x] Publish to YouTube or Vimeo (public or unlisted), confirm it is ≤15 minutes.
+      2026-11-03: https://youtu.be/Cw9C57M0s0I, unlisted, 900 s (exactly 15:00).
+- [x] Add the link to the README's "Vídeo demonstrativo" subsection.
 
 ## 6. PDF (`design.md` §5)
 
-- [ ] Assemble: repository link (access already granted, task 1), finalized architecture
-      diagram, video link.
+- [x] Assemble: repository link (access already granted, task 1), finalized architecture
+      diagram, video link. 2026-11-03: `entrega-fase-2.pdf` at the repository root (not
+      versioned), with the team members and RMs; access for task 1 still to be confirmed.
 - [ ] Upload to the student portal before the deadline.
 
 ## 7. Verification

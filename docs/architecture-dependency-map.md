@@ -30,7 +30,7 @@ calling them. Every use case depended on the 20-method `serviceOrderLookups` int
 | --- | --- |
 | `features/service-order` | `net/http`, `encoding/json`, `pgx/v5`, `pgx/v5/pgxpool`, `shared/apierror` |
 
-### After (this branch)
+### After (merged on `main`, PR #40 via #44)
 
 ```mermaid
 flowchart LR

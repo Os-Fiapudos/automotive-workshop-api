@@ -39,18 +39,18 @@ framework) exposes `/health` plus the implemented vertical slices:
   protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
   prices, with an `active` flag and logical deletion.
 
-`internal/features/product/` and `internal/features/service-order/` are also present in the
-code but are not described in this document or in `specs/architecture.md` yet — treat those
-two sections as incomplete rather than authoritative for them.
+`internal/features/vehicle/`, `internal/features/product/`,
+`internal/features/service-order/` (Clean Architecture layers, section 4) and
+`internal/features/service-order-tracking/` are also implemented, each with its own folder
+in `specs/`. This section lists only the first three slices in detail; `specs/architecture.md`
+covers the others through its addenda and decision 22.
 
 These slices are backed by a real Postgres connection (`pgx/v5` via
 `internal/shared/database`), with unit tests alongside the code and integration tests in
-`internal/handlers_test/`. The database schema and sample data modeled in `docs/` are now
-consumed by the implemented features (`users`, `customers`, and `services` tables). Every
-other business entity (Vehicle, ServiceOrderHistory, Quote, etc.) is still schema/docs only,
-with no corresponding Go feature yet — `internal/features/user/` (singular, unrelated to
-`auth`'s `users` table — an unfortunately similar name, see the note in section 3) remains
-an empty placeholder.
+`internal/handlers_test/`. Every business entity in `docs/entities.md` is now backed by an
+implemented feature — `internal/features/user/` (singular, unrelated to `auth`'s `users`
+table — an unfortunately similar name, see the note in section 3) remains an empty
+placeholder.
 
 **Changed on 2026-08-26**: the customer endpoints, and Service Order Opening's
 `POST /api/v1/service-orders`, are now wrapped in `middleware.RequireAuth` like every other
@@ -636,10 +636,10 @@ flow, the `specs/<feature>/requirements.md|design.md|tasks.md` organization) is 
 [specs/README.md](specs/README.md). The current system architecture, documented
 exclusively from the existing code, is in
 [specs/architecture.md](specs/architecture.md) — keep it up to date when a new feature
-changes the real architecture. Three feature folders exist today: `specs/auth/`,
-`specs/customer-management/`, and `specs/service-catalog/`; a request to implement a feature
-without a corresponding specification should be treated as ambiguous: ask for the
-requirements before writing code.
+changes the real architecture. Every implemented feature and every Fase 2 infrastructure
+item has its own folder under `specs/` (list it to see the current set); a request to
+implement a feature without a corresponding specification should be treated as ambiguous:
+ask for the requirements before writing code.
 
 **Open decisions inherited from merging the feature branches** (none should be resolved
 silently — see section 8 for detail):
