@@ -105,7 +105,7 @@ Com o aumento da demanda e a expansão para novas unidades, a Fase 2 evolui a ap
 | --- | --- | --- |
 | APIs: abertura de OS, consulta de status, aprovação externa, listagem ordenada, atualização de status por ferramenta | ✅ | [Endpoints](#6-ordens-de-serviço--ciclo-de-atendimento-service-orders), [`tools/n8n/`](tools/n8n/) |
 | Testes automatizados nos fluxos críticos | ✅ cobertura ≥ 80 % exigida na CI | [Testes](#testes-automatizados-cobertura-e-segurança) |
-| Refatoração para Clean Architecture / Arquitetura Hexagonal | ⚠️ **pendente**: em andamento na branch `chore/F2-US01-clean-architecture-service-order` ([spec](specs/service-order-architecture-refactor/)); o código atual ainda é *vertical slice* com camadas planas | [Arquitetura](#arquitetura-e-padrões) |
+| Refatoração para Clean Architecture / Arquitetura Hexagonal | ✅ `service-order` em camadas `domain/` ← `usecase/` ← `adapter/` ([spec](specs/service-order-architecture-refactor/), [mapa de dependências](docs/architecture-dependency-map.md)); regra de dependência verificada por teste | [Arquitetura](#arquitetura-e-padrões) |
 | Dockerfile e docker-compose revisados | ✅ | [Docker](#como-rodar-o-projeto-com-docker-passo-a-passo) |
 | Manifestos Kubernetes: Deployment, Service, ConfigMap, Secret, HPA | ✅ validado em cluster real (veja [Evidências](#evidências-da-execução)) | [`k8s/`](k8s/README.md) |
 | Terraform: cluster Kubernetes e banco de dados, documentados | ✅ validado em cluster real | [`infra/`](infra/README.md) |
@@ -117,9 +117,7 @@ Com o aumento da demanda e a expansão para novas unidades, a Fase 2 evolui a ap
 
 #### Componentes da aplicação
 
-Monólito modular em Go: cada funcionalidade é uma fatia vertical com handler, service e repository próprios. As fatias não se importam entre si; quando uma precisa da outra, o `cmd/api/main.go` injeta um adaptador.
-
-> ⚠️ Este diagrama reflete o código atual. Quando a refatoração para Clean Architecture for mergeada, o `service-order` passa a ter camadas `domain/`, `usecase/` e `adapter/`, e o diagrama precisa ser atualizado junto.
+Monólito modular em Go: cada funcionalidade é uma fatia vertical. As fatias não se importam entre si; quando uma precisa da outra, o `cmd/api` injeta um adaptador. O `service-order` organiza a sua fatia em Clean Architecture (`domain/` ← `usecase/` ← `adapter/{postgres,httpapi,notifier}`); as demais mantêm handler, service e repository planos.
 
 ```mermaid
 flowchart LR
@@ -137,7 +135,7 @@ flowchart LR
             vehicle["vehicle"]
             catalog["service-catalog"]
             product["product<br/>(estoque)"]
-            order["service-order<br/>(abertura, orçamento, execução,<br/>listagem, status, métricas)"]
+            order["service-order<br/>(domain · usecase · adapters)<br/>abertura, orçamento, execução,<br/>listagem, status, métricas"]
             tracking["service-order-tracking<br/>(token do cliente)"]
         end
         shared["internal/shared<br/>database · token · apierror/httpx<br/>document · money · config"]
@@ -262,10 +260,9 @@ Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2
 
 > ⚠️ Itens que ainda não puderam ser concluídos:
 >
-> 1. **Clean Architecture / Arquitetura Hexagonal** (requisito obrigatório): em desenvolvimento na branch `chore/F2-US01-clean-architecture-service-order`. Ao mergear, atualizar o diagrama de [Componentes da aplicação](#componentes-da-aplicação) e a seção [Arquitetura e Padrões](#arquitetura-e-padrões).
-> 2. **Execução do pipeline no GitHub**: `publish` e `deploy` só rodam em push na `main` ou por execução manual, que o GitHub só oferece depois que o workflow chega à branch padrão. Depois do merge, rodar `gh workflow run ci.yml --ref main` (caminho feliz) e `gh workflow run ci.yml --ref main -f simulate_migration_failure=true` (falha controlada) e registrar os links das execuções aqui.
-> 3. **Vídeo demonstrativo**: gravar e publicar, e adicionar o link acima.
-> 4. **Entrega no portal**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e montar o PDF com o link do repositório, o desenho da arquitetura e o link do vídeo.
+> 1. **Execução do pipeline no GitHub**: `publish` e `deploy` só rodam em push na `main` ou por execução manual, que o GitHub só oferece depois que o workflow chega à branch padrão. Depois do merge, rodar `gh workflow run ci.yml --ref main` (caminho feliz) e `gh workflow run ci.yml --ref main -f simulate_migration_failure=true` (falha controlada) e registrar os links das execuções aqui.
+> 2. **Vídeo demonstrativo**: gravar e publicar, e adicionar o link acima.
+> 3. **Entrega no portal**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e montar o PDF com o link do repositório, o desenho da arquitetura e o link do vídeo.
 
 ---
 
@@ -274,6 +271,7 @@ Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2
 O projeto foi construído seguindo os princípios de **Vertical Slice Architecture** (monólito modular orientado a funcionalidades):
 
 - **Fatias Verticais Independentes (`internal/features/`)**: Cada funcionalidade de negócio (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order`, `service-order-tracking`) encapsula suas próprias camadas de **Handler (HTTP)**, **Service (Regras de Domínio/Aplicação)**, **Repository (Acesso a Dados SQL)** e **Models/DTOs**.
+- **Clean Architecture dentro da fatia `service-order`**: a fatia continua em uma única pasta, mas é organizada em camadas cujas dependências só apontam para dentro: `domain/` (agregado, transições e erros; só stdlib, `uuid` e `money`) ← `usecase/` (casos de uso e as portas que eles declaram em `ports.go`) ← `adapter/postgres`, `adapter/httpapi` e `adapter/notifier` (pgx, HTTP e e-mail). A composição fica em `cmd/api` (`wiring.go`), e o `architecture_test.go` falha o build se `domain` ou `usecase` importarem infraestrutura. Spec: [specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/); mapa antes/depois em [docs/architecture-dependency-map.md](docs/architecture-dependency-map.md). As demais fatias seguem no layout plano.
 - **Desacoplamento entre Features**: Uma feature nunca importa diretamente outra feature. Quando é necessária comunicação ou validação cruzada (ex: criação de veículo validando se o cliente existe e está ativo), é utilizada a técnica de **Dependency Inversion** com *Adapters* definidos no ponto de composição (`cmd/api/main.go`).
 - **Núcleo Compartilhado (`internal/shared/`)**: Reservado estritamente para utilitários agnósticos de domínio: pool de conexões com o PostgreSQL, middlewares de autenticação, validação algorítmica de documentos, emissão/verificação de tokens e tratamento padronizado de erros.
 - **Composition Root Limpo (`cmd/api/main.go`)**: Responsável unicamente por ler configurações, abrir conexões, instanciar as dependências, montar os adaptadores e registrar as rotas no multiplexador HTTP nativo.
@@ -671,7 +669,7 @@ A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 
 ## Coleções para Testes (Bruno, Postman e Insomnia)
 
-O projeto disponibiliza coleções completas e pré-configuradas para todas as 48 rotas, com encadeamento automático de variáveis:
+O projeto disponibiliza coleções completas e pré-configuradas para todas as 49 rotas, com encadeamento automático de variáveis:
 
 1. **Bruno (Recomendado)**: Localizado na pasta [`bruno/`](bruno). Abra o diretório diretamente no aplicativo Bruno. Selecione o ambiente `Local`.
 2. **Postman**: Importe o arquivo [`docs/postman-collection.json`](docs/postman-collection.json).
@@ -809,7 +807,10 @@ automotive-workshop-api/
 │   │   ├── vehicle/                # Gestão de veículos
 │   │   ├── service-catalog/        # Catálogo de serviços
 │   │   ├── product/                # Catálogo de produtos e movimentação de estoque
-│   │   ├── service-order/          # Ciclo de vida da OS, orçamentos, execução e métricas
+│   │   ├── service-order/          # Ciclo de vida da OS, orçamentos, execução e métricas (Clean Architecture)
+│   │   │   ├── domain/             # Agregado, transições e erros (sem infraestrutura)
+│   │   │   ├── usecase/            # Casos de uso e portas (ports.go)
+│   │   │   └── adapter/            # postgres/, httpapi/ e notifier/ (e-mail via Resend)
 │   │   └── service-order-tracking/ # Acompanhamento público do cliente
 │   ├── shared/                     # Código utilitário transversal e infraestrutura
 │   │   ├── apierror/               # Tratamento de erro padronizado (RFC 7807)
@@ -822,7 +823,7 @@ automotive-workshop-api/
 │   └── handlers_test/              # Testes de integração HTTP ponta a ponta
 ├── bruno/                          # Coleção de requisições para o cliente Bruno
 ├── docs/                           # Documentação arquitetural, OpenAPI, Postman e Schemas SQL
-│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (48 rotas)
+│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (49 rotas)
 │   ├── schema.sql                  # Referência do schema completo (gerado pelas migrations; conferido na CI)
 │   ├── seed.sql                    # Dados de exemplo para desenvolvimento local e testes
 │   ├── postman-collection.json     # Coleção Postman v2.1
