@@ -20,7 +20,7 @@
 1. [Visão Geral do Projeto](#visão-geral-do-projeto)
 2. [Ciclo de Vida da Ordem de Serviço](#ciclo-de-vida-da-ordem-de-serviço)
 3. [Fase 2 — Escalabilidade, Infraestrutura e Automação](#fase-2--escalabilidade-infraestrutura-e-automação)
-   - [Situação dos requisitos](#situação-dos-requisitos) · [Arquitetura proposta](#arquitetura-proposta) · [Evidências](#evidências-da-execução) · [Vídeo](#vídeo-demonstrativo) · [Pendências](#pendências)
+   - [Situação dos requisitos](#situação-dos-requisitos) · [APIs exigidas](#apis-exigidas-nesta-fase) · [Arquitetura proposta](#arquitetura-proposta) · [Evidências](#evidências-da-execução) · [Vídeo](#vídeo-demonstrativo) · [Pendências](#pendências)
 4. [Arquitetura e Padrões](#arquitetura-e-padrões)
 5. [Tecnologias, Bibliotecas e Dependências](#tecnologias-bibliotecas-e-dependências)
 6. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
@@ -103,15 +103,37 @@ Com o aumento da demanda e a expansão para novas unidades, a Fase 2 evolui a ap
 
 | Requisito do Tech Challenge | Situação | Onde |
 | --- | --- | --- |
-| APIs: abertura de OS, consulta de status, aprovação externa, listagem ordenada, atualização de status por ferramenta | ✅ | [Endpoints](#6-ordens-de-serviço--ciclo-de-atendimento-service-orders), [`tools/n8n/`](tools/n8n/) |
+| APIs: abertura de OS, consulta de status, aprovação externa, listagem ordenada, atualização de status por ferramenta | ✅ | [APIs da Fase 2](#apis-exigidas-nesta-fase), [`tools/n8n/`](tools/n8n/) |
 | Testes automatizados nos fluxos críticos | ✅ cobertura ≥ 80 % exigida na CI | [Testes](#testes-automatizados-cobertura-e-segurança) |
-| Refatoração para Clean Architecture / Arquitetura Hexagonal | ✅ `service-order` em camadas `domain/` ← `usecase/` ← `adapter/` ([spec](specs/service-order-architecture-refactor/), [mapa de dependências](docs/architecture-dependency-map.md)); regra de dependência verificada por teste | [Arquitetura](#arquitetura-e-padrões) |
+| Refatoração com Clean Code | ✅ no `service-order`: handler único de 580 linhas dividido em um handler por caso de uso; interface de 20 métodos dividida em portas pequenas; valores monetários num tipo exato (`money.Cents`) | [Arquitetura](#arquitetura-e-padrões) |
+| Refatoração para Clean Architecture / Arquitetura Hexagonal | ✅ Clean Architecture aplicada ao núcleo do domínio, o `service-order` (abertura, orçamento, execução, listagem e status da OS): camadas `domain/` ← `usecase/` ← `adapter/`, com a regra de dependência verificada por teste ([spec](specs/service-order-architecture-refactor/), [mapa de dependências](docs/architecture-dependency-map.md)). As fatias de cadastro (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order-tracking`) continuam planas, por decisão de escopo registrada como dívida técnica | [Arquitetura](#arquitetura-e-padrões) |
 | Dockerfile e docker-compose revisados | ✅ | [Docker](#como-rodar-o-projeto-com-docker-passo-a-passo) |
 | Manifestos Kubernetes: Deployment, Service, ConfigMap, Secret, HPA | ✅ validado em cluster real (veja [Evidências](#evidências-da-execução)) | [`k8s/`](k8s/README.md) |
 | Terraform: cluster Kubernetes e banco de dados, documentados | ✅ validado em cluster real | [`infra/`](infra/README.md) |
-| CI/CD: build, testes, imagem, deploy do banco, deploy no cluster, manifestos | ✅ implementado; ⚠️ **a primeira execução de `publish`/`deploy` no GitHub depende do merge na `main`** | [Pipeline de CI/CD](#pipeline-de-cicd) |
+| CI/CD: build, testes, imagem, deploy do banco, deploy no cluster, manifestos | ✅ executado no GitHub Actions (push na `main` e execução manual, todos os jobs verdes) | [Pipeline de CI/CD](#pipeline-de-cicd), [Evidências](#evidências-da-execução) |
 | README com arquitetura, instruções e collection | ✅ | esta seção |
 | Vídeo demonstrativo (até 15 min) | ⚠️ **pendente** | [Vídeo](#vídeo-demonstrativo) |
+
+### APIs exigidas nesta fase
+
+Todas as rotas abaixo exigem JWT, exceto quando a coluna "Autenticação" diz outra coisa. A tabela completa está em [Documentação dos Endpoints](#documentação-dos-endpoints-da-api).
+
+| API pedida | Endpoint | Autenticação | Comportamento |
+| --- | --- | --- | --- |
+| Abertura de OS | `POST /api/v1/service-orders` | JWT | Recebe o cliente (`customerId` ou `customerDocument` com CPF/CNPJ), o veículo (`vehicleId` ou `licensePlate`), os serviços (`requestedServiceIds`), as peças (`requestedProducts` com `productId` e `quantity`) e `notes`. Responde `201` com a identificação única da OS (`id` UUID e `code` sequencial), o status `RECEIVED` e o `trackingToken` do cliente. |
+| Consulta de status | `GET /api/v1/service-orders/{id}` (aceita UUID ou `code`) | JWT | Retorna a OS com o campo `status` e o histórico de transições. |
+|  | `GET /api/v1/acompanhamento/{codigo}` | `X-Tracking-Token` | Versão do cliente: status atual e linha do tempo, sem dados pessoais. |
+| Aprovação de orçamento (notificação externa) | `POST /api/v1/service-orders/{id}/quote/decision` | `X-External-Notification-Secret` | Corpo `{"decision": "approved" \| "rejected"}`: aprovação leva a OS a `IN_PROGRESS` e recusa a `CANCELED`. `401` com segredo errado, `409` se o orçamento já foi decidido. |
+| Listagem de OS | `GET /api/v1/service-orders` | JWT | Sem o filtro `status`, ordena por prioridade, `IN_PROGRESS` > `AWAITING_APPROVAL` > `IN_DIAGNOSIS` > `RECEIVED`, e dentro de cada status mostra as mais antigas primeiro. As OS `COMPLETED` e `DELIVERED` (e também as `CANCELED`) ficam fora da lista, mas continuam no banco (exclusão lógica). Com `?status=`, a listagem mostra só aquele status, inclusive os finalizados, em ordem de abertura. |
+| Atualização de status via ferramenta | `POST /api/v1/service-orders/{id}/status` | `X-External-Status-Secret` | A ferramenta escolhida foi um formulário do **n8n** ([`tools/n8n/`](tools/n8n/README.md), `http://localhost:5678/form/service-order-status`). O operador escolhe a OS e a próxima etapa (`IN_DIAGNOSIS`, `COMPLETED` ou `DELIVERED`), e o workflow chama a API. O e-mail (Resend) é usado em outro ponto: avisar o cliente de que o orçamento está disponível. |
+
+Nomes dos status do PDF e os valores usados pela API:
+
+| PDF | Recebida | Diagnóstico | Aguardando Aprovação | Execução | Finalizada | Entregue |
+| --- | --- | --- | --- | --- | --- | --- |
+| API | `RECEIVED` | `IN_DIAGNOSIS` | `AWAITING_APPROVAL` | `IN_PROGRESS` | `COMPLETED` | `DELIVERED` |
+
+O status `CANCELED` existe além dos seis do PDF e corresponde a um orçamento recusado.
 
 ### Arquitetura proposta
 
@@ -129,13 +151,13 @@ flowchart LR
     subgraph api["API Go — cmd/api/main.go (composition root, net/http)"]
         direction TB
         mw["middleware.RequireAuth<br/>(JWT HS256)"]
-        subgraph features["internal/features — fatias verticais (handler → service → repository)"]
+        subgraph features["internal/features — fatias verticais"]
             auth["auth"]
             customer["customer"]
             vehicle["vehicle"]
             catalog["service-catalog"]
             product["product<br/>(estoque)"]
-            order["service-order<br/>(domain · usecase · adapters)<br/>abertura, orçamento, execução,<br/>listagem, status, métricas"]
+            order["service-order — Clean Architecture<br/>(domain ← usecase ← adapters, detalhe abaixo)<br/>abertura, orçamento, execução,<br/>listagem, status, métricas"]
             tracking["service-order-tracking<br/>(token do cliente)"]
         end
         shared["internal/shared<br/>database · token · apierror/httpx<br/>document · money · config"]
@@ -150,6 +172,43 @@ flowchart LR
     order -. "orçamento enviado" .-> resend
     vehicle -. "adaptador no main.go" .-> customer
     features --> shared --> db
+```
+
+As demais fatias (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order-tracking`) seguem planas: handler → service → repository no mesmo pacote.
+
+**Clean Architecture no `service-order`.** As dependências só apontam para dentro. O `usecase/` declara as portas que usa (`ports.go`), os adaptadores implementam essas portas, e o `cmd/api/wiring.go` faz a ligação. O [architecture_test.go](internal/features/service-order/architecture_test.go) quebra o build se `domain/` ou `usecase/` importarem `net/http`, `encoding/json`, `pgx` ou algum adaptador.
+
+```mermaid
+flowchart LR
+    subgraph adapters["adapter/ — infraestrutura"]
+        direction TB
+        httpapi["httpapi<br/>handlers, DTOs, router<br/>(net/http, JSON, apierror)"]
+        pg["postgres<br/>Repository (pgx)"]
+        notif["notifier<br/>Resend · no-op"]
+    end
+
+    subgraph uc["usecase/ — aplicação"]
+        direction TB
+        cases["Opening · Lifecycle · Quotes<br/>Executions · Queries<br/>StockUsage · Metrics"]
+        ports["ports.go (portas)<br/>OrderCreator · OrderFinder · QuoteStore<br/>ExecutionStore · StockLedger<br/>CustomerLookup · VehicleLookup<br/>QuoteNotifier …"]
+        cases --> ports
+    end
+
+    subgraph dom["domain/ — regras de negócio"]
+        domain["ServiceOrder (agregado)<br/>transições de status · Quote<br/>Execution · History · erros<br/>(stdlib, uuid, shared/money)"]
+    end
+
+    wiring["cmd/api/wiring.go<br/>(composition root)"]
+
+    httpapi -- "chama" --> cases
+    pg -. "implementa" .-> ports
+    notif -. "implementa" .-> ports
+    cases --> domain
+    ports --> domain
+    wiring -- "instancia e injeta" --> httpapi
+    wiring --> pg
+    wiring --> notif
+    wiring --> cases
 ```
 
 #### Infraestrutura provisionada
@@ -250,7 +309,12 @@ Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2
 | Destroy de ambiente descartável | `make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes` | 6 recursos destruídos; nenhum container `automotive-workshop` restante; state vazio |
 | Testes da aplicação | `go build ./... && go vet ./... && go test ./...` (Go 1.26.10) | todos os pacotes ok |
 
-> ⚠️ Ainda não há evidência **no GitHub Actions**: as execuções de `publish` e `deploy` (caminho feliz e falha controlada) só podem acontecer depois do merge na `main`. Veja [Pendências](#pendências).
+**No GitHub Actions** (workflow [`ci.yml`](.github/workflows/ci.yml)), os jobs `build`, `coverage`, `migrations`, `security`, `image`, `publish` e `deploy` passaram nas duas execuções abaixo. O `deploy` provisiona o cluster com Terraform, roda os Jobs de migração e de bootstrap, aplica os manifestos, faz o smoke autenticado e destrói o ambiente no fim. As evidências de cada execução ficam no artefato `deploy-evidence-<id>`.
+
+| Execução | Gatilho | Commit | Resultado |
+| --- | --- | --- | --- |
+| [41636134953](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41636134953) | push na `main` (PR #45) | `2503d44` | ✅ todos os jobs |
+| [41521034844](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41521034844) | execução manual (`workflow_dispatch`) | `f005f79` | ✅ todos os jobs |
 
 ### Vídeo demonstrativo
 
@@ -260,7 +324,7 @@ Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2
 
 > ⚠️ Itens que ainda não puderam ser concluídos:
 >
-> 1. **Execução do pipeline no GitHub**: `publish` e `deploy` só rodam em push na `main` ou por execução manual, que o GitHub só oferece depois que o workflow chega à branch padrão. Depois do merge, rodar `gh workflow run ci.yml --ref main` (caminho feliz) e `gh workflow run ci.yml --ref main -f simulate_migration_failure=true` (falha controlada) e registrar os links das execuções aqui.
+> 1. **Falha controlada no GitHub**: o caminho feliz já rodou (veja [Evidências](#evidências-da-execução)). Falta rodar `gh workflow run ci.yml --ref main -f simulate_migration_failure=true` e registrar o link da execução aqui. Ela deve terminar com falha, com o Job de migração `Failed` e sem rollout.
 > 2. **Vídeo demonstrativo**: gravar e publicar, e adicionar o link acima.
 > 3. **Entrega no portal**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e montar o PDF com o link do repositório, o desenho da arquitetura e o link do vídeo.
 
@@ -268,12 +332,23 @@ Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2
 
 ## Arquitetura e Padrões
 
-O projeto foi construído seguindo os princípios de **Vertical Slice Architecture** (monólito modular orientado a funcionalidades):
+A aplicação é um monólito modular organizado em **fatias verticais** (uma pasta por funcionalidade). Na Fase 2, o núcleo do domínio, a fatia `service-order`, foi refatorado para **Clean Architecture**:
 
-- **Fatias Verticais Independentes (`internal/features/`)**: Cada funcionalidade de negócio (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order`, `service-order-tracking`) encapsula suas próprias camadas de **Handler (HTTP)**, **Service (Regras de Domínio/Aplicação)**, **Repository (Acesso a Dados SQL)** e **Models/DTOs**.
-- **Clean Architecture dentro da fatia `service-order`**: a fatia continua em uma única pasta, mas é organizada em camadas cujas dependências só apontam para dentro: `domain/` (agregado, transições e erros; só stdlib, `uuid` e `money`) ← `usecase/` (casos de uso e as portas que eles declaram em `ports.go`) ← `adapter/postgres`, `adapter/httpapi` e `adapter/notifier` (pgx, HTTP e e-mail). A composição fica em `cmd/api` (`wiring.go`), e o `architecture_test.go` falha o build se `domain` ou `usecase` importarem infraestrutura. Spec: [specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/); mapa antes/depois em [docs/architecture-dependency-map.md](docs/architecture-dependency-map.md). As demais fatias seguem no layout plano.
+- **Clean Architecture na fatia `service-order`**: a fatia continua em uma única pasta, mas é organizada em camadas cujas dependências só apontam para dentro:
+  - `domain/`: o agregado, as transições de status e os erros. Usa só a stdlib, `uuid` e `money`.
+  - `usecase/`: os casos de uso e as portas que eles declaram em `ports.go`.
+  - `adapter/postgres`, `adapter/httpapi` e `adapter/notifier`: pgx, HTTP e e-mail.
+
+  A composição fica em `cmd/api` (`wiring.go`), e o `architecture_test.go` falha o build se `domain` ou `usecase` importarem infraestrutura. Spec: [specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/). O mapa antes/depois está em [docs/architecture-dependency-map.md](docs/architecture-dependency-map.md).
+- **Clean Code na refatoração**:
+  - O handler de 580 linhas, que registrava 17 rotas, virou um handler por caso de uso (`create_handler.go`, `quote_handler.go`, `status_update_handler.go`…).
+  - A interface única de 20 métodos (`serviceOrderLookups`) foi dividida em portas pequenas (`CustomerLookup`, `QuoteStore`, `StockLedger`…). Cada caso de uso depende só do que usa.
+  - Os DTOs HTTP saíram do domínio.
+  - Preços e totais usam um tipo exato (`money.Cents`) em vez de `float64`.
+  - Os nomes de domínio seguem o inglês em todo o código, banco e documentação.
+- **Fatias de cadastro no layout plano (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order-tracking`)**: cada uma reúne **Handler (HTTP)**, **Service (regras)**, **Repository (SQL)** e **Models/DTOs** no mesmo pacote. Elas não foram refatoradas nesta fase por decisão de escopo, e isso está registrado como dívida técnica no mapa de dependências.
 - **Desacoplamento entre Features**: Uma feature nunca importa diretamente outra feature. Quando é necessária comunicação ou validação cruzada (ex: criação de veículo validando se o cliente existe e está ativo), é utilizada a técnica de **Dependency Inversion** com *Adapters* definidos no ponto de composição (`cmd/api/main.go`).
-- **Núcleo Compartilhado (`internal/shared/`)**: Reservado estritamente para utilitários agnósticos de domínio: pool de conexões com o PostgreSQL, middlewares de autenticação, validação algorítmica de documentos, emissão/verificação de tokens e tratamento padronizado de erros.
+- **Núcleo Compartilhado (`internal/shared/`)**: Reservado estritamente para utilitários agnósticos de domínio: pool de conexões com o PostgreSQL, middlewares de autenticação, validação algorítmica de documentos, emissão/verificação de tokens, valores monetários exatos e os envelopes de erro JSON. Hoje existem dois envelopes: `httpx` no `auth` e `apierror` nas demais fatias. Unificar os dois é uma decisão em aberto.
 - **Composition Root Limpo (`cmd/api/main.go`)**: Responsável unicamente por ler configurações, abrir conexões, instanciar as dependências, montar os adaptadores e registrar as rotas no multiplexador HTTP nativo.
 
 ---
@@ -294,7 +369,15 @@ A aplicação foi projetada com foco em alta performance, baixo acoplamento e de
 | **`github.com/stretchr/testify`** | `v1.11.1` | Biblioteca de asserções fluídas (`assert`, `require`) para garantir legibilidade nos testes unitários e de integração. |
 | **`gosec`** | `v2.28.0` | Scanner SAST (Static Application Security Testing) para análise de segurança e boas práticas no código Go. |
 | **`govulncheck`** | `v1.7.0` | Ferramenta oficial do time do Go para detecção de vulnerabilidades conhecidas em dependências e stdlib. |
-| **Docker & Docker Compose** | — | Conteinerização completa da aplicação, banco de dados, cliente web do banco (Adminer) e documentação interativa (Swagger UI). |
+| **Docker & Docker Compose** | — | Conteinerização completa da aplicação, banco de dados, cliente web do banco (Adminer), documentação interativa (Swagger UI) e n8n. |
+| **golang-migrate** | `v4.20.1` | Migrations versionadas do schema, aplicadas no Compose, na CI e por um Job no Kubernetes (imagem `migrate/migrate`, fora do `go.mod`). |
+| **Kubernetes (kind)** | `v1.37.0` | Cluster local de 1 nó (`kindest/node`) que roda a API (Deployment, Service, ConfigMap, Secret, HPA) e o PostgreSQL (StatefulSet). |
+| **metrics-server** | Helm `3.13.1` | Métricas de CPU/memória dos pods, usadas pelo HPA. |
+| **Terraform** | `>= 1.16` (CI: `1.16.6`) | Provisionamento do cluster kind, do metrics-server, do namespace e do PostgreSQL ([`infra/`](infra/README.md)). |
+| **kubectl** | `v1.36.5` | Aplicação dos manifestos de [`k8s/`](k8s/README.md) no deploy. |
+| **GitHub Actions + GHCR** | — | Pipeline de CI/CD ([`.github/workflows/`](.github/workflows/)) e registro da imagem Docker (`ghcr.io/os-fiapudos/automotive-workshop-api`). |
+| **n8n** | `2.43.8` | Ferramenta externa de atualização de status da OS ([`tools/n8n/`](tools/n8n/README.md)). |
+| **Resend** | API HTTP | E-mail de "orçamento disponível" para o cliente (opcional, chamado via `net/http`, sem SDK). |
 
 ---
 
@@ -640,9 +723,9 @@ A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 ### 6. Ordens de Serviço — Ciclo de Atendimento (`/service-orders`)
 | Método | Endpoint | Proteção | Descrição |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/service-orders` | JWT | Abre uma nova OS com status `RECEIVED` e emite o `trackingToken`. |
-| `GET` | `/api/v1/service-orders` | JWT | Lista OSs com filtros avançados (`code`, `status`, `document`, `licensePlate`, período). |
-| `GET` | `/api/v1/service-orders/{id}` | JWT | Detalha a OS completa (aceita UUID ou código sequencial numérico). |
+| `POST` | `/api/v1/service-orders` | JWT | Abre uma OS com cliente, veículo, serviços (`requestedServiceIds`) e peças (`requestedProducts`). Retorna `id` e `code` (identificação única), o status `RECEIVED` e o `trackingToken`. |
+| `GET` | `/api/v1/service-orders` | JWT | Lista OSs por prioridade (`IN_PROGRESS` > `AWAITING_APPROVAL` > `IN_DIAGNOSIS` > `RECEIVED`), as mais antigas primeiro, sem as finalizadas, entregues e canceladas. Aceita os filtros `code`, `status`, `document`, `licensePlate` e período; com `status`, a ordem passa a ser a de abertura. |
+| `GET` | `/api/v1/service-orders/{id}` | JWT | Detalha a OS completa, incluindo o `status` atual (aceita UUID ou código sequencial numérico). |
 | `POST` | `/api/v1/service-orders/{id}/diagnosis` | JWT | Inicia o diagnóstico da OS (`RECEIVED → IN_DIAGNOSIS`). |
 | `PUT` | `/api/v1/service-orders/{id}/quote` | JWT | Compõe/versiona o orçamento com itens de produtos e serviços. |
 | `GET` | `/api/v1/service-orders/{id}/quote` | JWT | Consulta o orçamento vinculado à OS. |
@@ -798,8 +881,13 @@ automotive-workshop-api/
 │   │   └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
 │   └── bootstrap-admin/            # Comando que cria o admin num banco recém-migrado
 ├── migrations/                     # Migrations versionadas (golang-migrate): 0001 = baseline da Fase 1
+├── .github/workflows/
+│   ├── ci.yml                      # CI/CD: build, testes, cobertura, segurança, imagem, publish, deploy
+│   └── iac.yml                     # Validação estática de infra/ e k8s/
 ├── infra/                          # Terraform: cluster kind, metrics-server, Postgres (FP-35)
 ├── k8s/                            # Manifests da API: Deployment, Service, ConfigMap, HPA, Jobs (FP-34)
+│   └── templates/                  # secrets.example.yaml: modelo dos Secrets (valores nunca no Git)
+├── tools/n8n/                      # Workflow n8n de atualização de status da OS
 ├── internal/
 │   ├── features/                   # Fatias verticais (Vertical Slice Architecture)
 │   │   ├── auth/                   # Autenticação administrativa e login JWT
@@ -813,11 +901,13 @@ automotive-workshop-api/
 │   │   │   └── adapter/            # postgres/, httpapi/ e notifier/ (e-mail via Resend)
 │   │   └── service-order-tracking/ # Acompanhamento público do cliente
 │   ├── shared/                     # Código utilitário transversal e infraestrutura
-│   │   ├── apierror/               # Tratamento de erro padronizado (RFC 7807)
+│   │   ├── apierror/               # Envelope de erro JSON {"error": {code, message, details}}
+│   │   ├── httpx/                  # Envelope de erro JSON do auth (sem details)
 │   │   ├── config/                 # Carregamento de variáveis de ambiente
 │   │   ├── database/               # Pool de conexões PostgreSQL (pgxpool)
 │   │   ├── document/               # Validadores algorítmicos de CPF e CNPJ
 │   │   ├── middleware/             # Middleware de autenticação JWT
+│   │   ├── money/                  # Tipo monetário exato (centavos), nunca float64
 │   │   ├── token/                  # Gerenciador de emissão e verificação de JWT
 │   │   └── trackingtoken/          # Gerador e hash de token de rastreamento
 │   └── handlers_test/              # Testes de integração HTTP ponta a ponta
@@ -838,7 +928,7 @@ automotive-workshop-api/
 │   ├── security-scan.sh            # Varredura com gosec e govulncheck
 │   └── smoke.sh                    # Smoke test da stack local (health, login, abrir/consultar OS)
 ├── .env.example                    # Modelo de configuração de ambiente
-├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer)
+├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer + n8n)
 ├── .dockerignore                   # Contexto de build: só go.mod, go.sum, cmd/ e internal/
 ├── Dockerfile                      # Build multi-stage da API (não root, healthcheck)
 ├── Makefile                        # Atalhos de comandos para desenvolvimento
