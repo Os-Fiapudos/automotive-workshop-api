@@ -1,0 +1,14 @@
+# Non-sensitive API configuration (specs/kubernetes-deployment/design.md §2). Credentials
+# never go here: they come from the Secret automotive-workshop-api-secrets.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: automotive-workshop-api-config
+  namespace: automotive-workshop
+  labels:
+    app.kubernetes.io/name: automotive-workshop-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: automotive-workshop
+data:
+  PORT: "8080"
+  JWT_TTL: "1h"

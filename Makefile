@@ -46,6 +46,13 @@ help: ## Mostra esta ajuda
 	@echo '  make reset        — Recria banco do zero (apaga dados) + migrations + seed'
 	@echo '  make smoke        — Smoke test: health, login, abre e consulta uma OS'
 	@echo ''
+	@echo '=== Infraestrutura (Terraform, infra/) e Kubernetes (k8s/) ==='
+	@echo '  make infra-init / infra-plan / infra-apply — kind + metrics-server + Postgres (TF_VAR_postgres_password)'
+	@echo '  make infra-output   — Outputs (kubeconfig_path, postgres_database_url_template)'
+	@echo '  make infra-destroy INFRA_CONFIRM_DESTROY=yes — Derruba cluster e banco (só ambiente descartável)'
+	@echo '  make iac-validate   — Validação estática de infra/ e k8s/ (igual à CI)'
+	@echo '  make k8s-status / k8s-hpa-load / k8s-pod-recovery / k8s-db-persistence — Evidências (evidence/)'
+	@echo ''
 	@echo '=== Migrations do banco (golang-migrate) ==='
 	@echo '  make migrate-up       — Aplica as migrations pendentes'
 	@echo '  make migrate-version  — Mostra a versão atual do schema'
@@ -54,6 +61,10 @@ help: ## Mostra esta ajuda
 	@echo '  make migrate-verify   — Verifica a cadeia inteira em containers descartáveis (igual à CI)'
 	@echo '  make migrate-down MIGRATE_CONFIRM_DOWN=yes — Reverte 1 migration (só banco descartável)'
 	@echo '  make bootstrap-admin  — Cria o admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD'
+	@echo ''
+	@echo '=== Deploy em Kubernetes — ambiente de demonstração (specs/ci-cd-pipeline/) ==='
+	@echo '  make deploy           — Terraform + migrations + bootstrap + rollout + smoke (IMAGE e segredos no ambiente)'
+	@echo '  make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes — Derruba o cluster e o banco'
 	@echo ''
 	@echo '=== Opção 2: Banco no Docker + API local ==='
 	@echo '  make start-db     — Sobe apenas o Postgres (docker)'
@@ -75,6 +86,54 @@ help: ## Mostra esta ajuda
 	@echo '  Swagger:   http://localhost:$(shell grep -E '^SWAGGER_UI_PORT=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 8082)'
 	@echo '  Adminer:   http://localhost:$(shell grep -E '^ADMINER_PORT=' $(ENV_FILE) 2>/dev/null | cut -d= -f2 || echo 8081)'
 	@echo ''
+
+# ─── Infraestrutura e Kubernetes (specs/infrastructure-provisioning/, specs/kubernetes-deployment/) ─
+# Terraform owns the kind cluster, metrics-server and Postgres; the API is deployed from
+# k8s/ (k8s/README.md). TF_VAR_postgres_password must be in the environment (or in the
+# git-ignored infra/terraform.tfvars).
+
+TERRAFORM := terraform -chdir=infra
+
+.PHONY: infra-init
+infra-init: ## Inicializa o Terraform (providers pinados)
+	$(TERRAFORM) init -input=false
+
+.PHONY: infra-plan
+infra-plan: ## Mostra o plano do Terraform (cluster kind, metrics-server, Postgres)
+	$(TERRAFORM) plan -input=false
+
+.PHONY: infra-apply
+infra-apply: ## Provisiona/atualiza cluster kind, metrics-server e Postgres
+	$(TERRAFORM) apply -input=false
+
+.PHONY: infra-output
+infra-output: ## Mostra os outputs (nenhum contém credencial)
+	$(TERRAFORM) output
+
+.PHONY: infra-destroy
+infra-destroy: ## Derruba cluster e banco — só ambiente descartável (INFRA_CONFIRM_DESTROY=yes)
+	@test "$(INFRA_CONFIRM_DESTROY)" = yes || { echo "Destrói o cluster e o banco. Rode: make infra-destroy INFRA_CONFIRM_DESTROY=yes"; exit 1; }
+	$(TERRAFORM) destroy -input=false
+
+.PHONY: iac-validate
+iac-validate: ## Validação estática de infra/ e k8s/ (terraform validate, kubeconform, regras)
+	scripts/iac-validate.sh all
+
+.PHONY: k8s-status
+k8s-status: ## Estado do namespace: pods, HPA, métricas
+	scripts/k8s-evidence.sh status
+
+.PHONY: k8s-hpa-load
+k8s-hpa-load: ## Carga dentro do cluster e linha do tempo de réplicas do HPA
+	scripts/k8s-evidence.sh hpa-load
+
+.PHONY: k8s-pod-recovery
+k8s-pod-recovery: ## Apaga um pod da API e mede a reposição
+	scripts/k8s-evidence.sh pod-recovery
+
+.PHONY: k8s-db-persistence
+k8s-db-persistence: ## Recria o pod do Postgres e confirma que os dados persistem
+	scripts/k8s-evidence.sh db-persistence
 
 # ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -249,3 +308,16 @@ migrate-verify: ## Verifica a cadeia de migrations em containers descartáveis (
 bootstrap-admin: ## Cria o usuário admin a partir de ADMIN_EMAIL/ADMIN_PASSWORD (idempotente)
 	@test -n "$$ADMIN_EMAIL" && test -n "$$ADMIN_PASSWORD" || { echo "Uso: ADMIN_EMAIL=... ADMIN_PASSWORD=... make bootstrap-admin"; exit 1; }
 	$(COMPOSE) run --build --rm --no-deps -e ADMIN_EMAIL -e ADMIN_PASSWORD -e ADMIN_NAME api /bootstrap-admin
+
+# ─── Deploy em Kubernetes (specs/ci-cd-pipeline/) ─────────────────────────────
+# The same staged script the CI deploy job runs; locally it builds the demonstration
+# environment and leaves it up. Needs IMAGE and the credentials in the environment
+# (README, "Ambiente de demonstração").
+
+.PHONY: deploy
+deploy: ## Sobe/atualiza o ambiente de demonstração no Kubernetes (não destrói nada)
+	scripts/deploy.sh up
+
+.PHONY: deploy-destroy
+deploy-destroy: ## Derruba o ambiente de demonstração (exige DEPLOY_CONFIRM_DESTROY=yes)
+	@DEPLOY_CONFIRM_DESTROY='$(DEPLOY_CONFIRM_DESTROY)' scripts/deploy.sh destroy

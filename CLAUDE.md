@@ -39,18 +39,18 @@ framework) exposes `/health` plus the implemented vertical slices:
   protected CRUD over `/api/v1/services` (5 endpoints) for the catalog of services and
   prices, with an `active` flag and logical deletion.
 
-`internal/features/product/` and `internal/features/service-order/` are also present in the
-code but are not described in this document or in `specs/architecture.md` yet — treat those
-two sections as incomplete rather than authoritative for them.
+`internal/features/vehicle/`, `internal/features/product/`,
+`internal/features/service-order/` (Clean Architecture layers, section 4) and
+`internal/features/service-order-tracking/` are also implemented, each with its own folder
+in `specs/`. This section lists only the first three slices in detail; `specs/architecture.md`
+covers the others through its addenda and decision 22.
 
 These slices are backed by a real Postgres connection (`pgx/v5` via
 `internal/shared/database`), with unit tests alongside the code and integration tests in
-`internal/handlers_test/`. The database schema and sample data modeled in `docs/` are now
-consumed by the implemented features (`users`, `customers`, and `services` tables). Every
-other business entity (Vehicle, ServiceOrderHistory, Quote, etc.) is still schema/docs only,
-with no corresponding Go feature yet — `internal/features/user/` (singular, unrelated to
-`auth`'s `users` table — an unfortunately similar name, see the note in section 3) remains
-an empty placeholder.
+`internal/handlers_test/`. Every business entity in `docs/entities.md` is now backed by an
+implemented feature — `internal/features/user/` (singular, unrelated to `auth`'s `users`
+table — an unfortunately similar name, see the note in section 3) remains an empty
+placeholder.
 
 **Changed on 2026-08-26**: the customer endpoints, and Service Order Opening's
 `POST /api/v1/service-orders`, are now wrapped in `middleware.RequireAuth` like every other
@@ -127,8 +127,30 @@ the rule, same convention already used for the Go 1.22→1.25 note in section 2.
   (`alpine:3.24`, `adminer:6.1.1`, `swaggerapi/swagger-ui:v5.33.1`,
   `migrate/migrate:v4.20.1`, `n8nio/n8n:2.43.8`) are pinned on purpose: raise them as a reviewed change, never
   back to `:latest`.
+- **Kubernetes and IaC (Fase 2, added 2026-10-25)**: `infra/` is a Terraform root (local
+  backend) that creates a local `kind` cluster, `metrics-server` and Postgres 16 as a
+  StatefulSet (FP-35, [specs/infrastructure-provisioning/](specs/infrastructure-provisioning/));
+  `k8s/` holds the API manifests and the migration/bootstrap Jobs (FP-34,
+  [specs/kubernetes-deployment/](specs/kubernetes-deployment/)). Terraform (`>= 1.16`),
+  `kind` (via the `tehcyx/kind` provider) and `kubectl` are external tools, never Go
+  dependencies; provider versions, node image, chart and Postgres image are pinned exactly in
+  `infra/` and raised only as a reviewed change. Terraform owns the cluster, namespace,
+  metrics-server and Postgres; the deploy owns the API Secrets/ConfigMaps/Jobs — never add an
+  object to both. Never `kubectl apply -f k8s/` wholesale (order and unique Job names
+  matter), and never give the `Deployment` a `replicas` field (the HPA owns it).
 - **CI**: GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) running
   `go build ./...`, `go vet ./...`, and `go test ./...` on every push/PR.
+  **CD added on 2026-10-21 (FP-36, [specs/ci-cd-pipeline/](specs/ci-cd-pipeline/))**: every
+  push/PR also builds the image (`image`, no push). A push to `main` or a manual
+  `workflow_dispatch` then runs `publish` (GHCR, lowercase name, full-SHA tag, deployed as
+  `name:<sha>@<digest>`) and `deploy` — both `needs:` the `build`, `coverage`, `migrations`,
+  `security` and `image` jobs by name, so renaming one of those jobs means updating the
+  `needs:` lists. `deploy` is an ephemeral environment inside the runner, driven by
+  [scripts/deploy.sh](scripts/deploy.sh): Terraform (`/infra`, FP-35) → migration `Job` →
+  bootstrap `Job` → `/k8s` rollout (FP-34) → authenticated smoke → evidence → destroy. Its
+  credentials are generated per run (no repository secret); the integration contract with
+  `/infra` and `/k8s` is `specs/ci-cd-pipeline/design.md` §9. Pinned: Terraform `1.16.6`,
+  `kubectl` `v1.36.5` — raise them as a reviewed change, like the image pins above.
 
 ## 3. Project structure
 
@@ -137,7 +159,9 @@ cmd/api/main.go             → HTTP entrypoint, wires up the server and registe
 cmd/bootstrap-admin/        → one-off command creating the first admin user on a migrated
                                database (specs/database-migrations/, section 13)
 migrations/                 → versioned schema migrations (golang-migrate), section 14
-scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh
+scripts/                    → coverage.sh, security-scan.sh, migrate.sh, smoke.sh,
+                               deploy.sh + deploy-smoke.sh (staged Kubernetes deploy, used
+                               by CI and for the demonstration environment — FP-36)
 internal/features/          → one folder per business feature (vertical slice)
   features/auth/            → implemented slice: handler + service + repository + model
                                (login, /me; unit-tested)
@@ -146,6 +170,10 @@ internal/features/          → one folder per business feature (vertical slice)
   features/service-catalog/ → implemented slice: handler + service + repository + model
                                (service catalog CRUD over /api/v1/services; unit- and
                                integration-tested)
+  features/service-order/   → implemented slice in Clean Architecture layers (section 9.1):
+                               domain/, usecase/ (ports.go), adapter/{postgres,httpapi,
+                               notifier}/; architecture_test.go enforces the dependency
+                               rule (specs/service-order-architecture-refactor/)
   features/user/            → placeholder slice: only has doc.go, no implementation yet.
                                NOTE: unrelated to auth's `users` database table — this is a
                                distinct, not-yet-specified future feature; don't conflate them.
@@ -167,6 +195,9 @@ docs/                       → domain model (entities.md), schema reference (sc
                                produced by migrations/, no longer executed) and dev seed
                                (seed.sql)
 .github/workflows/ci.yml    → CI pipeline
+.github/workflows/iac.yml   → static validation of infra/ and k8s/ (scripts/iac-validate.sh)
+infra/                      → Terraform: kind cluster, metrics-server, Postgres StatefulSet (FP-35)
+k8s/                        → API Deployment/Service/ConfigMap/HPA + migration/bootstrap Jobs (FP-34)
 Dockerfile, .dockerignore, docker-compose.yml, .env.example → containerized local environment
 ```
 
@@ -184,6 +215,18 @@ etc.). This is the pattern declared in [README.md](README.md), now implemented e
 by `internal/features/auth/`, `internal/features/customer/`, and
 `internal/features/service-catalog/`; `internal/features/user/` remains an unimplemented
 placeholder folder.
+
+**Clean Architecture inside a slice (since 2026-10-21, F2-US01)**: `service-order` keeps
+the vertical slice — one folder, `internal/features/service-order/` — but organizes it
+internally in layers whose dependencies only point inward: `domain/` (aggregate,
+transitions, errors; standard library, `uuid` and the `shared/money` value type only) ←
+`usecase/` (use cases and the
+narrow ports they declare in `ports.go`) ← `adapter/postgres`, `adapter/httpapi`,
+`adapter/notifier` (pgx, HTTP and e-mail). Composition happens in `cmd/api`
+(`wiring.go`). The other implemented features keep the flat layout; that their packages
+mix HTTP, SQL and rules is recorded technical debt, not a pattern to copy — see
+[docs/architecture-dependency-map.md](docs/architecture-dependency-map.md) and
+[specs/service-order-architecture-refactor/](specs/service-order-architecture-refactor/).
 
 Infrastructure layers are implemented: database connection (`internal/shared/database`, pgx
 pool, shared by every feature), authentication middleware (`internal/shared/middleware`),
@@ -254,18 +297,34 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
 
 - `go vet ./...` — run in CI, the only static analysis configured today.
 - `go build ./...` — also run in CI as a compilation check.
+- `internal/features/service-order/architecture_test.go` — the dependency-rule check: it
+  resolves the transitive import graph with `go list -deps` and fails if `domain`/`usecase`
+  reach `net/http`, `encoding/json`, `pgx`, `apierror`/`httpx`, an adapter or a library
+  outside their allowlist, or if an adapter depends on another adapter or feature. It is
+  a plain test, so `go test ./...` (and CI's `build` job) runs it.
 - `gosec` (SAST) and `govulncheck` (dependency/standard-library vulnerabilities) — run in
   CI by the `security` job and locally by `scripts/security-scan.sh`, both pinned to exact
   versions and executed via `go run <module>@<version>` so they never enter `go.mod` (see
   [specs/quality-and-security/](specs/quality-and-security/)). Findings and residual risks
   are recorded in [docs/security-report.md](docs/security-report.md).
 - `scripts/coverage.sh` — enforces RNF06 (≥80% statement coverage on `service-order`,
-  `product`, and `service-order-tracking`), run in CI by the `coverage` job against a real
-  Postgres. It fails when `DATABASE_URL` is unset rather than measuring skipped tests.
+  `product`, and `service-order-tracking`; `service-order` is gated as one aggregate over
+  `service-order/...`, so its sub-packages can never drop out of the gate), run in CI by
+  the `coverage` job against a real Postgres. It fails when `DATABASE_URL` is unset rather
+  than measuring skipped tests.
 - `scripts/migrate.sh verify` — run in CI by the `migrations` job (and locally by
   `make migrate-verify`): on throwaway containers, checks the migration chain against
   `docs/schema.sql`, re-run/no-op, full down/up, Fase 1 adoption with data preserved,
   refusal of a non-matching database, and failure/recovery. See section 14.
+- `scripts/iac-validate.sh` (`make iac-validate`) — `terraform fmt`/`validate` on `infra/`
+  and a render of `k8s/` identical to the deploy's, checked with `kubeconform -strict` plus
+  the repository rules (no `replicas`, no Namespace/populated Secret in `k8s/`). Run in CI by
+  `.github/workflows/iac.yml` on changes to `infra/**`/`k8s/**`, together with `shellcheck`.
+- `image` — builds the `Dockerfile` on every push/PR without pushing; `publish`/`deploy`
+  only on `main`/manual and only after every check above passed (section 2's CD note).
+  `scripts/deploy.sh check` validates the `/infra` + `/k8s` contract and renders the
+  manifests without a cluster; `scripts/deploy.sh destroy` refuses outside CI unless
+  `DEPLOY_CONFIRM_DESTROY=yes`.
 - No general-purpose linter is configured (no `.golangci.yml`, no `golangci-lint`, no
   `.editorconfig`). **Still to be defined**: whether a more complete linter (e.g.
   `golangci-lint`) will be adopted. Until then, follow `gofmt`/`go vet` as the minimum
@@ -367,6 +426,15 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
    Do not create cross-cutting technical packages (`internal/handlers/`, `internal/models/`,
    global `internal/services/`) — that breaks the vertical slice organization already
    adopted.
+   A feature that has explicitly adopted Clean Architecture or a Hexagonal layering
+   (currently: `service-order` only, see `specs/service-order-architecture-refactor/`) may
+   organize its internal files into `domain/`, `usecase/`, and `adapter/<name>/`
+   sub-packages, as long as the whole feature still lives under one
+   `internal/features/<name>/` folder and no cross-feature import is introduced. This is
+   additive to, not a replacement for, the vertical-slice rule: the slice is still the
+   feature folder; the sub-packages are internal to it. Ports are declared by their
+   consumer (`usecase/`), never in an adapter, and the dependency direction is enforced
+   by the feature's `architecture_test.go`.
 2. **No direct coupling between features.** A feature must not import internal packages of
    another feature directly. If two features need to share logic or types, that logic must
    move up to `internal/shared/`. (Both `auth` and `customer` today only import
@@ -385,7 +453,8 @@ builds, and what CI's `coverage` job builds with `scripts/migrate.sh up` + the s
 - Every new feature is born from a specification in `specs/` (see section 17) — not
   directly from code.
 - Follow the vertical slice pattern (section 9): handler, service, repository, and model
-  together in `internal/features/<feature>/`.
+  together in `internal/features/<feature>/` — or, for a feature that adopts Clean
+  Architecture, the layered sub-packages of section 9.1.
 - Reuse what already exists in `internal/shared/` before duplicating logic; if something new
   is genuinely cross-cutting, it goes into `internal/shared/`, not repeated in each feature.
   (Exception currently in effect: the error envelope — see section 8 — until that's
@@ -567,10 +636,10 @@ flow, the `specs/<feature>/requirements.md|design.md|tasks.md` organization) is 
 [specs/README.md](specs/README.md). The current system architecture, documented
 exclusively from the existing code, is in
 [specs/architecture.md](specs/architecture.md) — keep it up to date when a new feature
-changes the real architecture. Three feature folders exist today: `specs/auth/`,
-`specs/customer-management/`, and `specs/service-catalog/`; a request to implement a feature
-without a corresponding specification should be treated as ambiguous: ask for the
-requirements before writing code.
+changes the real architecture. Every implemented feature and every Fase 2 infrastructure
+item has its own folder under `specs/` (list it to see the current set); a request to
+implement a feature without a corresponding specification should be treated as ambiguous:
+ask for the requirements before writing code.
 
 **Open decisions inherited from merging the feature branches** (none should be resolved
 silently — see section 8 for detail):

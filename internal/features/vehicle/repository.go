@@ -10,22 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// VehicleRepository is the persistence boundary for the Vehicle aggregate.
-// It is defined next to its only consumer (VehicleService) rather than in a
-// separate "contracts" package — see specs/vehicle-management/design.md
-// §1.1/§1.3.
-type VehicleRepository interface {
-	Create(ctx context.Context, vehicle *Vehicle) error
-	FindByID(ctx context.Context, id uuid.UUID) (*Vehicle, error)
-	FindByPlate(ctx context.Context, normalizedPlate string) (*Vehicle, error)
-	// ExistsByPlate reports whether normalizedPlate already belongs to a
-	// vehicle other than excludeID (nil to check against every vehicle).
-	ExistsByPlate(ctx context.Context, normalizedPlate string, excludeID *uuid.UUID) (bool, error)
-	List(ctx context.Context, page, pageSize int) ([]*Vehicle, int, error)
-	ListByCustomer(ctx context.Context, customerID uuid.UUID, page, pageSize int) ([]*Vehicle, int, error)
-	Update(ctx context.Context, vehicle *Vehicle) error
-}
-
 // postgresUniqueViolation is the SQLSTATE Postgres returns for any unique
 // index/constraint violation.
 const postgresUniqueViolation = "23505"

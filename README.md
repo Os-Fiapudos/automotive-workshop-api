@@ -1,6 +1,6 @@
 # Automotive Workshop API
 
-> **Tech Challenge — Fase 1 | Pós-Tech FIAP (Software Architecture)**  
+> **Tech Challenge — Fases 1 e 2 | Pós-Tech FIAP (Software Architecture)**  
 > REST API robusta para gerenciamento completo do ciclo de atendimento em uma oficina mecânica: cadastro de clientes e veículos, catálogo de serviços, controle de peças/insumos com estoque, abertura de Ordens de Serviço (OS), diagnóstico, composição e aprovação de orçamentos, execução de serviços com auditoria, baixa de peças, acompanhamento público pelo cliente e métricas operacionais.
 
 ---
@@ -9,8 +9,8 @@
 
 - **Jean Ferreira dos Santos Cruz Junior** — RM376169
 - **João Victor dos Santos Cerqueira** — RM376742
-- **Giovane Kenuy Soares Colognesi Rubira Cardona** — RM376443
-- **Augusto José Rizzi** — RM376822
+- **Giovane Kenuy Soares Colognesi Rubira Cardona** — RM377047
+- **Augusto José Rizzi** — RM376119
 - **Lucas Guimarães Fabris** — RM376444
 
 ---
@@ -19,15 +19,19 @@
 
 1. [Visão Geral do Projeto](#visão-geral-do-projeto)
 2. [Ciclo de Vida da Ordem de Serviço](#ciclo-de-vida-da-ordem-de-serviço)
-3. [Arquitetura e Padrões](#arquitetura-e-padrões)
-4. [Tecnologias, Bibliotecas e Dependências](#tecnologias-bibliotecas-e-dependências)
-5. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
-6. [Credenciais de Teste e Dados Iniciais (Seed)](#credenciais-de-teste-e-dados-iniciais-seed)
-7. [Migrações do Banco de Dados](#migrações-do-banco-de-dados)
-8. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
-9. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
-10. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
-11. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
+3. [Fase 2 — Escalabilidade, Infraestrutura e Automação](#fase-2--escalabilidade-infraestrutura-e-automação)
+   - [Situação dos requisitos](#situação-dos-requisitos) · [Arquitetura proposta](#arquitetura-proposta) · [Evidências](#evidências-da-execução) · [Vídeo](#vídeo-demonstrativo) · [Pendências](#pendências)
+4. [Arquitetura e Padrões](#arquitetura-e-padrões)
+5. [Tecnologias, Bibliotecas e Dependências](#tecnologias-bibliotecas-e-dependências)
+6. [Como Rodar o Projeto com Docker (Passo a Passo)](#como-rodar-o-projeto-com-docker-passo-a-passo)
+7. [Credenciais de Teste e Dados Iniciais (Seed)](#credenciais-de-teste-e-dados-iniciais-seed)
+8. [Migrações do Banco de Dados](#migrações-do-banco-de-dados)
+9. [Infraestrutura com Terraform e Deploy em Kubernetes](#infraestrutura-com-terraform-e-deploy-em-kubernetes)
+10. [Documentação dos Endpoints da API](#documentação-dos-endpoints-da-api)
+11. [Coleções para Testes (Bruno, Postman e Insomnia)](#coleções-para-testes-bruno-postman-e-insomnia)
+12. [Testes Automatizados, Cobertura e Segurança](#testes-automatizados-cobertura-e-segurança)
+13. [Pipeline de CI/CD](#pipeline-de-cicd)
+14. [Estrutura de Pastas do Projeto](#estrutura-de-pastas-do-projeto)
 
 ---
 
@@ -84,14 +88,245 @@ Toda Ordem de Serviço transita rigorosamente pelos seguintes estados:
 
 ---
 
+## Fase 2 — Escalabilidade, Infraestrutura e Automação
+
+### Objetivo e escopo desta fase
+
+Com o aumento da demanda e a expansão para novas unidades, a Fase 2 evolui a aplicação da Fase 1 para ter qualidade, resiliência e escalabilidade:
+
+- **Infraestrutura escalável**: a API roda em Kubernetes com réplicas e um `HorizontalPodAutoscaler` que escala por CPU e memória (2 a 8 pods).
+- **Provisionamento e deploy automatizados**: o Terraform cria o cluster, o metrics-server e o PostgreSQL; um pipeline no GitHub Actions valida cada commit, publica a imagem e implanta banco, schema e aplicação no cluster.
+- **Qualidade do código**: o `service-order`, núcleo do domínio, foi refatorado para Clean Architecture com a regra de dependência verificada por teste; os demais módulos seguem como fatias verticais independentes, preparando a migração para microsserviços.
+- **Código e APIs**: abertura de OS com cliente, veículo, serviços e peças; consulta de status; decisão externa do orçamento; listagem ordenada por prioridade (sem OS finalizadas ou entregues); atualização de status por uma ferramenta externa (n8n); valores monetários exatos.
+- **Banco versionado**: o schema evolui só por migrations (`golang-migrate`), aplicadas por um Job antes de cada rollout.
+
+### Situação dos requisitos
+
+| Requisito do Tech Challenge | Situação | Onde |
+| --- | --- | --- |
+| APIs: abertura de OS, consulta de status, aprovação externa, listagem ordenada, atualização de status por ferramenta | ✅ | [Endpoints](#6-ordens-de-serviço--ciclo-de-atendimento-service-orders), [`tools/n8n/`](tools/n8n/) |
+| Testes automatizados nos fluxos críticos | ✅ cobertura ≥ 80 % exigida na CI | [Testes](#testes-automatizados-cobertura-e-segurança) |
+| Refatoração com Clean Code e Clean Architecture | ✅ Clean Architecture completa no `service-order` (`domain/` ← `usecase/` ← `adapter/`, regra de dependência verificada por teste); demais módulos seguem como fatias verticais **por decisão**, para facilitar a migração para microsserviços | [Arquitetura e Padrões](#arquitetura-e-padrões) |
+| Dockerfile e docker-compose revisados | ✅ | [Docker](#como-rodar-o-projeto-com-docker-passo-a-passo) |
+| Manifestos Kubernetes: Deployment, Service, ConfigMap, Secret, HPA | ✅ validado em cluster real (veja [Evidências](#evidências-da-execução)) | [`k8s/`](k8s/README.md) |
+| Terraform: cluster Kubernetes e banco de dados, documentados | ✅ validado em cluster real | [`infra/`](infra/README.md) |
+| CI/CD: build, testes, imagem, deploy do banco, deploy no cluster, manifestos | ✅ executado no GitHub Actions: [execução na `main`](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41368399908) com `publish` e `deploy` aprovados | [Pipeline de CI/CD](#pipeline-de-cicd) |
+| README com arquitetura, instruções e collection | ✅ | esta seção |
+| Vídeo demonstrativo (até 15 min) | ✅ [no YouTube](https://youtu.be/Cw9C57M0s0I) (não listado, 15 min) | [Vídeo](#vídeo-demonstrativo) |
+
+### Arquitetura proposta
+
+#### Componentes da aplicação
+
+Monólito modular em Go, organizado em fatias verticais: cada funcionalidade tem rotas, regras e persistência próprias, e as fatias não se importam entre si. Quando uma precisa da outra, o *composition root* (`cmd/api`) injeta um adaptador. O `service-order`, núcleo do domínio e dono de todas as APIs novas da Fase 2, é organizado por dentro em camadas de Clean Architecture; os demais módulos mantêm handler, service e repository no mesmo pacote. O motivo dessa escolha está em [Arquitetura e Padrões](#arquitetura-e-padrões).
+
+```mermaid
+flowchart LR
+    client["Clientes HTTP<br/>(collection, Swagger, portal do cliente)"]
+    n8n["n8n<br/>(atualização de status)"]
+    ext["Sistema externo<br/>(decisão do orçamento)"]
+    resend["Resend<br/>(e-mail do orçamento)"]
+
+    subgraph api["API Go — cmd/api (composition root: main.go + wiring.go, net/http)"]
+        direction TB
+        mw["middleware.RequireAuth<br/>(JWT HS256)"]
+        subgraph slices["internal/features — fatias verticais (handler → service → repository)"]
+            auth["auth"]
+            customer["customer"]
+            vehicle["vehicle"]
+            catalog["service-catalog"]
+            product["product<br/>(estoque)"]
+            tracking["service-order-tracking<br/>(token do cliente)"]
+        end
+        subgraph order["internal/features/service-order — Clean Architecture"]
+            direction TB
+            httpapi["adapter/httpapi<br/>(rotas, DTOs, erro → status HTTP)"]
+            usecase["usecase<br/>(abertura, orçamento, execução, listagem,<br/>status, métricas · portas em ports.go)"]
+            domain["domain<br/>(agregado ServiceOrder, transições, erros)"]
+            pgadapter["adapter/postgres<br/>(implementa as portas)"]
+            notifier["adapter/notifier<br/>(no-op · Resend)"]
+            httpapi --> usecase --> domain
+            pgadapter -. "implementa" .-> usecase
+            notifier -. "implementa" .-> usecase
+        end
+        shared["internal/shared<br/>database · token · apierror/httpx<br/>document · money · config"]
+    end
+
+    db[("PostgreSQL 16")]
+
+    client --> mw --> slices
+    mw --> httpapi
+    client --> tracking
+    n8n -- "X-External-Status-Secret" --> httpapi
+    ext -- "X-External-Notification-Secret" --> httpapi
+    notifier -. "orçamento enviado" .-> resend
+    vehicle -. "adaptador no composition root" .-> customer
+    slices --> shared
+    pgadapter --> db
+    shared --> db
+```
+
+As setas sólidas dentro do `service-order` apontam só para dentro: `domain` não conhece HTTP nem SQL, e `usecase` declara as portas que os adaptadores implementam. O teste [`architecture_test.go`](internal/features/service-order/architecture_test.go) quebra o build se essa regra for violada.
+
+#### Infraestrutura provisionada
+
+Tudo roda localmente num cluster `kind` (o PDF aceita cluster local ou em nuvem). O Terraform é o único dono do cluster, do namespace, do metrics-server e do banco; o deploy é dono dos objetos da API.
+
+```mermaid
+flowchart TB
+    dev["Desenvolvedor / avaliador<br/>kubectl port-forward :8080"]
+
+    subgraph kind["cluster kind"]
+        subgraph ks["kube-system"]
+            ms["metrics-server<br/>(Helm 3.13.1)"]
+        end
+        subgraph ns["automotive-workshop"]
+            svc["Service automotive-workshop-api<br/>ClusterIP :8080"]
+            deploy["Deployment automotive-workshop-api<br/>2–8 pods · probes /health<br/>100m/128Mi → 500m/256Mi"]
+            hpa["HPA autoscaling/v2<br/>CPU 70 % · memória 80 %"]
+            cm["ConfigMap da API<br/>+ ConfigMap de migrations"]
+            sec["Secrets da API e do admin<br/>(criados no deploy)"]
+            jobs["Jobs por execução:<br/>migração · bootstrap do admin"]
+            pgsvc["Service postgres (headless)"]
+            pg[("StatefulSet postgres-0<br/>PostgreSQL 16 + PVC 1 Gi")]
+        end
+    end
+
+    dev --> svc --> deploy
+    hpa -- "escala" --> deploy
+    ms -- "métricas de CPU/memória" --> hpa
+    cm --> deploy
+    sec --> deploy
+    jobs --> pgsvc
+    deploy --> pgsvc --> pg
+
+    classDef tf fill:#e8f0fe,stroke:#4a6fd1,color:#1a1a1a
+    classDef app fill:#e9f7ef,stroke:#2e8b57,color:#1a1a1a
+    class kind,ms,pgsvc,pg tf
+    class svc,deploy,hpa,cm,sec,jobs app
+```
+
+O cluster `kind` (1 nó, Kubernetes 1.37) roda como container Docker na máquina local ou no runner da CI; o namespace `automotive-workshop` aplica o perfil de Pod Security `restricted`. Azul: criado pelo Terraform ([`infra/`](infra/README.md)). Verde: criado pelo deploy a partir de [`k8s/`](k8s/README.md).
+
+#### Fluxo de deploy
+
+```mermaid
+flowchart TB
+    push["push / pull request"] --> checks
+    subgraph checks["Checks (todo push e PR)"]
+        direction LR
+        b["build · vet · test"]
+        c["coverage ≥ 80 %<br/>(Postgres real)"]
+        m["migrations verify"]
+        s["security<br/>(govulncheck, gosec)"]
+        i["image build<br/>(sem push)"]
+    end
+    checks -- "push na main<br/>ou execução manual" --> publish["publish<br/>GHCR :sha@digest"]
+    publish --> d1
+    subgraph deploy["deploy (scripts/deploy.sh)"]
+        direction LR
+        d1["terraform apply<br/>cluster + metrics-server + Postgres"] --> d2["Secrets + ConfigMap<br/>de migrations"]
+        d2 --> d3{"Job de migração<br/>Complete?"}
+        d3 -- "não" --> stop["para: sem rollout"]
+        d3 -- "sim" --> d4["Job bootstrap-admin"] --> d5["Deployment + Service<br/>+ HPA · rollout"]
+        d5 --> d6["smoke autenticado"] --> d7["evidências"] --> d8["terraform destroy<br/>(só no ambiente efêmero)"]
+    end
+```
+
+Na CI, o ambiente é efêmero: o cluster nasce dentro do runner e é destruído no fim do job. Para o vídeo e para consumir a API, `make deploy` sobe o mesmo ambiente na máquina local e o deixa no ar ([Ambiente de demonstração](#ambiente-de-demonstração-máquina-local)).
+
+### Como executar
+
+| Objetivo | Onde |
+| --- | --- |
+| Execução local com Docker Compose | [Como Rodar o Projeto com Docker](#como-rodar-o-projeto-com-docker-passo-a-passo) |
+| Provisionamento com Terraform (recursos criados, aplicar, destruir) | [Infraestrutura com Terraform e Deploy em Kubernetes](#infraestrutura-com-terraform-e-deploy-em-kubernetes) e [`infra/README.md`](infra/README.md) |
+| Deploy em Kubernetes (ordem, Secrets, rollout, acesso) | [`k8s/README.md`](k8s/README.md) e [Ambiente de demonstração](#ambiente-de-demonstração-máquina-local) |
+| Pipeline de CI/CD (gatilhos, execução manual, falha controlada) | [Pipeline de CI/CD](#pipeline-de-cicd) |
+| Collection completa da API | [Postman](docs/postman-collection.json), [Insomnia](docs/insomnia-collection.json), [Bruno](bruno/), [OpenAPI/Swagger](docs/openapi.yaml) — veja [Coleções para Testes](#coleções-para-testes-bruno-postman-e-insomnia) |
+
+### Evidências da execução
+
+Ambiente real criado do zero em **2026-10-27 (UTC)**: Linux x86_64 com cgroup v2, Docker 29.9.2, 8 CPUs / 16 GiB, Terraform 1.16.6, `kubectl` 1.36.5, nó `kindest/node:v1.37.0`. A imagem da API foi construída do commit `4c731a0` e carregada no nó (veja [Sem imagem publicada](#sem-imagem-publicada-imagem-construída-localmente)). Os registros completos ficam em `evidence/` e `deploy-evidence/`, que não vão para o Git; nenhum valor secreto apareceu neles.
+
+| Evidência | Comando | Resultado |
+| --- | --- | --- |
+| Validação estática | `make iac-validate`, `scripts/deploy.sh check` | Terraform válido; 9/9 manifests aprovados pelo `kubeconform -strict`; contrato `/infra` + `/k8s` ok |
+| Provisionamento do zero | `scripts/deploy.sh infra` | 6 recursos criados em ~90 s num único state; Postgres pronto |
+| `plan` estável | `terraform plan -detailed-exitcode` | `No changes` (código 0) |
+| Deploy na ordem exigida | `scripts/deploy.sh config migrate bootstrap rollout` | Job de migração `Complete` (2 migrations) → Job de bootstrap `Complete` → rollout com 2 réplicas |
+| Smoke autenticado | `scripts/deploy.sh smoke` | `/health` 200, `/auth/me` sem token 401, login 200, `/auth/me` 200, `/services` 200 |
+| Métricas reais no HPA | `kubectl get hpa` | `cpu: 1%/70%, memory: 1%/80%`, mín. 2, máx. 8 |
+| Autoscaling (carga leve) | `make k8s-hpa-load` (4 geradores × 240 s) | 2 → **3** réplicas com CPU a 90 %; voltou a 2 depois da carga |
+| Autoscaling (carga forte) | `LOAD_WORKERS=10 LOAD_DURATION=180 make k8s-hpa-load` | 2 → 4 → **5** réplicas com CPU a 135 %; 5 → 4 → 2 depois da janela de estabilização de 120 s; `AbleToScale` e `ScalingActive` verdadeiros |
+| Reposição de pod | `make k8s-pod-recovery` | novo pod pronto em **6 s**; o Service nunca ficou sem endpoint |
+| Persistência do banco | `make k8s-db-persistence` | `postgres-0` recriado (UID novo, mesmo PVC); dado gravado antes foi lido depois; smoke passou de novo |
+| APIs da Fase 2 no cluster | roteiro com `curl` via `port-forward` | 3 OS abertas; diagnóstico → orçamento → envio; decisão externa com segredo errado **401** e aprovada com o segredo certo (OS → `IN_PROGRESS`); status pela ferramenta externa `RECEIVED → IN_DIAGNOSIS`; listagem na ordem `IN_PROGRESS`, `IN_DIAGNOSIS`, `RECEIVED` |
+| Falha de migração bloqueia o rollout | `SIMULATE_MIGRATION_FAILURE=true` num ambiente efêmero novo | Job de migração `Failed`, deploy interrompido com "the rollout is blocked", **nenhum** `Deployment`, HPA ou Service da API criado |
+| Destroy de ambiente descartável | `make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes` | 6 recursos destruídos; nenhum container `automotive-workshop` restante; state vazio |
+| Testes da aplicação | `go build ./... && go vet ./... && go test ./...` (Go 1.26.10) | todos os pacotes ok |
+
+**No GitHub Actions** (2026-11-02, push do merge do PR #44 na `main`, commit `f005f79`):
+
+| Execução | Resultado |
+| --- | --- |
+| [CI #41368399908](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41368399908) (push na `main`) | `build`, `coverage`, `migrations`, `security` e `image` aprovados → `publish` (imagem no GHCR) → `deploy`: Terraform → Secrets/ConfigMap → Job de migração → bootstrap do admin → rollout → smoke autenticado → evidências → destroy, tudo com sucesso. Pipeline completo em ~4 min (deploy ~2 min). Artefato `deploy-evidence-ci-41368399908-1` anexado à execução. |
+| [CI #41360629362](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41360629362) (pull request #44) | os cinco checks aprovados; `publish` e `deploy` **pulados**, como definido para pull requests |
+| [IaC #41368399911](https://github.com/Os-Fiapudos/automotive-workshop-api/actions/runs/41368399911) (push na `main`) | validação estática de `infra/` e `k8s/` aprovada |
+
+A falha controlada (`simulate_migration_failure`) foi demonstrada localmente (tabela acima). No GitHub ela ainda não foi disparada; veja [Pendências](#pendências).
+
+### Vídeo demonstrativo
+
+**[Automotive Workshop: Solução para o Tech Challenge da Postech FIAP | Fase 2](https://youtu.be/Cw9C57M0s0I)** (YouTube, não listado, 15 minutos).
+
+O vídeo mostra o deploy da aplicação, a execução do CI/CD, o consumo das APIs e a escalabilidade automática, seguindo o roteiro de [specs/phase-2-deliverables/design.md](specs/phase-2-deliverables/design.md) §4.
+
+### Pendências
+
+> ⚠️ Itens que ainda não puderam ser concluídos:
+>
+> 1. **Acesso do `soat-architecture` ao repositório**: dar acesso de colaborador ao usuário do GitHub `soat-architecture` (Settings → Collaborators; não confundir com o usuário de mesmo nome do seed da aplicação) e confirmar que o convite foi aceito ou está pendente.
+> 2. **Entrega no portal**: enviar o PDF de entrega (link do repositório, desenho da arquitetura, link do vídeo e integrantes) no portal do aluno dentro do prazo.
+> 3. **Falha controlada no GitHub** (opcional, reforça a evidência): `gh workflow run ci.yml --ref main -f simulate_migration_failure=true`, e registrar o link da execução na tabela de evidências. O caminho feliz já rodou no push da `main`.
+
+---
+
 ## Arquitetura e Padrões
 
-O projeto foi construído seguindo os princípios de **Vertical Slice Architecture** (monólito modular orientado a funcionalidades):
+O projeto combina duas abordagens, cada uma num nível diferente:
 
-- **Fatias Verticais Independentes (`internal/features/`)**: Cada funcionalidade de negócio (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order`, `service-order-tracking`) encapsula suas próprias camadas de **Handler (HTTP)**, **Service (Regras de Domínio/Aplicação)**, **Repository (Acesso a Dados SQL)** e **Models/DTOs**.
-- **Desacoplamento entre Features**: Uma feature nunca importa diretamente outra feature. Quando é necessária comunicação ou validação cruzada (ex: criação de veículo validando se o cliente existe e está ativo), é utilizada a técnica de **Dependency Inversion** com *Adapters* definidos no ponto de composição (`cmd/api/main.go`).
-- **Núcleo Compartilhado (`internal/shared/`)**: Reservado estritamente para utilitários agnósticos de domínio: pool de conexões com o PostgreSQL, middlewares de autenticação, validação algorítmica de documentos, emissão/verificação de tokens e tratamento padronizado de erros.
-- **Composition Root Limpo (`cmd/api/main.go`)**: Responsável unicamente por ler configurações, abrir conexões, instanciar as dependências, montar os adaptadores e registrar as rotas no multiplexador HTTP nativo.
+- **Entre módulos: Vertical Slice Architecture** (monólito modular orientado a funcionalidades). Cada funcionalidade de negócio (`auth`, `customer`, `vehicle`, `service-catalog`, `product`, `service-order`, `service-order-tracking`) fica numa pasta própria em `internal/features/`, com rotas, regras e acesso a dados.
+- **Dentro do `service-order`: Clean Architecture.** É o núcleo do domínio e concentra todas as APIs novas da Fase 2 (abertura, consulta de status, decisão externa do orçamento, listagem priorizada e atualização de status pela ferramenta externa). Ele foi refatorado em camadas cujas dependências só apontam para dentro:
+
+  | Camada | Conteúdo | Pode depender de |
+  | --- | --- | --- |
+  | `domain/` | agregado `ServiceOrder`, transições de status, orçamento, execuções, histórico e erros de negócio | biblioteca padrão, `uuid` e o tipo de valor `shared/money` |
+  | `usecase/` | casos de uso (`Opening`, `Lifecycle`, `Quotes`, `Executions`, `Queries`, `StockUsage`, `Metrics`) e as portas que eles exigem (`ports.go`) | `domain/` |
+  | `adapter/httpapi` | rotas, DTOs e o mapeamento único de erro → status HTTP | `usecase/`, `domain/` |
+  | `adapter/postgres` | implementação das portas com SQL parametrizado (`pgx`) | `usecase/`, `domain/` |
+  | `adapter/notifier` | e-mail de orçamento (no-op ou Resend) | `usecase/`, `domain/` |
+
+  A composição acontece em [`cmd/api/wiring.go`](cmd/api/wiring.go). O teste [`architecture_test.go`](internal/features/service-order/architecture_test.go) resolve o grafo de imports e falha se `domain` ou `usecase` alcançarem `net/http`, `encoding/json`, `pgx`, um adaptador ou outra feature. Como roda no `go test ./...`, a CI barra qualquer regressão. A refatoração não mudou nenhum contrato HTTP: as 50 requisições da collection Postman devolveram os mesmos status e corpos antes e depois ([spec](specs/service-order-architecture-refactor/), [mapa de dependências antes/depois](docs/architecture-dependency-map.md)).
+
+- **Clean Code** em todo o código: nomes de domínio em inglês, um `doc.go` por pacote explicando sua responsabilidade, portas pequenas e específicas (as 17 portas do `service-order` substituíram uma interface de 20 métodos) e um único ponto de tradução de erros para HTTP por feature.
+- **Desacoplamento entre features**: nenhuma feature importa outra (verificado no código). Quando uma precisa da outra, como na criação de veículo, que valida se o cliente existe e está ativo, o *composition root* injeta um adaptador (inversão de dependência).
+- **Núcleo compartilhado (`internal/shared/`)**: só utilitários sem regra de negócio, como pool do PostgreSQL, middleware JWT, emissão de tokens, validação de CPF/CNPJ, valores monetários exatos e envelope de erro.
+- **Composition root enxuto (`cmd/api`)**: lê a configuração, abre conexões, monta adaptadores e casos de uso e registra as rotas no `http.ServeMux` nativo.
+
+### Por que a Clean Architecture ficou só no `service-order`
+
+Foi uma decisão do time, tomada em 12/10/2026 e registrada em [specs/service-order-architecture-refactor/requirements.md](specs/service-order-architecture-refactor/requirements.md) (§1 e §7.2) e na decisão 22 de [specs/architecture.md](specs/architecture.md).
+
+**Mantivemos a Vertical Slice como organização principal porque ela facilita a migração da API para microsserviços nas próximas fases da Pós.** Cada fatia já funciona como uma fronteira de serviço:
+
+- tem suas próprias rotas, regras e repositório, sem importar nenhuma outra feature;
+- as dependências entre fatias passam por adaptadores no *composition root*, que são o ponto exato onde uma chamada em memória vira uma chamada HTTP ou uma mensagem quando a fatia for extraída;
+- extrair um serviço passa a ser mover uma pasta para um novo repositório ou binário, com seu Dockerfile e seus manifestos, em vez de desmontar camadas técnicas compartilhadas (`handlers/`, `models/`, `services/` globais), que é o que acontece num monólito organizado por camada.
+
+Por isso aplicamos as camadas completas onde o ganho é maior hoje, no `service-order`, que tem as regras mais complexas e todas as APIs novas desta fase. Os outros módulos ficaram como fatias planas, para não gastar esforço em camadas que serão redesenhadas na extração. Mesmo assim, eles receberam a única correção de Clean Architecture que o inventário encontrou: a interface do repositório de `customer`, `vehicle` e `product` saiu do `repository.go` e foi para o `service.go`, que é quem a consome. Cada módulo receberá as camadas completas, com a mesma receita do `service-order`, quando for extraído como microsserviço.
+
+**Ponto de atenção para a extração:** as fatias não compartilham código, mas compartilham o banco. O `service-order` lê `customers`, `vehicles`, `products` e `services` e grava em `stock_movements` com SQL próprio. Separar os dados de cada serviço (uma API ou um evento no lugar da leitura direta da tabela) faz parte do trabalho das próximas fases.
 
 ---
 
@@ -111,7 +346,13 @@ A aplicação foi projetada com foco em alta performance, baixo acoplamento e de
 | **`github.com/stretchr/testify`** | `v1.11.1` | Biblioteca de asserções fluídas (`assert`, `require`) para garantir legibilidade nos testes unitários e de integração. |
 | **`gosec`** | `v2.28.0` | Scanner SAST (Static Application Security Testing) para análise de segurança e boas práticas no código Go. |
 | **`govulncheck`** | `v1.7.0` | Ferramenta oficial do time do Go para detecção de vulnerabilidades conhecidas em dependências e stdlib. |
-| **Docker & Docker Compose** | — | Conteinerização completa da aplicação, banco de dados, cliente web do banco (Adminer) e documentação interativa (Swagger UI). |
+| **Docker & Docker Compose** | — | Conteinerização completa da aplicação, banco de dados, cliente web do banco (Adminer), documentação interativa (Swagger UI) e ferramenta de status (n8n). |
+| **golang-migrate** | `v4.20.1` | Migrations versionadas do schema, executadas pela imagem oficial no Compose, na CI e no Job do Kubernetes (não entra no `go.mod`). |
+| **Kubernetes (kind)** | nó `v1.37.0` | Cluster local onde a API roda com Deployment, Service, ConfigMap, Secrets e HPA. |
+| **Terraform** | `1.16.6` | Provisiona o cluster kind (`tehcyx/kind` 0.13.0), o metrics-server (chart 3.13.1) e o PostgreSQL em StatefulSet. |
+| **GitHub Actions** | — | CI/CD: build, testes, cobertura, migrations, segurança, imagem no GHCR e deploy no cluster (`kubectl` `v1.36.5`). |
+| **n8n** | `2.43.8` | Ferramenta externa de atualização de status da OS (formulário do operador). |
+| **Resend** | API HTTP | E-mail de "orçamento disponível" ao cliente (opcional, chamada `net/http` sem SDK). |
 
 ---
 
@@ -366,6 +607,32 @@ ADMIN_EMAIL=admin@oficina.example ADMIN_PASSWORD='uma-senha-forte-aqui' make boo
 
 ---
 
+## Infraestrutura com Terraform e Deploy em Kubernetes
+
+Ambiente Kubernetes local da Fase 2, provisionado por código. Specs: [specs/infrastructure-provisioning/](specs/infrastructure-provisioning/) (FP-35) e [specs/kubernetes-deployment/](specs/kubernetes-deployment/) (FP-34).
+
+```text
+terraform apply (infra/)                      deploy (k8s/, FP-36 scripts/deploy.sh ou comandos manuais)
+├─ cluster kind (1 nó)                         ├─ Secrets da API e do admin (nunca no Git)
+├─ metrics-server (Helm)                       ├─ ConfigMap de migrations ← migrations/
+├─ namespace automotive-workshop (restricted)  ├─ Job de migração ──► Complete (senão para aqui)
+└─ Postgres 16: StatefulSet + PVC + Service    ├─ Job /bootstrap-admin ──► Complete
+                                               └─ ConfigMap + Deployment + Service + HPA (2–8 pods, CPU 70 % / memória 80 %)
+```
+
+| Etapa | Comandos | Detalhes |
+| --- | --- | --- |
+| Provisionar cluster e banco | `export TF_VAR_postgres_password=$(openssl rand -hex 32)` e `make infra-init infra-apply` | [infra/README.md](infra/README.md): recursos criados, outputs, state, destroy, limites |
+| Implantar a API | `make deploy` (FP-36) ou os comandos do [k8s/README.md](k8s/README.md) | ordem obrigatória; nunca `kubectl apply -f k8s/` |
+| Acessar | `kubectl -n automotive-workshop port-forward svc/automotive-workshop-api 8080:8080` | collection com `baseUrl` `http://localhost:8080` |
+| Demonstrar escala e resiliência | `make k8s-hpa-load`, `make k8s-pod-recovery`, `make k8s-db-persistence` | evidências em `evidence/` (git-ignored) |
+| Validar sem cluster | `make iac-validate` | o mesmo que o workflow [`.github/workflows/iac.yml`](.github/workflows/iac.yml) roda |
+| Derrubar | `make infra-destroy INFRA_CONFIRM_DESTROY=yes` | só em ambiente descartável: apaga os dados |
+
+Pré-requisitos: Docker, Terraform ≥ 1.16 e `kubectl`. Em host com cgroup v1, veja a nota sobre `node_image` em [infra/README.md](infra/README.md#pré-requisitos).
+
+---
+
 ## Documentação dos Endpoints da API
 
 A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0 ([docs/openapi.yaml](docs/openapi.yaml)).
@@ -460,7 +727,7 @@ A API possui **49 rotas registradas**, todas com 100% de paridade no OpenAPI 3.0
 
 ## Coleções para Testes (Bruno, Postman e Insomnia)
 
-O projeto disponibiliza coleções completas e pré-configuradas para todas as 48 rotas, com encadeamento automático de variáveis:
+O projeto disponibiliza coleções completas e pré-configuradas para todas as 49 rotas, com encadeamento automático de variáveis:
 
 1. **Bruno (Recomendado)**: Localizado na pasta [`bruno/`](bruno). Abra o diretório diretamente no aplicativo Bruno. Selecione o ambiente `Local`.
 2. **Postman**: Importe o arquivo [`docs/postman-collection.json`](docs/postman-collection.json).
@@ -506,15 +773,95 @@ Executa `govulncheck` e `gosec` fixados em versões sem poluir o `go.mod`:
 
 ---
 
+## Pipeline de CI/CD
+
+Um único workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) valida cada commit e entrega a versão validada num cluster Kubernetes. Spec: [specs/ci-cd-pipeline/](specs/ci-cd-pipeline/).
+
+```text
+push / pull request ─┬─ build ───────┐
+                     ├─ coverage ────┤   (os quatro checks de sempre)
+                     ├─ migrations ──┤
+                     ├─ security ────┤
+                     └─ image ───────┤   build da imagem, sem push
+                                     ▼
+            push na main ou execução manual (workflow_dispatch)
+                                     ▼
+ publish ── push no GHCR: ghcr.io/os-fiapudos/automotive-workshop-api:<sha>
+                                     ▼
+ deploy (ambiente efêmero dentro do runner)
+   check → Terraform (cluster kind + Postgres) → Postgres pronto → Secrets/ConfigMap
+   → Job de migração até Complete → Job de bootstrap do admin → Deployment/Service/HPA
+   → rollout → smoke autenticado → evidências → terraform destroy (sempre)
+```
+
+**Regra de falha:** nada é publicado se `build`, `coverage`, `migrations`, `security` e `image` não passarem para aquele commit; nada é implantado se não foi publicado; nada é *rollout* se o banco ou a migração falharem. Pull requests rodam só os checks e o build da imagem — sem push, sem deploy, sem segredo.
+
+**Imagem:** nome em minúsculas (registries rejeitam maiúsculas), tag com o SHA completo do commit; o deploy usa a referência imutável `nome:<sha>@sha256:<digest>`. Se o pacote for privado, o job cria no cluster um Secret de pull com o próprio `GITHUB_TOKEN` (somente leitura).
+
+**Credenciais:** o ambiente efêmero não usa nenhum secret do repositório. Senha do Postgres, `JWT_SECRET`, os dois `EXTERNAL_*` e a senha do administrador são gerados a cada execução, mascarados no log e morrem com o cluster. O Terraform roda com saída `-json` filtrada (só endereços e progresso), e as evidências são sanitizadas e reconferidas antes do upload.
+
+**Smoke test** ([`scripts/deploy-smoke.sh`](scripts/deploy-smoke.sh)): `/health` não prova schema nem autorização, então o teste também confere `401` sem token, login com o administrador criado pelo `/bootstrap-admin` no banco recém-criado, `GET /api/v1/auth/me` e `GET /api/v1/services` autenticados.
+
+**Evidências:** cada deploy (com sucesso ou não) publica o artefato `deploy-evidence-<id>` e o mesmo resumo na página da execução — id do ambiente (`ci-<run>-<tentativa>`), SHA, imagem e digest efetivamente rodando, resultado de cada etapa, status e logs dos Jobs, rollout e saída do smoke.
+
+### Executar manualmente (vídeo / demonstração)
+
+Em **Actions → CI → Run workflow** (ou `gh workflow run ci.yml --ref <branch>`). A opção **simulate_migration_failure** injeta, só naquela execução, uma migration que sempre falha: a execução termina com falha, o Job de migração fica `Failed`, nenhum `Deployment` é criado, e as evidências e o destroy acontecem do mesmo jeito.
+
+```bash
+gh workflow run ci.yml --ref main                                           # caminho feliz
+gh workflow run ci.yml --ref main -f simulate_migration_failure=true        # falha controlada
+```
+
+O ambiente efêmero existe só durante o job: não há promessa de disponibilidade depois da execução.
+
+### Ambiente de demonstração (máquina local)
+
+O mesmo [`scripts/deploy.sh`](scripts/deploy.sh) que a CI chama etapa por etapa sobe, na sua máquina, um ambiente que **continua no ar** para o vídeo e o consumo da API. Requer Docker, Terraform, `kubectl`, `curl` e `jq`, e os diretórios `infra/` (FP-35) e `k8s/` (FP-34).
+
+```bash
+export IMAGE=ghcr.io/os-fiapudos/automotive-workshop-api:<sha>   # uma imagem já publicada pela CI
+export POSTGRES_PASSWORD=$(openssl rand -hex 24) JWT_SECRET=$(openssl rand -hex 32) \
+       EXTERNAL_NOTIFICATION_SECRET=$(openssl rand -hex 32) \
+       EXTERNAL_STATUS_UPDATE_SECRET=$(openssl rand -hex 32) \
+       ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=$(openssl rand -hex 16)
+make deploy                                    # scripts/deploy.sh up — não destrói nada
+make deploy-destroy DEPLOY_CONFIRM_DESTROY=yes # só quando quiser derrubar
+```
+
+Guarde esses valores: execuções seguintes no mesmo ambiente precisam deles (o Postgres mantém a senha com que foi criado). Se o pacote no GHCR for privado, exporte também `REGISTRY_USERNAME` e `REGISTRY_PASSWORD` (um token com `read:packages`). As etapas também rodam isoladas (`scripts/deploy.sh check|infra|config|migrate|bootstrap|rollout|smoke|evidence|destroy`), e as evidências ficam em `deploy-evidence/<id>/`.
+
+#### Sem imagem publicada: imagem construída localmente
+
+Para testar um commit que ainda não foi publicado no GHCR (o `publish` só roda na `main` ou por execução manual), ou sem acesso ao pacote, construa a imagem do commit atual e carregue-a no nó do kind entre as etapas `infra` e `config`. O `Deployment` usa `imagePullPolicy: IfNotPresent`, então o kubelet usa a imagem carregada sem tentar baixá-la:
+
+```bash
+export IMAGE=ghcr.io/os-fiapudos/automotive-workshop-api:$(git rev-parse HEAD)
+docker build -t "$IMAGE" .
+scripts/deploy.sh check && scripts/deploy.sh infra
+# equivalente a `kind load docker-image "$IMAGE" --name automotive-workshop`, sem precisar do CLI do kind
+docker save "$IMAGE" | docker exec -i automotive-workshop-control-plane \
+  ctr --namespace=k8s.io images import --all-platforms --digests --snapshotter=overlayfs -
+make deploy        # reaplica o Terraform (sem mudanças) e segue com config → migrate → bootstrap → rollout → smoke
+```
+
+---
+
 ## Estrutura de Pastas do Projeto
 
 ```text
 automotive-workshop-api/
+├── .github/workflows/
+│   ├── ci.yml                      # CI/CD: checks, imagem, publish no GHCR e deploy no Kubernetes
+│   └── iac.yml                     # Validação estática de infra/ e k8s/
 ├── cmd/
 │   ├── api/
-│   │   └── main.go                 # Entrypoint HTTP e Composition Root da aplicação
+│   │   ├── main.go                 # Entrypoint HTTP e Composition Root da aplicação
+│   │   └── wiring.go               # Montagem dos casos de uso e adaptadores do service-order
 │   └── bootstrap-admin/            # Comando que cria o admin num banco recém-migrado
 ├── migrations/                     # Migrations versionadas (golang-migrate): 0001 = baseline da Fase 1
+├── infra/                          # Terraform: cluster kind, metrics-server, Postgres (FP-35)
+├── k8s/                            # Manifests da API: Deployment, Service, ConfigMap, HPA, Jobs (FP-34)
 ├── internal/
 │   ├── features/                   # Fatias verticais (Vertical Slice Architecture)
 │   │   ├── auth/                   # Autenticação administrativa e login JWT
@@ -522,31 +869,44 @@ automotive-workshop-api/
 │   │   ├── vehicle/                # Gestão de veículos
 │   │   ├── service-catalog/        # Catálogo de serviços
 │   │   ├── product/                # Catálogo de produtos e movimentação de estoque
-│   │   ├── service-order/          # Ciclo de vida da OS, orçamentos, execução e métricas
-│   │   └── service-order-tracking/ # Acompanhamento público do cliente
+│   │   ├── service-order/          # Ciclo de vida da OS, em camadas de Clean Architecture:
+│   │   │   ├── domain/             #   agregado ServiceOrder, transições e erros de negócio
+│   │   │   ├── usecase/            #   casos de uso e portas (ports.go)
+│   │   │   ├── adapter/            #   httpapi (HTTP) · postgres (SQL) · notifier (e-mail)
+│   │   │   └── architecture_test.go #  garante que as dependências só apontam para dentro
+│   │   ├── service-order-tracking/ # Acompanhamento público do cliente
+│   │   └── user/                   # Reservado (só doc.go); não é o login, que fica em auth/
 │   ├── shared/                     # Código utilitário transversal e infraestrutura
-│   │   ├── apierror/               # Tratamento de erro padronizado (RFC 7807)
+│   │   ├── apierror/               # Envelope de erro JSON {"error": {code, message, details}}
+│   │   ├── httpx/                  # Respostas JSON e envelope de erro usados pelo auth
 │   │   ├── config/                 # Carregamento de variáveis de ambiente
 │   │   ├── database/               # Pool de conexões PostgreSQL (pgxpool)
 │   │   ├── document/               # Validadores algorítmicos de CPF e CNPJ
 │   │   ├── middleware/             # Middleware de autenticação JWT
+│   │   ├── money/                  # Valores monetários exatos em centavos (sem float64)
 │   │   ├── token/                  # Gerenciador de emissão e verificação de JWT
 │   │   └── trackingtoken/          # Gerador e hash de token de rastreamento
 │   └── handlers_test/              # Testes de integração HTTP ponta a ponta
+├── tools/n8n/                      # Workflow do n8n para atualização de status da OS
+├── specs/                          # Especificações (SDD): requisitos, design e tarefas de cada feature
 ├── bruno/                          # Coleção de requisições para o cliente Bruno
 ├── docs/                           # Documentação arquitetural, OpenAPI, Postman e Schemas SQL
-│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (48 rotas)
+│   ├── openapi.yaml                # Contrato OpenAPI 3.0 completo (49 rotas)
 │   ├── schema.sql                  # Referência do schema completo (gerado pelas migrations; conferido na CI)
 │   ├── seed.sql                    # Dados de exemplo para desenvolvimento local e testes
 │   ├── postman-collection.json     # Coleção Postman v2.1
 │   └── insomnia-collection.json    # Coleção Insomnia v4
 ├── scripts/                        # Scripts de automação
 │   ├── coverage.sh                 # Aferição e validação do gate de cobertura (>= 80%)
+│   ├── deploy.sh                   # Deploy em etapas no Kubernetes (CI e ambiente de demonstração)
+│   ├── deploy-smoke.sh             # Smoke autenticado de um ambiente implantado
+│   ├── iac-validate.sh             # Validação estática de infra/ e k8s/ (terraform validate, kubeconform)
+│   ├── k8s-evidence.sh             # Evidências no cluster: HPA sob carga, reposição de pod, persistência do banco
 │   ├── migrate.sh                  # Migrations: up, version, create, down, baseline, verify
 │   ├── security-scan.sh            # Varredura com gosec e govulncheck
 │   └── smoke.sh                    # Smoke test da stack local (health, login, abrir/consultar OS)
 ├── .env.example                    # Modelo de configuração de ambiente
-├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer)
+├── docker-compose.yml              # Orquestração local (Postgres + migrate + seed + API + Swagger + Adminer + n8n)
 ├── .dockerignore                   # Contexto de build: só go.mod, go.sum, cmd/ e internal/
 ├── Dockerfile                      # Build multi-stage da API (não root, healthcheck)
 ├── Makefile                        # Atalhos de comandos para desenvolvimento

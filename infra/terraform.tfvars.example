@@ -1,0 +1,3 @@
+# Copy to terraform.tfvars (git-ignored) or export TF_VAR_postgres_password instead.
+# Generate a strong value, e.g. `openssl rand -hex 32`. Never commit the real one.
+postgres_password = "REPLACE_ME"

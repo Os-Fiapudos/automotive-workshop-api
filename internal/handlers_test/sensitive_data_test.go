@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 )
 
 // Enforces RNF08 / BR-Q7 (specs/quality-and-security/requirements.md §4): no error
@@ -129,7 +129,7 @@ func TestInternalErrorResponseHidesInfrastructure(t *testing.T) {
 	vehicleID := insertVehicle(t, pool, createdCustomer.ID, randomLicensePlate(), true)
 	serviceID := insertService(t, pool)
 
-	response := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", serviceorder.CreateRequest{
+	response := doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders", httpapi.CreateRequest{
 		CustomerID:          createdCustomer.ID,
 		VehicleID:           vehicleID,
 		RequestedServiceIDs: []string{serviceID, serviceID},

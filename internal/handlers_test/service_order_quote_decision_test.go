@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	serviceorder "automotive-workshop-api/internal/features/service-order"
+	"automotive-workshop-api/internal/features/service-order/adapter/httpapi"
 )
 
 // doTrackingPost issues a POST to server+path with no body, setting the
@@ -36,7 +36,7 @@ func doTrackingPost(t *testing.T, server, path, trackingToken string) *http.Resp
 // composition, and sending, via the real authenticated API, returning it
 // with AWAITING_APPROVAL and a token ready to approve/reject through the
 // public /acompanhamento endpoints.
-func createOrderWithSentQuote(t *testing.T, server string, pool *pgxpool.Pool, authToken string) serviceorder.Response {
+func createOrderWithSentQuote(t *testing.T, server string, pool *pgxpool.Pool, authToken string) httpapi.Response {
 	t.Helper()
 
 	order := createServiceOrder(t, server, pool)
@@ -76,7 +76,7 @@ func TestQuoteDecisionSendFullFlow(t *testing.T) {
 	resp = doAuthJSON(t, http.MethodPost, server+"/api/v1/service-orders/"+order.ID+"/quote/send", nil, authToken)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var quote serviceorder.QuoteResponse
+	var quote httpapi.QuoteResponse
 	decodeBody(t, resp, &quote)
 	require.NotNil(t, quote.SentAt)
 	require.NotNil(t, quote.SentVersion)

@@ -1,8 +1,9 @@
 # Requirements — `service-order` Clean Architecture Refactor
 
-Status: **Approved for implementation**
+Status: **Approved for implementation** — **revised 2026-10-21** for story F2-US01 (see §7;
+that section takes precedence over anything earlier in this file that it contradicts).
 Feature folder: `internal/features/service-order/` (internal reorganization only — no new
-top-level feature folder, no change to any other feature's package).
+top-level feature folder; other features only receive the narrow, file-level fix in §7.2).
 
 ## 1. Context
 
@@ -141,3 +142,107 @@ Out of scope:
 - **New Go package names**: `domain`, `usecase`, and `adapter/postgres`/`adapter/httpapi`
   (not `http`, which would shadow the standard library package when imported unqualified) —
   see `design.md` §1 for the full tree and import-path reasoning.
+
+## 7. Revision 2026-10-21 — story F2-US01
+
+Story F2-US01 (Fase 2, mandatory; requirements R01/R02 of the Fase 2 manual) asks for more
+than this spec originally covered: an inventory of the other modules, an explicit decision
+about the violations it finds, a coverage gate that cannot be bypassed by the new paths, and
+an automated check that also covers **transitive** dependencies. The team decided the points
+below on 2026-10-21, before implementation started. They are recorded here instead of
+silently stretching §1–§6.
+
+### 7.1 Inventory of the other modules (story checklist item 3)
+
+`auth`, `customer`, `vehicle`, `product`, `service-catalog` and `service-order-tracking` are
+inventoried file by file and package by package; the result, with the before/after
+dependency map, lives in `docs/architecture-dependency-map.md`. Two kinds of violation are
+distinguished:
+
+- **File level** — a business-rule file (`model.go`, `service.go`, `errors.go`) importing
+  infrastructure, or a port declared in an adapter file instead of in its consumer.
+- **Package level** — the dependency rule evaluated per Go package, which is the only unit
+  Go (and therefore an automated check) can resolve. Every flat module violates it by
+  construction: its handler (`net/http`), repository (`pgx`) and domain share one package.
+
+### 7.2 Decision: "middle ground" scope
+
+- `service-order` is refactored completely (§1–§6, plus §7.4–§7.6).
+- In the other modules, **file-level** violations are fixed. The inventory found exactly
+  one kind: the repository port of `customer`, `vehicle` and `product` is declared in
+  `repository.go` (the Postgres adapter) instead of in `service.go`, its only consumer. The
+  declaration moves to `service.go` — same package, no behavior change. `auth`,
+  `service-catalog` and `service-order-tracking` already declare their ports in the
+  consumer. A `dto.go` importing `apierror` is **not** a violation: request/response shapes
+  are HTTP-layer code.
+- **Package-level** layering of those six modules is explicitly **out of scope for F2-US01**
+  and recorded as technical debt in `specs/architecture.md` and in the dependency map. The
+  original AC7 ("no other feature's package has any file changed") is replaced by: the only
+  change to another feature is the port move above.
+
+### 7.3 Files that appeared after this spec was written
+
+`status_update_service.go` / `status_update_dto.go` (specs/service-order-status-update/),
+`quote_notifier.go` and `resend_notifier.go` (specs/service-order-email-notification/) are
+part of the refactor: status update → `usecase/` + `adapter/httpapi/`; the notifier port →
+`usecase/`; `NoOpQuoteNotifier` and `ResendQuoteNotifier` → `adapter/notifier/` (the Resend
+adapter imports `net/http` and `encoding/json`, so it can never live in `usecase/`). Their
+specs join the regression bar of §5 item 3, together with the tracking protection of the
+customer-facing decision routes (specs/service-order-tracking/).
+
+### 7.4 Coverage gate (story checklist item 5)
+
+`scripts/coverage.sh` gates `service-order` as one **aggregate** over every package under
+`internal/features/service-order/...` (the feature root plus all its sub-packages), at the
+inherited 80% threshold. The gate is expressed as a prefix, not a list of folders, so a
+sub-package created later is included automatically. Each sub-package's own figure is
+printed as information only. AC5 (no lower than the pre-refactor figure) still applies to
+the aggregate.
+
+### 7.5 Automated dependency check (story checklist item 6)
+
+A Go test (`internal/features/service-order/architecture_test.go`) resolves the
+**transitive** dependencies of `domain` and `usecase` with `go list -deps` and fails if they
+reach `net/http`, `encoding/json`, `internal/shared/apierror`, `internal/shared/httpx`,
+`github.com/jackc/pgx`, an `adapter/` package, or another feature's package; it also fails
+if `domain` reaches `usecase`. Because it is a test, `go test ./...` runs it — including in
+CI's `build` job — with no new CI job. This replaces the grep of direct imports in
+`design.md` §7 and supersedes AC2's "go vet reports" wording.
+
+### 7.6 Documentation
+
+Besides `CLAUDE.md` §9.1 and `specs/architecture.md` (§6 AC6), `AGENTS.md` (the same
+instructions for other agents) is updated identically, and the dependency map of §7.1 is
+added under `docs/`.
+
+### 7.7 Revision 2026-10-28: integration with FP-31 and the `money` value type
+
+The team chose on 2026-10-28 to merge this refactor into `develop`. Before that,
+`develop@6779547` was preserved as the long-lived branch `vertical-slice-arch`
+(`docs/f2-us01-decision-log.md`). By then `develop` carried FP-31
+(`specs/monetary-value-precision/`), which replaced `float64` money with
+`internal/shared/money.Cents` across `service-order`. That reversed the order §4 assumed:
+money precision landed first, and this refactor absorbs it.
+
+- FP-31's changes are reapplied onto the layers, with no behavior change of their own:
+  - `domain/quote.go`: `QuoteItem`/`Quote` in `money.Cents`, `PriceQuoteItems`,
+    `CalculateTotal` returning `(money.Cents, error)`, `ErrQuoteAmountOutOfRange`.
+  - `usecase/`: `ComposeQuote` prices the items and then sums them with bounds checks.
+    `ServiceRef.Price`, `ProductRef.UnitPrice` and `QuoteNotification.TotalAmount` use
+    `money.Cents`.
+  - `adapter/postgres`: NUMERIC conversions through `database.ScanCents` and
+    `database.NumericFromCents`.
+  - `adapter/httpapi`: DTOs in `money.Cents`, and the `ErrQuoteAmountOutOfRange` → 400
+    mapping.
+- **BR1/BR2 exception (decision A, 2026-10-28):** `domain` and `usecase` may import
+  `internal/shared/money`. It is a pure value type: it imports only the standard library,
+  including `encoding/json`, because `Cents` marshals itself.
+  - `architecture_test.go` treats it as a leaf, like `github.com/google/uuid`, so its own
+    `encoding/json` import does not count against the inner layers.
+  - `TestValueTypePackagesStayInfrastructureFree` fails if the package ever imports
+    anything outside the standard library, or a networking, database or process package.
+  - The rejected alternative (B) was `int64` cents in the domain with conversion in the
+    adapters. It would have meant more conversion code and a larger integration diff for
+    the same guarantee.
+- The regression bar of §5 item 3 now includes `specs/monetary-value-precision/`. Its
+  baseline is `develop@6779547`, not `c6e4677`.
